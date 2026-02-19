@@ -1,37 +1,40 @@
 # Deployment Guide
 
-Complete guide for deploying Milli-Mala, the Zendesk document archival bridge service. Supports OneSystems and GoPro (gopro.net) as document backends — set `DOC_SYSTEM` to choose which one.
+Deployment guide for milli-mala, the multi-tenant Zendesk-to-archive gateway. Each deployment requires:
+
+1. **Instance-level config** — port, log level, audit secret (environment variables)
+2. **Tenant config** — per-institution Zendesk credentials, archive endpoints, PDF settings (stored in KV or `tenants.json`)
 
 ## Table of Contents
 
 - [Option 1: Cloudflare Workers (Recommended)](#option-1-cloudflare-workers-recommended)
-- [Option 2: Azure Container Apps](#option-2-azure-container-apps)
-- [Option 3: Self-Hosted Docker](#option-3-self-hosted-docker)
+- [Option 2: Docker / Docker Compose](#option-2-docker--docker-compose)
+- [Option 3: Kubernetes](#option-3-kubernetes)
 - [Option 4: Node.js on Server](#option-4-nodejs-on-server)
-- [Updating Milli-Mala](#updating-milli-mala)
-- [Zendesk Webhook Setup](#zendesk-webhook-setup)
-- [Running Tests](#running-tests)
+- [Tenant Configuration](#tenant-configuration)
+- [Zendesk Setup](#zendesk-setup)
 - [Testing Your Deployment](#testing-your-deployment)
+- [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Option 1: Cloudflare Workers (Recommended)
 
-Cloudflare Workers provides a serverless, globally distributed deployment with no infrastructure to manage. This is the primary deployment target.
+Serverless, globally distributed deployment with no infrastructure to manage.
 
 ### Prerequisites
 
 - [Cloudflare account](https://dash.cloudflare.com/sign-up)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed (`npm install -g wrangler`)
-- Zendesk admin access with API token
-- OneSystems or GoPro API credentials (depending on `DOC_SYSTEM`)
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed
+- Zendesk admin access with API token per institution
+- Archive system credentials per institution
 
 ### Step 1: Clone and install
 
 ```bash
-git clone https://github.com/Vertiscx/milli-mala.git
-cd milli-mala
+git clone https://github.com/Vertiscx/milli-mala-multi-tenant.git
+cd milli-mala-multi-tenant
 npm install
 ```
 
@@ -41,64 +44,54 @@ npm install
 wrangler login
 ```
 
-### Step 3: Create KV namespace for audit logs
+### Step 3: Create KV namespaces
+
+Two KV namespaces are needed: one for tenant config, one for audit logs.
 
 ```bash
+wrangler kv namespace create TENANT_KV
 wrangler kv namespace create AUDIT_LOG
 ```
 
-Copy the returned namespace ID into your `wrangler.toml`:
+Copy the returned namespace IDs into your `wrangler.toml`:
 
 ```toml
 [[kv_namespaces]]
+binding = "TENANT_KV"
+id = "your-tenant-kv-namespace-id"
+
+[[kv_namespaces]]
 binding = "AUDIT_LOG"
-id = "your-namespace-id-here"
+id = "your-audit-log-namespace-id"
 ```
 
-### Step 4: Set secrets
-
-All sensitive configuration is stored as encrypted Cloudflare Worker secrets, never in code or environment variables:
+### Step 4: Set instance-level secrets
 
 ```bash
-wrangler secret put ZENDESK_SUBDOMAIN      # e.g. "yourcompany"
-wrangler secret put ZENDESK_EMAIL           # Zendesk admin email
-wrangler secret put ZENDESK_API_TOKEN       # Zendesk API token
-wrangler secret put ZENDESK_WEBHOOK_SECRET  # Zendesk webhook signing secret
-wrangler secret put DOC_SYSTEM              # "onesystems" or "gopro" (default: onesystems)
-wrangler secret put MALASKRA_API_KEY        # API key for /attachments endpoint (if using Malaskra)
-wrangler secret put AUDIT_SECRET            # Random string for /audit endpoint access
+wrangler secret put AUDIT_SECRET    # Random string for /v1/audit endpoint access
 ```
 
-**If using OneSystems** (`DOC_SYSTEM=onesystems`):
+### Step 5: Upload tenant config to KV
+
+Each tenant is stored as a JSON value with key `tenant:{brand_id}`:
+
 ```bash
-wrangler secret put ONESYSTEMS_BASE_URL     # OneSystems API URL
-wrangler secret put ONESYSTEMS_APP_KEY      # OneSystems app key
+# Upload tenant config for a brand
+wrangler kv key put --binding=TENANT_KV \
+  "tenant:360001234567" \
+  '{"brand_id":"360001234567","name":"Samgongustofa","zendesk":{"subdomain":"samgongustofa","email":"integration@samgongustofa.is","apiToken":"...","webhookSecret":"..."},"endpoints":{"onesystems":{"type":"onesystems","baseUrl":"https://api.onesystems.is","appKey":"..."}},"malaskra":{"apiKey":"..."},"pdf":{"companyName":"Samgongustofa","locale":"is-IS","includeInternalNotes":false}}'
 ```
 
-**If using GoPro** (`DOC_SYSTEM=gopro`):
-```bash
-wrangler secret put GOPRO_BASE_URL          # GoPro API base URL
-wrangler secret put GOPRO_USERNAME          # GoPro login username
-wrangler secret put GOPRO_PASSWORD          # GoPro login password
-```
+See [Tenant Configuration](#tenant-configuration) for the full schema.
 
-### Step 5: Deploy
+### Step 6: Deploy
 
 ```bash
-wrangler deploy
+npm test              # Verify tests pass
+wrangler deploy       # Deploy to production
 ```
 
 Your worker will be available at `https://milli-mala.<your-subdomain>.workers.dev`.
-
-### Step 6: Configure Zendesk webhook
-
-1. Go to **Admin Center** > **Apps and integrations** > **Webhooks**
-2. Create a new webhook pointing to your worker URL
-3. Set the **Signing Secret** and copy it (this is your `ZENDESK_WEBHOOK_SECRET`)
-4. Create a **Trigger** that fires when tickets are solved/closed with the body:
-   ```json
-   { "ticket_id": "{{ticket.id}}" }
-   ```
 
 ### Viewing logs
 
@@ -108,193 +101,120 @@ wrangler tail
 
 ---
 
-## Option 2: Azure Container Apps
+## Option 2: Docker / Docker Compose
 
-For Azure-based deployments, use Azure Container Apps with the Docker image.
+For on-premises or cloud VM deployments.
 
 ### Prerequisites
 
-- Azure subscription
-- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) installed
-- Docker installed locally (for building the image)
+- Docker and Docker Compose installed
+- `tenants.json` file with tenant configurations
 
-### Step 1: Build and push the container image
-
-```bash
-# Login to Azure
-az login
-
-# Create a resource group
-az group create --name milli-mala-rg --location northeurope
-
-# Create Azure Container Registry
-az acr create --name millimalaacr --resource-group milli-mala-rg --sku Basic
-az acr login --name millimalaacr
-
-# Build and push
-docker build -t millimalaacr.azurecr.io/milli-mala:latest .
-docker push millimalaacr.azurecr.io/milli-mala:latest
-```
-
-### Step 2: Create Container App environment
+### Step 1: Clone and install
 
 ```bash
-az containerapp env create \
-  --name milli-mala-env \
-  --resource-group milli-mala-rg \
-  --location northeurope
+git clone https://github.com/Vertiscx/milli-mala-multi-tenant.git
+cd milli-mala-multi-tenant
 ```
 
-### Step 3: Deploy the container
+### Step 2: Create tenants.json
+
+Create a `tenants.json` file with all tenant configurations:
+
+```json
+{
+  "tenants": [
+    {
+      "brand_id": "360001234567",
+      "name": "Samgongustofa",
+      "zendesk": {
+        "subdomain": "samgongustofa",
+        "email": "integration@samgongustofa.is",
+        "apiToken": "...",
+        "webhookSecret": "..."
+      },
+      "endpoints": {
+        "onesystems": {
+          "type": "onesystems",
+          "baseUrl": "https://api.onesystems.is",
+          "appKey": "..."
+        }
+      },
+      "malaskra": {
+        "apiKey": "..."
+      },
+      "pdf": {
+        "companyName": "Samgongustofa",
+        "locale": "is-IS",
+        "includeInternalNotes": false
+      }
+    }
+  ]
+}
+```
+
+### Step 3: Create .env file
+
+Instance-level configuration only:
 
 ```bash
-az containerapp create \
-  --name milli-mala \
-  --resource-group milli-mala-rg \
-  --environment milli-mala-env \
-  --image millimalaacr.azurecr.io/milli-mala:latest \
-  --target-port 8080 \
-  --ingress external \
-  --min-replicas 1 \
-  --max-replicas 3 \
-  --registry-server millimalaacr.azurecr.io \
-  --secrets \
-    zendesk-subdomain="YOUR_SUBDOMAIN" \
-    zendesk-email="YOUR_EMAIL" \
-    zendesk-api-token="YOUR_TOKEN" \
-    zendesk-webhook-secret="YOUR_SECRET" \
-    doc-system="onesystems" \
-    onesystems-base-url="YOUR_URL" \
-    onesystems-app-key="YOUR_KEY" \
-  --env-vars \
-    ZENDESK_SUBDOMAIN=secretref:zendesk-subdomain \
-    ZENDESK_EMAIL=secretref:zendesk-email \
-    ZENDESK_API_TOKEN=secretref:zendesk-api-token \
-    ZENDESK_WEBHOOK_SECRET=secretref:zendesk-webhook-secret \
-    DOC_SYSTEM=secretref:doc-system \
-    ONESYSTEMS_BASE_URL=secretref:onesystems-base-url \
-    ONESYSTEMS_APP_KEY=secretref:onesystems-app-key \
-    PORT=8080 \
-    LOG_LEVEL=info \
-    PDF_LOCALE=is-IS \
-    PDF_INCLUDE_INTERNAL_NOTES=false \
-    PDF_COMPANY_NAME=YourCompanyName
+PORT=8080
+LOG_LEVEL=info
+AUDIT_SECRET=your-random-audit-secret
+TENANTS_FILE=./tenants.json
+AUDIT_DIR=./audit-data
 ```
 
-### Step 4: Get the application URL
+### Step 4: Start the service
 
-```bash
-az containerapp show \
-  --name milli-mala \
-  --resource-group milli-mala-rg \
-  --query properties.configuration.ingress.fqdn \
-  --output tsv
-```
+Using Docker Compose:
 
-Use this URL when configuring the Zendesk webhook.
-
-### Viewing logs
-
-```bash
-az containerapp logs show \
-  --name milli-mala \
-  --resource-group milli-mala-rg \
-  --follow
-```
-
-**Note**: The Azure deployment uses the Node.js server entry point (`src/index.js`). Audit entries are stored using a file-based audit store (configurable via `AUDIT_DIR`, default: `./audit-data`). The `/audit` endpoint is available with `AUDIT_SECRET` configured.
-
----
-
-## Option 3: Self-Hosted Docker
-
-For organizations that prefer on-premises hosting or need more control.
-
-### Step 1: Install Docker
-
-```bash
-# macOS
-brew install docker docker-compose
-
-# Linux (Ubuntu/Debian)
-sudo apt-get update
-sudo apt-get install docker.io docker-compose
-sudo systemctl enable docker
-sudo systemctl start docker
-
-# Add your user to docker group
-sudo usermod -aG docker $USER
-```
-
-### Step 2: Clone and Configure
-
-```bash
-git clone https://github.com/Vertiscx/milli-mala.git
-cd milli-mala
-
-# Copy and edit configuration
-cp .env.example .env
-nano .env  # or use your preferred editor
-```
-
-### Step 3: Start the Service
-
-Using Docker Compose (recommended):
 ```bash
 docker-compose up -d
 ```
 
 Or build and run manually:
+
 ```bash
 docker build -t milli-mala .
-docker run -d -p 8080:8080 --env-file .env --name milli-mala milli-mala
+docker run -d -p 8080:8080 \
+  --env-file .env \
+  -v $(pwd)/tenants.json:/app/tenants.json:ro \
+  --name milli-mala milli-mala
 ```
 
-### Step 4: Verify It's Running
+### Step 5: Verify
 
 ```bash
-# Check container status
-docker ps
-
-# Check logs
-docker-compose logs -f
-
-# Test health endpoint
-curl http://localhost:8080/health
+curl http://localhost:8080/v1/health
 ```
 
-### Step 5: Expose to Internet
+Expected response:
 
-The service needs to be accessible from Zendesk. Options:
+```json
+{"status":"ok","service":"milli-mala","version":"2.0.0","timestamp":"..."}
+```
 
-#### Option A: Reverse Proxy with Caddy (Recommended)
+### Step 6: Expose to internet
 
-```bash
-# Install Caddy
-sudo apt install caddy
+The service needs to be reachable from Zendesk. Options:
 
-# Create Caddyfile
-cat > /etc/caddy/Caddyfile << EOF
+**Caddy (recommended):**
+
+```
 milli-mala.yourdomain.com {
     reverse_proxy localhost:8080
 }
-EOF
-
-# Start Caddy
-sudo systemctl enable caddy
-sudo systemctl start caddy
 ```
 
-#### Option B: Reverse Proxy with Nginx
+**Nginx:**
 
 ```nginx
 server {
     listen 443 ssl;
     server_name milli-mala.yourdomain.com;
-
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
-
     location / {
         proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
@@ -303,95 +223,113 @@ server {
 }
 ```
 
-#### Option C: Cloudflare Tunnel (No Port Forwarding)
+**Cloudflare Tunnel (no port forwarding needed):**
 
 ```bash
-# Install cloudflared
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-chmod +x cloudflared
-sudo mv cloudflared /usr/local/bin/
-
-# Authenticate
-cloudflared tunnel login
-
-# Create tunnel
 cloudflared tunnel create milli-mala
-
-# Configure tunnel
-cat > ~/.cloudflared/config.yml << EOF
-tunnel: YOUR_TUNNEL_ID
-credentials-file: /root/.cloudflared/YOUR_TUNNEL_ID.json
-ingress:
-  - hostname: milli-mala.yourdomain.com
-    service: http://localhost:8080
-  - service: http_status:404
-EOF
-
-# Run tunnel
+# Configure tunnel to point to http://localhost:8080
 cloudflared tunnel run milli-mala
 ```
 
-### Managing the Service
+### Managing the service
 
 ```bash
-# View logs
-docker-compose logs -f
+docker-compose logs -f        # View logs
+docker-compose restart         # Restart
+docker-compose down            # Stop
+```
 
-# Restart service
-docker-compose restart
+---
 
-# Stop service
-docker-compose down
+## Option 3: Kubernetes
 
-# Update to latest version
-git pull
-docker-compose build
-docker-compose up -d
+### Step 1: Build and push the container image
+
+```bash
+docker build -t your-registry/milli-mala:latest .
+docker push your-registry/milli-mala:latest
+```
+
+### Step 2: Create the tenant config secret
+
+```bash
+kubectl create secret generic milli-mala-tenants \
+  --from-file=tenants.json=./tenants.json
+```
+
+### Step 3: Create instance config
+
+```bash
+kubectl create configmap milli-mala-config \
+  --from-literal=PORT=8080 \
+  --from-literal=LOG_LEVEL=info
+
+kubectl create secret generic milli-mala-secrets \
+  --from-literal=AUDIT_SECRET=your-random-audit-secret
+```
+
+### Step 4: Deploy
+
+See the `k8s/` directory for manifests (deployment, service, configmap, secret templates).
+
+```bash
+kubectl apply -f k8s/
+```
+
+### Step 5: Verify
+
+```bash
+kubectl port-forward svc/milli-mala 8080:8080
+curl http://localhost:8080/v1/health
 ```
 
 ---
 
 ## Option 4: Node.js on Server
 
-For running directly on a VM or bare-metal server without Docker.
+For running directly on a VM or bare-metal server.
 
 ### Prerequisites
 
-- Server with Node.js 20+ installed
+- Node.js 20+
 - A process manager (PM2 recommended) or systemd
 - A reverse proxy (Caddy or Nginx) for HTTPS
-- Git installed
 
-### Step 1: Clone and install
+### Step 1: Clone and build
 
 ```bash
-git clone https://github.com/Vertiscx/milli-mala.git
-cd milli-mala
-npm install --production
+git clone https://github.com/Vertiscx/milli-mala-multi-tenant.git
+cd milli-mala-multi-tenant
+npm install
+npm run build
 ```
 
-### Step 2: Configure environment
+### Step 2: Configure
+
+Create `.env` with instance-level config:
 
 ```bash
-cp .env.example .env
-nano .env  # Fill in your values
+PORT=8080
+LOG_LEVEL=info
+AUDIT_SECRET=your-random-audit-secret
+TENANTS_FILE=./tenants.json
+AUDIT_DIR=./audit-data
 ```
 
-### Step 3: Start with PM2 (Recommended)
+Create `tenants.json` with tenant configurations (see [Tenant Configuration](#tenant-configuration)).
+
+### Step 3: Start
+
+**PM2 (recommended):**
 
 ```bash
-# Install PM2 globally
 npm install -g pm2
-
-# Start the service
-pm2 start src/index.js --name milli-mala
-
-# Save process list so it restarts on reboot
+pm2 start dist/index.js --name milli-mala
 pm2 save
 pm2 startup
 ```
 
-### Alternative: Start with systemd
+**systemd:**
 
 Create `/etc/systemd/system/milli-mala.service`:
 
@@ -405,7 +343,7 @@ Type=simple
 User=milli-mala
 WorkingDirectory=/opt/milli-mala
 EnvironmentFile=/opt/milli-mala/.env
-ExecStart=/usr/bin/node src/index.js
+ExecStart=/usr/bin/node dist/index.js
 Restart=on-failure
 RestartSec=5
 
@@ -418,114 +356,103 @@ sudo systemctl enable milli-mala
 sudo systemctl start milli-mala
 ```
 
-### Step 4: Set up HTTPS with reverse proxy
+### Step 4: Set up HTTPS with a reverse proxy
 
-Use the same Caddy, Nginx, or Cloudflare Tunnel instructions from [Option 3](#option-3-self-hosted-docker) — they work identically since the service runs on `localhost:8080`.
+Use Caddy, Nginx, or Cloudflare Tunnel as described in [Option 2](#step-6-expose-to-internet).
 
 ### Step 5: Verify
 
 ```bash
-curl http://localhost:8080/health
-```
-
-### Viewing logs
-
-```bash
-# PM2
-pm2 logs milli-mala
-
-# systemd
-journalctl -u milli-mala -f
+curl http://localhost:8080/v1/health
 ```
 
 ---
 
-## Updating Milli-Mala
+## Tenant Configuration
 
-How to deploy a new version for each deployment type.
+### Full schema
 
-### Cloudflare Workers
+Each tenant object has this structure:
 
-```bash
-cd milli-mala
-git pull
-npm test          # Verify tests pass
-wrangler deploy   # Deploy in seconds
-```
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `brand_id` | string | Yes | Zendesk brand ID — the lookup key |
+| `name` | string | Yes | Institution name (for logging) |
+| `zendesk.subdomain` | string | Yes | Zendesk subdomain |
+| `zendesk.email` | string | Yes | Zendesk admin email |
+| `zendesk.apiToken` | string | Yes | Zendesk API token |
+| `zendesk.webhookSecret` | string | Yes | Zendesk webhook signing secret |
+| `endpoints` | map | Yes | At least one archive endpoint |
+| `endpoints.{name}.type` | string | Yes | `"onesystems"` or `"gopro"` |
+| `endpoints.{name}.baseUrl` | string | Yes | Archive system API URL |
+| `endpoints.{name}.appKey` | string | If OneSystems | OneSystems app key |
+| `endpoints.{name}.username` | string | If GoPro | GoPro login username |
+| `endpoints.{name}.password` | string | If GoPro | GoPro login password |
+| `endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID for case number |
+| `endpoints.{name}.tokenTtlMs` | number | No | Auth token TTL in ms (default: 1500000) |
+| `malaskra.apiKey` | string | Yes | API key for `/v1/attachments` authentication |
+| `pdf.companyName` | string | No | Company name in PDF header |
+| `pdf.locale` | string | No | Date formatting locale (default: `is-IS`) |
+| `pdf.includeInternalNotes` | boolean | No | Include internal notes in PDF (default: `false`) |
 
-No downtime — the new version replaces the old one atomically.
+### Adding a new tenant
 
-### Azure Container Apps
-
-```bash
-cd milli-mala
-git pull
-
-# Rebuild and push the container image
-docker build -t millimalaacr.azurecr.io/milli-mala:latest .
-docker push millimalaacr.azurecr.io/milli-mala:latest
-
-# Trigger a new revision
-az containerapp update \
-  --name milli-mala \
-  --resource-group milli-mala-rg \
-  --image millimalaacr.azurecr.io/milli-mala:latest
-```
-
-Azure performs a rolling update with no downtime.
-
-### Self-Hosted Docker
+**Cloudflare Workers:**
 
 ```bash
-cd milli-mala
-git pull
-docker-compose build
-docker-compose up -d
+wrangler kv key put --binding=TENANT_KV \
+  "tenant:NEW_BRAND_ID" \
+  '{ ... tenant JSON ... }'
 ```
 
-There will be a few seconds of downtime while the container restarts. Zendesk will retry failed webhooks automatically.
+**Docker / K8s / Node.js:**
 
-### Node.js on Server
+Add a new entry to the `tenants` array in `tenants.json` and restart the service.
 
-```bash
-cd milli-mala
-git pull
-npm install --production   # Install any new dependencies
+### Instance-level environment variables
 
-# PM2
-pm2 restart milli-mala
+These are not per-tenant — they configure the service itself:
 
-# systemd
-sudo systemctl restart milli-mala
-```
-
-There will be a few seconds of downtime during restart. Zendesk will retry failed webhooks automatically.
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PORT` | No | `8080` | HTTP server port (Docker/Node.js only) |
+| `LOG_LEVEL` | No | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `AUDIT_SECRET` | No | — | Bearer token for `/v1/audit` endpoint |
+| `TENANTS_FILE` | No | `./tenants.json` | Path to tenants config file (Docker/Node.js only) |
+| `AUDIT_DIR` | No | `./audit-data` | Audit log directory (Docker/Node.js only) |
 
 ---
 
-## Zendesk Webhook Setup
+## Zendesk Setup
 
-This creates the automation that triggers Milli-Mala when tickets close.
+Each institution needs a webhook and trigger configured in their Zendesk account.
 
-### Step 1: Create Webhook
+### Step 1: Create webhook
 
 1. Go to **Admin Center** > **Apps and integrations** > **Webhooks**
 2. Create a new webhook:
-   - **URL**: Your Milli-Mala endpoint (e.g. `https://milli-mala.your-subdomain.workers.dev`)
+   - **URL**: Your milli-mala endpoint + `/v1/webhook` (e.g. `https://milli-mala.workers.dev/v1/webhook`)
    - **Method**: POST
    - **Content-Type**: `application/json`
-3. Set the **Signing Secret** and copy it (this is your `ZENDESK_WEBHOOK_SECRET`)
+3. Enable **Signing Secret** and copy the value — this goes into the tenant's `zendesk.webhookSecret`
 
-### Step 2: Create Trigger
+### Step 2: Create trigger
 
 1. Navigate to **Admin Center** > **Objects and rules** > **Business rules** > **Triggers**
 2. Create a new trigger:
    - **Name**: `Archive ticket to document system`
-   - **Condition**: Ticket status changed to Solved (or Closed)
+   - **Conditions**: Whatever automation the institution wants (e.g. ticket solved, ticket closed, specific tag added)
    - **Action**: Notify webhook with body:
-   ```json
-   { "ticket_id": "{{ticket.id}}" }
-   ```
+
+```json
+{
+  "ticket_id": "{{ticket.id}}",
+  "brand_id": "{{ticket.brand.id}}",
+  "doc_endpoint": "onesystems"
+}
+```
+
+The `doc_endpoint` value should match one of the keys in the tenant's `endpoints` map. It is hardcoded per trigger — each brand knows which archive system to target.
 
 ### Step 3: Activate
 
@@ -534,132 +461,128 @@ This creates the automation that triggers Milli-Mala when tickets close.
 
 ---
 
-## Running Tests
+## Testing Your Deployment
+
+### Health check
 
 ```bash
-npm test
+curl https://YOUR_ENDPOINT/v1/health
 ```
+
+Expected:
+
+```json
+{"status":"ok","service":"milli-mala","version":"2.0.0","timestamp":"..."}
+```
+
+### End-to-end test
+
+1. Ensure at least one tenant is configured
+2. Create a test ticket in the tenant's Zendesk brand
+3. Add some comments and an attachment
+4. Trigger the automation (e.g. solve the ticket)
+5. Check the archive system for the uploaded PDF
+6. Check audit log: `curl -H "Authorization: Bearer YOUR_AUDIT_SECRET" https://YOUR_ENDPOINT/v1/audit?brand_id=BRAND_ID`
 
 ---
 
-## Testing Your Deployment
+## Updating
 
-### Test 1: Health Check
+### Cloudflare Workers
 
 ```bash
-curl https://YOUR_ENDPOINT/health
+git pull
+npm test
+wrangler deploy
 ```
 
-Expected response:
-```json
-{"status":"ok","service":"milli-mala","timestamp":"2026-02-09T10:30:00.000Z"}
+No downtime — the new version replaces the old one atomically.
+
+### Docker
+
+```bash
+git pull
+docker-compose build
+docker-compose up -d
 ```
 
-### Test 2: End-to-End Test
+Brief downtime during container restart. Zendesk retries failed webhooks automatically.
 
-1. Create a test ticket in Zendesk
-2. Add some comments and an attachment
-3. Solve the ticket
-4. Check your document system (OneSystems or GoPro) for the archived case
-5. Verify PDF uploaded correctly
+### Kubernetes
+
+```bash
+docker build -t your-registry/milli-mala:latest .
+docker push your-registry/milli-mala:latest
+kubectl rollout restart deployment/milli-mala
+```
+
+Rolling update with no downtime.
+
+### Node.js
+
+```bash
+git pull
+npm install
+npm run build
+pm2 restart milli-mala    # or: sudo systemctl restart milli-mala
+```
+
+Brief downtime during restart.
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+### "Unknown tenant" (404)
 
-#### "Missing configuration" error
-- Ensure all required environment variables / secrets are set
-- For Cloudflare Workers, verify secrets were set via `wrangler secret put`
-- For Docker, check `.env` file exists and is formatted correctly
+- The `brand_id` in the request doesn't match any tenant config
+- **CF Workers**: Verify the KV key exists: `wrangler kv key get --binding=TENANT_KV "tenant:BRAND_ID"`
+- **Docker/Node.js**: Check `tenants.json` contains the brand_id
 
-#### "Authentication failed" for Zendesk
-- Verify `ZENDESK_EMAIL` is an admin account
-- Check `ZENDESK_API_TOKEN` is valid (not expired)
-- Ensure token format is correct (no extra spaces)
+### "Missing brand_id" or "Missing doc_endpoint" (400)
 
-#### "Token exchange failed" for OneSystems
-- Verify `ONESYSTEMS_BASE_URL` is correct
-- Check `ONESYSTEMS_APP_KEY` is valid
-- Test the OneSystems API directly if issues persist
+- The request body is missing required fields
+- Check the Zendesk trigger body includes `brand_id` and `doc_endpoint`
 
-#### "Authentication failed" for GoPro
-- Verify `GOPRO_BASE_URL` is correct
-- Check `GOPRO_USERNAME` and `GOPRO_PASSWORD` are valid
-- Test the GoPro API directly if issues persist
+### "Unknown doc_endpoint" (500)
 
-#### Webhook not triggering
-- Verify the Zendesk trigger is active
-- Check trigger conditions match your workflow
-- Review Zendesk trigger logs for errors
+- The `doc_endpoint` in the request doesn't match any key in the tenant's `endpoints` map
+- Verify the trigger body's `doc_endpoint` value matches the tenant config
 
-#### PDF generation fails
-- Check ticket has valid content
-- Verify memory allocation (increase if needed for Docker/Azure)
-- Check logs for specific error messages
+### "Invalid webhook signature" (401)
 
-### Viewing Logs
+- The `zendesk.webhookSecret` in the tenant config doesn't match the webhook's signing secret in Zendesk
+- Re-copy the signing secret from Zendesk Admin Center
 
-**Cloudflare Workers:**
-```bash
-wrangler tail
-```
+### "Invalid or missing API key" (401) on /v1/attachments
 
-**Azure Container Apps:**
-```bash
-az containerapp logs show --name milli-mala --resource-group milli-mala-rg --follow
-```
+- The `X-Api-Key` header doesn't match the tenant's `malaskra.apiKey`
+- Verify the API key in the Malaskra app configuration
 
-**Docker:**
-```bash
-docker-compose logs -f milli-mala
-```
+### Authentication failed for archive system
+
+- Verify the archive credentials in the tenant config (OneSystems: `appKey`, GoPro: `username`/`password`)
+- Test the archive API directly if issues persist
+
+### Viewing logs
+
+**Cloudflare Workers:** `wrangler tail`
+
+**Docker:** `docker-compose logs -f`
+
+**K8s:** `kubectl logs -f deployment/milli-mala`
+
+**PM2:** `pm2 logs milli-mala`
+
+**systemd:** `journalctl -u milli-mala -f`
+
+All logs are structured JSON with `brand_id` included for filtering.
 
 ---
 
-## Required Configuration
-
-| Variable | Required | Description |
-|---|---|---|
-| `ZENDESK_SUBDOMAIN` | Yes | Your Zendesk subdomain |
-| `ZENDESK_EMAIL` | Yes | Admin email address in Zendesk |
-| `ZENDESK_API_TOKEN` | Yes | Zendesk API token |
-| `ZENDESK_WEBHOOK_SECRET` | Yes | Zendesk webhook signing secret for HMAC verification |
-| `DOC_SYSTEM` | No | `"onesystems"` or `"gopro"` (default: `onesystems`) |
-| `ONESYSTEMS_BASE_URL` | If OneSystems | OneSystems API base URL |
-| `ONESYSTEMS_APP_KEY` | If OneSystems | OneSystems app key for authentication |
-| `ONESYSTEMS_CASE_NUMBER_FIELD_ID` | No | Zendesk custom field ID for OneSystems case number |
-| `GOPRO_BASE_URL` | If GoPro | GoPro API base URL |
-| `GOPRO_USERNAME` | If GoPro | GoPro login username |
-| `GOPRO_PASSWORD` | If GoPro | GoPro login password |
-| `GOPRO_CASE_NUMBER_FIELD_ID` | No | Zendesk custom field ID for GoPro case number |
-| `MALASKRA_API_KEY` | If using Malaskra | API key for authenticating `/attachments` requests from Malaskra |
-| `AUDIT_SECRET` | No | Bearer token for `/audit` endpoint access |
-| `AUDIT_DIR` | No | Directory for file-based audit storage (default: `./audit-data`, Docker/Node.js only) |
-| `PORT` | No | Service port (default: 8080, Docker/Azure only) |
-| `LOG_LEVEL` | No | Log level (default: info) |
-| `TOKEN_TTL_MS` | No | Authentication token TTL in milliseconds (default: 1500000 = 25 min) |
-| `PDF_LOCALE` | No | Date formatting locale (default: is-IS) |
-| `PDF_INCLUDE_INTERNAL_NOTES` | No | Include internal notes in PDF (default: false) |
-| `PDF_COMPANY_NAME` | No | Company name in PDF header |
-
----
-
-## Security Best Practices
-
-1. **Store credentials securely** — Use Cloudflare secrets, Azure secretref, or Docker secrets. Never store in code or plaintext config.
-2. **Use HTTPS** — Always use HTTPS in production. Cloudflare Workers and Azure Container Apps handle this automatically.
-3. **Restrict access** — HMAC webhook signature verification ensures only Zendesk can trigger the webhook. The `/audit` endpoint requires a Bearer token.
-4. **Monitor and alert** — Set up log monitoring and configure alerts for failures.
-5. **Multi-tenant consideration: `doc_system` override** — The `/attachments` endpoint currently allows the caller to override the target document system via the `doc_system` field in the request body. In a single-tenant setup this is convenient (Malaskra can target GoPro or OneSystems per-request). In a multi-tenant or government deployment, consider restricting this by validating `doc_system` against an allow-list (`["gopro", "onesystems"]`) or ignoring the field entirely and always using the server's configured `DOC_SYSTEM`. This prevents a compromised API key from routing data to an unintended system.
-
----
-
-## Related Documentation
+## Related documentation
 
 - [Malaskra Zendesk App](https://github.com/Vertiscx/malaskra_v2)
 - [Zendesk Webhooks](https://developer.zendesk.com/documentation/webhooks/)
-- [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
-- [Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/)
-- [Docker Documentation](https://docs.docker.com/)
+- [Cloudflare Workers](https://developers.cloudflare.com/workers/)
+- [Docker](https://docs.docker.com/)
