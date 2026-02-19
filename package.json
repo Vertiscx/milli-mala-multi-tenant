@@ -1,0 +1,31 @@
+{
+  "name": "milli-mala",
+  "version": "2.0.0",
+  "description": "Multi-tenant middleware service — bridges Zendesk to government archive systems (OneSystems, GoPro)",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx src/index.ts",
+    "dev": "npx tsx --watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "jspdf": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "node-mocks-http": "^1.17.2",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.0.18"
+  },
+  "license": "MIT"
+}
