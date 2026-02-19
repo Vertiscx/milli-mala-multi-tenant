@@ -295,6 +295,42 @@ Attachment binary data never touches disk.
 | Container security | Non-root Docker container (`node:20-alpine`), 1 production dependency |
 | Structured logging | JSON format with `brand_id` in all entries. No PII in logs. |
 
+## Future: OAuth 2.0 authentication
+
+The `/v1/attachments` endpoint currently uses a static API key (`X-Api-Key` header) for authentication. This is secure — keys are per-tenant and compared in constant time — but static keys have limitations:
+
+- A leaked key remains valid until manually rotated
+- Keys carry no expiry, scope, or identity information
+- No standard way to audit which client made a request
+
+**Recommended upgrade: OAuth 2.0 with island.is authentication service.**
+
+The island.is authentication service is built on OAuth 2.0 / OpenID Connect and is the standard for government service-to-service authentication in Iceland. Migrating to OAuth would provide:
+
+- **Short-lived tokens** — access tokens expire automatically (e.g. 1 hour), limiting the damage from a leaked credential
+- **Scopes** — tokens can be restricted to specific tenants or actions (e.g. "can only access brand 360001234567")
+- **Audit trail** — each token carries client identity, enabling per-caller audit logging
+- **Standard protocol** — aligns with devland.is standards and enables integration with other island.is services
+
+### What would need to change
+
+| Component | Current | With OAuth |
+|-----------|---------|-----------|
+| **Malaskra app** | Sends static `X-Api-Key` header | Requests an access token from the authorization server, sends `Authorization: Bearer {token}` |
+| **Tenant config** | `malaskra.apiKey` field | Replace with `malaskra.oauth.audience` or `malaskra.oauth.allowedClientIds` |
+| **`/v1/attachments` handler** | Compares `X-Api-Key` against tenant config | Validates JWT signature, checks expiry, verifies audience/scope matches tenant |
+| **`/v1/webhook` endpoint** | No change needed | No change — Zendesk HMAC signing is Zendesk's own standard |
+| **`/v1/audit` endpoint** | Static Bearer token | Could also migrate to OAuth, or keep as-is for internal use |
+
+### Migration path
+
+1. Add a `/v1/token` endpoint or integrate with island.is auth service as the authorization server
+2. Update the attachments handler to accept and validate JWTs alongside the existing API key (backwards compatible)
+3. Update Malaskra to use OAuth token flow
+4. Once all clients are migrated, remove static API key support
+
+This is not required for the current deployment but is recommended before scaling to more institutions or exposing the API to additional consumers beyond Malaskra.
+
 ## License
 
 MIT
