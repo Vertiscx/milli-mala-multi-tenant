@@ -83,8 +83,32 @@ describe('handleAttachments', () => {
     expect(result.body.error).toContain('case_number')
   })
 
+  it('should reject ticket with mismatched brand_id', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket — returns ticket belonging to a different brand
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 123, brand_id: 999999 } })
+      })
+
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: 'C-100' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+
+    expect(result.status).toBe(403)
+    expect(result.body.error).toContain('does not belong to this brand')
+  })
+
   it('should return success with 0 attachments when ticket has none', async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 123, brand_id: 360001234567 } })
+      })
       // getTicketComments
       .mockResolvedValueOnce({
         ok: true,
@@ -107,6 +131,11 @@ describe('handleAttachments', () => {
     const fakeFileBuffer = Buffer.from('fake-pdf-content')
 
     ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 123, brand_id: 360001234567 } })
+      })
       // getTicketComments
       .mockResolvedValueOnce({
         ok: true,
@@ -175,6 +204,11 @@ describe('handleAttachments', () => {
     const fakeFileBuffer = Buffer.from('fake-content')
 
     ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 200, brand_id: 360001234567 } })
+      })
       // getTicketComments
       .mockResolvedValueOnce({
         ok: true,
@@ -228,6 +262,11 @@ describe('handleAttachments', () => {
     const fakeFileBuffer = Buffer.from('data')
 
     ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 300, brand_id: 360001234567 } })
+      })
       // getTicketComments - two attachments
       .mockResolvedValueOnce({
         ok: true,

@@ -63,13 +63,22 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
       return { status: 400, body: { error: (err as Error).message } }
     }
 
-    // 1. Fetch attachments from Zendesk
+    // 1. Fetch ticket and verify brand ownership
     const zendesk = new ZendeskClient(
       tenantConfig.zendesk.subdomain,
       tenantConfig.zendesk.apiToken,
       tenantConfig.zendesk.email
     )
 
+    const ticket = await zendesk.getTicket(ticketId)
+    if (ticket.brand_id !== undefined && String(ticket.brand_id) !== brandId) {
+      logger.warn('Brand mismatch: ticket belongs to different brand', {
+        brand_id: brandId, ticket_brand_id: ticket.brand_id, ticket_id: ticketId
+      })
+      return { status: 403, body: { error: 'Ticket does not belong to this brand' } }
+    }
+
+    // 2. Fetch attachments from Zendesk
     const comments = await zendesk.getTicketComments(ticketId)
     const attachments = await zendesk.fetchAttachments(comments)
 

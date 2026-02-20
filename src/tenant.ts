@@ -19,8 +19,12 @@ const SUBDOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*$/i
 const PRIVATE_IP_PATTERNS = [
   /^127\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./,
   /^169\.254\./, /^0\./, /^::1$/, /^fc00:/, /^fe80:/,
+  /^\[/,  // Block all IPv6 literal addresses (brackets in hostname) — no legitimate archive uses these
   /^localhost$/i
 ]
+
+/** Audit query params must be alphanumeric/hyphens only — prevents prefix injection */
+const AUDIT_PARAM_PATTERN = /^[a-zA-Z0-9_-]+$/
 
 // ─── Tenant Store Interface ──────────────────────────────────────────
 
@@ -128,13 +132,13 @@ export function validateTenantConfig(config: TenantConfig): void {
   // Malaskra section
   if (!config.malaskra?.apiKey) missing.push('malaskra.apiKey')
 
-  // PDF section — defaults are acceptable, but validate types if present
-  if (config.pdf) {
+  // PDF section — required since pdf.ts accesses it unconditionally
+  if (!config.pdf) {
+    missing.push('pdf')
+  } else {
+    if (!config.pdf.companyName) missing.push('pdf.companyName')
     if (config.pdf.locale !== undefined && typeof config.pdf.locale !== 'string') {
       missing.push('pdf.locale (must be a string)')
-    }
-    if (config.pdf.companyName !== undefined && typeof config.pdf.companyName !== 'string') {
-      missing.push('pdf.companyName (must be a string)')
     }
   }
 
@@ -199,8 +203,16 @@ function validateEndpoint(name: string, ep: EndpointConfig): void {
 export function resolveEndpoint(tenantConfig: TenantConfig, docEndpoint: string): EndpointConfig {
   const ep = tenantConfig.endpoints[docEndpoint]
   if (!ep) {
-    const available = Object.keys(tenantConfig.endpoints).join(', ')
-    throw new Error(`Unknown doc_endpoint "${docEndpoint}". Available: ${available}`)
+    throw new Error(`Unknown doc_endpoint "${docEndpoint}"`)
   }
   return ep
+}
+
+/**
+ * Validate an audit query parameter (brand_id, ticket_id).
+ * Returns the sanitized value or null if invalid.
+ */
+export function sanitizeAuditParam(value: string | null): string | null {
+  if (!value) return null
+  return AUDIT_PARAM_PATTERN.test(value) ? value : null
 }

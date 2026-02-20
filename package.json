@@ -27,5 +27,5 @@
     "typescript": "^5.5.0",
     "vitest": "^4.0.18"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

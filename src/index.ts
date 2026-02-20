@@ -15,7 +15,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { getConfig } from './config.js'
 import { handleWebhook } from './webhook.js'
 import { handleAttachments } from './attachments.js'
-import { FileTenantStore, resolveTenantConfig } from './tenant.js'
+import { FileTenantStore, resolveTenantConfig, sanitizeAuditParam } from './tenant.js'
 import { FileAuditStore } from './fileAuditStore.js'
 import { createLogger } from './logger.js'
 import type { TenantConfig, Logger } from './types.js'
@@ -152,8 +152,8 @@ async function handleAuditHttp(
   }
 
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '20', 10), 100)
-  const brandId = url.searchParams.get('brand_id')
-  const ticketId = url.searchParams.get('ticket_id')
+  const brandId = sanitizeAuditParam(url.searchParams.get('brand_id'))
+  const ticketId = sanitizeAuditParam(url.searchParams.get('ticket_id'))
 
   let prefix = 'audit:'
   if (brandId && ticketId) {

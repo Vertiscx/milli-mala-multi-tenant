@@ -12,7 +12,7 @@
 import { timingSafeEqual, createHash } from 'node:crypto'
 import { handleWebhook } from './webhook.js'
 import { handleAttachments } from './attachments.js'
-import { KvTenantStore, resolveTenantConfig } from './tenant.js'
+import { KvTenantStore, resolveTenantConfig, sanitizeAuditParam } from './tenant.js'
 import type { AuditStore } from './types.js'
 
 interface CfEnv {
@@ -162,8 +162,8 @@ export default {
       }
 
       const limit = Math.min(parseInt(url.searchParams.get('limit') || '20', 10), 100)
-      const brandId = url.searchParams.get('brand_id')
-      const ticketId = url.searchParams.get('ticket_id')
+      const brandId = sanitizeAuditParam(url.searchParams.get('brand_id'))
+      const ticketId = sanitizeAuditParam(url.searchParams.get('ticket_id'))
 
       let prefix = 'audit:'
       if (brandId && ticketId) {

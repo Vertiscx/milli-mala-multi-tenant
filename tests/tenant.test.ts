@@ -4,7 +4,8 @@ import {
   KvTenantStore,
   resolveTenantConfig,
   validateTenantConfig,
-  resolveEndpoint
+  resolveEndpoint,
+  sanitizeAuditParam
 } from '../src/tenant.js'
 import type { TenantConfig } from '../src/types.js'
 
@@ -278,7 +279,7 @@ describe('resolveEndpoint', () => {
     expect(() => resolveEndpoint(tenant, 'sharepoint')).toThrow('Unknown doc_endpoint')
   })
 
-  it('should list available endpoints in error message', () => {
+  it('should not leak available endpoint names in error message', () => {
     const tenant = makeValidTenant({
       endpoints: {
         onesystems: { type: 'onesystems', baseUrl: 'https://a.test', appKey: 'k' },
@@ -287,9 +288,87 @@ describe('resolveEndpoint', () => {
     })
     try {
       resolveEndpoint(tenant, 'bad')
+      expect.unreachable('should have thrown')
     } catch (e) {
-      expect((e as Error).message).toContain('onesystems')
-      expect((e as Error).message).toContain('gopro')
+      expect((e as Error).message).toContain('Unknown doc_endpoint')
+      expect((e as Error).message).not.toContain('onesystems')
+      expect((e as Error).message).not.toContain('gopro')
     }
+  })
+})
+
+describe('sanitizeAuditParam', () => {
+  it('should accept alphanumeric brand_id', () => {
+    expect(sanitizeAuditParam('360001234567')).toBe('360001234567')
+  })
+
+  it('should accept brand_id with hyphens and underscores', () => {
+    expect(sanitizeAuditParam('brand-a_123')).toBe('brand-a_123')
+  })
+
+  it('should reject brand_id with colons (prefix injection)', () => {
+    expect(sanitizeAuditParam('tenant_b:2024')).toBeNull()
+  })
+
+  it('should reject brand_id with slashes', () => {
+    expect(sanitizeAuditParam('../../etc')).toBeNull()
+  })
+
+  it('should reject brand_id with spaces', () => {
+    expect(sanitizeAuditParam('brand id')).toBeNull()
+  })
+
+  it('should return null for empty string', () => {
+    expect(sanitizeAuditParam('')).toBeNull()
+  })
+
+  it('should return null for null input', () => {
+    expect(sanitizeAuditParam(null)).toBeNull()
+  })
+})
+
+describe('validateTenantConfig — pdf section', () => {
+  it('should throw for missing pdf section', () => {
+    const tenant = makeValidTenant()
+    delete (tenant as any).pdf
+    expect(() => validateTenantConfig(tenant)).toThrow('pdf')
+  })
+
+  it('should throw for missing pdf.companyName', () => {
+    const tenant = makeValidTenant()
+    tenant.pdf.companyName = ''
+    expect(() => validateTenantConfig(tenant)).toThrow('pdf.companyName')
+  })
+
+  it('should accept pdf with only companyName', () => {
+    const tenant = makeValidTenant()
+    tenant.pdf = { companyName: 'Test' } as any
+    expect(() => validateTenantConfig(tenant)).not.toThrow()
+  })
+})
+
+describe('validateTenantConfig — IPv6-mapped private IPs', () => {
+  it('should reject baseUrl pointing to ::ffff:127.0.0.1', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:127.0.0.1]/api', appKey: 'k' }
+      }
+    }))).toThrow('private')
+  })
+
+  it('should reject baseUrl pointing to ::ffff:10.0.0.1', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:10.0.0.1]/api', appKey: 'k' }
+      }
+    }))).toThrow('private')
+  })
+
+  it('should reject baseUrl pointing to ::ffff:169.254.169.254', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:169.254.169.254]/api', appKey: 'k' }
+      }
+    }))).toThrow('private')
   })
 })
