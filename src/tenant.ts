@@ -10,6 +10,18 @@ import { createLogger } from './logger.js'
 
 const logger = createLogger('tenant')
 
+// ─── Validation Patterns ────────────────────────────────────────────
+
+/** Zendesk subdomains are alphanumeric + hyphens only */
+const SUBDOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*$/i
+
+/** Private/reserved IP ranges that must be blocked in baseUrl */
+const PRIVATE_IP_PATTERNS = [
+  /^127\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./,
+  /^169\.254\./, /^0\./, /^::1$/, /^fc00:/, /^fe80:/,
+  /^localhost$/i
+]
+
 // ─── Tenant Store Interface ──────────────────────────────────────────
 
 export interface TenantStore {
@@ -64,6 +76,8 @@ export class FileTenantStore implements TenantStore {
 
 /**
  * Resolve a TenantConfig from a brand_id. Returns null if not found.
+ * Validates the config before returning — malformed configs are rejected
+ * with a logged error and null return.
  */
 export async function resolveTenantConfig(
   brandId: string,
@@ -75,6 +89,15 @@ export async function resolveTenantConfig(
     logger.warn('Tenant not found', { brand_id: brandId })
     return null
   }
+
+  // Validate config before returning — catches malformed KV entries or tenants.json
+  try {
+    validateTenantConfig(config)
+  } catch (err) {
+    logger.error('Invalid tenant config', { brand_id: brandId, error: (err as Error).message })
+    return null
+  }
+
   return config
 }
 
@@ -94,8 +117,26 @@ export function validateTenantConfig(config: TenantConfig): void {
   if (!config.zendesk?.apiToken) missing.push('zendesk.apiToken')
   if (!config.zendesk?.webhookSecret) missing.push('zendesk.webhookSecret')
 
+  // Validate subdomain format (prevents URL injection via crafted subdomains)
+  if (config.zendesk?.subdomain && !SUBDOMAIN_PATTERN.test(config.zendesk.subdomain)) {
+    throw new Error(
+      `Invalid tenant config for "${config.name || config.brand_id}": ` +
+      `zendesk.subdomain contains invalid characters (must be alphanumeric/hyphens only)`
+    )
+  }
+
   // Malaskra section
   if (!config.malaskra?.apiKey) missing.push('malaskra.apiKey')
+
+  // PDF section — defaults are acceptable, but validate types if present
+  if (config.pdf) {
+    if (config.pdf.locale !== undefined && typeof config.pdf.locale !== 'string') {
+      missing.push('pdf.locale (must be a string)')
+    }
+    if (config.pdf.companyName !== undefined && typeof config.pdf.companyName !== 'string') {
+      missing.push('pdf.companyName (must be a string)')
+    }
+  }
 
   // At least one endpoint
   if (!config.endpoints || Object.keys(config.endpoints).length === 0) {
@@ -117,6 +158,25 @@ function validateEndpoint(name: string, ep: EndpointConfig): void {
 
   if (!ep.type) missing.push('type')
   if (!ep.baseUrl) missing.push('baseUrl')
+
+  // Validate baseUrl: must be HTTPS, must not point to private/reserved IPs
+  if (ep.baseUrl) {
+    try {
+      const url = new URL(ep.baseUrl)
+      if (url.protocol !== 'https:') {
+        throw new Error(`Endpoint "${name}": baseUrl must use HTTPS (got "${url.protocol}")`)
+      }
+      // Block private/reserved IP ranges to prevent SSRF via config injection
+      for (const pattern of PRIVATE_IP_PATTERNS) {
+        if (pattern.test(url.hostname)) {
+          throw new Error(`Endpoint "${name}": baseUrl must not point to a private/reserved address`)
+        }
+      }
+    } catch (err) {
+      if ((err as Error).message.startsWith('Endpoint')) throw err
+      throw new Error(`Endpoint "${name}": invalid baseUrl "${ep.baseUrl}"`)
+    }
+  }
 
   if (ep.type === 'onesystems') {
     if (!ep.appKey) missing.push('appKey')

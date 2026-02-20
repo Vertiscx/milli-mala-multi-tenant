@@ -8,11 +8,10 @@
 
 import { timingSafeEqual, createHash } from 'node:crypto'
 import { ZendeskClient } from './zendesk.js'
-import { GoProClient } from './gopro.js'
-import { OneSystemsClient } from './onesystems.js'
 import { createLogger } from './logger.js'
 import { resolveEndpoint } from './tenant.js'
-import type { HandlerResult, AttachmentsRequest, DocClient, TenantConfig, EndpointConfig, Logger } from './types.js'
+import { createDocClient } from './docClient.js'
+import type { HandlerResult, AttachmentsRequest, TenantConfig, Logger } from './types.js'
 
 const logger: Logger = createLogger('attachments')
 
@@ -30,20 +29,6 @@ function verifyApiKey(headers: Record<string, string>, tenantConfig: TenantConfi
 }
 
 /**
- * Build a doc-system client from an EndpointConfig.
- */
-function createDocClient(ep: EndpointConfig): DocClient {
-  if (ep.type === 'gopro') {
-    return new GoProClient(ep.baseUrl, ep.username!, ep.password!, {
-      tokenTtlMs: ep.tokenTtlMs
-    })
-  }
-  return new OneSystemsClient(ep.baseUrl, ep.appKey!, {
-    tokenTtlMs: ep.tokenTtlMs
-  })
-}
-
-/**
  * Core handler for POST /v1/attachments.
  * Accepts tenantConfig + docEndpoint, returns { status, body }.
  */
@@ -58,20 +43,25 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
     }
 
     // Validate input
-    const ticketId = Number((body as Record<string, unknown>).ticket_id)
+    const ticketId = Number(body.ticket_id)
     if (!Number.isInteger(ticketId) || ticketId <= 0) {
       return { status: 400, body: { error: 'Invalid or missing ticket_id' } }
     }
 
-    const caseNumber = (body as Record<string, unknown>).case_number
+    const caseNumber = body.case_number
     if (!caseNumber || typeof caseNumber !== 'string') {
       return { status: 400, body: { error: 'Invalid or missing case_number' } }
     }
 
     logger.info('Attachment forwarding request', { brand_id: brandId, ticketId, caseNumber, docEndpoint })
 
-    // Validate doc_endpoint against tenant config
-    const ep = resolveEndpoint(tenantConfig, docEndpoint)
+    // Validate doc_endpoint against tenant config — 400 if invalid
+    let ep
+    try {
+      ep = resolveEndpoint(tenantConfig, docEndpoint)
+    } catch (err) {
+      return { status: 400, body: { error: (err as Error).message } }
+    }
 
     // 1. Fetch attachments from Zendesk
     const zendesk = new ZendeskClient(

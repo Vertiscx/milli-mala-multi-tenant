@@ -77,7 +77,12 @@ async function handleWebhookHttp(
 ): Promise<void> {
   try {
     const rawBody = await getRequestBody(req, MAX_BODY_SIZE)
-    const body = JSON.parse(rawBody) as Record<string, unknown>
+    let body: Record<string, unknown>
+    try {
+      body = JSON.parse(rawBody) as Record<string, unknown>
+    } catch {
+      return sendJson(res, 400, { error: 'Invalid JSON body' })
+    }
     const brandId = body.brand_id != null ? String(body.brand_id) : undefined
     const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
 
@@ -103,7 +108,12 @@ async function handleAttachmentsHttp(
 ): Promise<void> {
   try {
     const rawBody = await getRequestBody(req, MAX_BODY_SIZE)
-    const body = JSON.parse(rawBody) as Record<string, unknown>
+    let body: Record<string, unknown>
+    try {
+      body = JSON.parse(rawBody) as Record<string, unknown>
+    } catch {
+      return sendJson(res, 400, { error: 'Invalid JSON body' })
+    }
     const brandId = body.brand_id != null ? String(body.brand_id) : undefined
     const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
 

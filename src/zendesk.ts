@@ -61,34 +61,42 @@ export class ZendeskClient {
           return attachments
         }
         try {
-          // SSRF protection: only allow Zendesk URLs
+          // SSRF protection: only allow genuine Zendesk URLs
           const attUrl = new URL(att.content_url)
-          if (!attUrl.hostname.endsWith('.zendesk.com') && !attUrl.hostname.endsWith('.zdassets.com')) {
-            logger.warn('Skipping non-Zendesk attachment URL', { url: att.content_url })
-            continue
-          }
           if (attUrl.protocol !== 'https:') {
             logger.warn('Skipping non-HTTPS attachment URL', { url: att.content_url })
+            continue
+          }
+          // Proper domain check: extract the last two labels and compare exactly.
+          // This prevents bypasses like "evil-zendesk.com" matching ".zendesk.com".
+          const hostParts = attUrl.hostname.split('.')
+          const domain = hostParts.slice(-2).join('.')
+          if (domain !== 'zendesk.com' && domain !== 'zdassets.com') {
+            logger.warn('Skipping non-Zendesk attachment URL', { url: att.content_url })
             continue
           }
           const response = await fetch(att.content_url, {
             headers: { 'Authorization': `Basic ${this.auth}` }
           })
-          if (response.ok) {
-            const buffer = Buffer.from(await response.arrayBuffer())
-            if (totalBytes + buffer.length > maxTotalBytes) {
-              logger.warn('Attachment total size limit reached', { maxTotalBytes, currentBytes: totalBytes })
-              return attachments
-            }
-            totalBytes += buffer.length
-            attachments.push({
-              filename: att.file_name,
-              contentType: att.content_type,
-              size: att.size,
-              data: buffer
+          if (!response.ok) {
+            logger.warn('Attachment download returned non-OK status', {
+              filename: att.file_name, status: response.status
             })
-            logger.debug('Downloaded attachment', { filename: att.file_name, size: att.size })
+            continue
           }
+          const buffer = Buffer.from(await response.arrayBuffer())
+          if (totalBytes + buffer.length > maxTotalBytes) {
+            logger.warn('Attachment total size limit reached', { maxTotalBytes, currentBytes: totalBytes })
+            return attachments
+          }
+          totalBytes += buffer.length
+          attachments.push({
+            filename: att.file_name,
+            contentType: att.content_type,
+            size: att.size,
+            data: buffer
+          })
+          logger.debug('Downloaded attachment', { filename: att.file_name, size: att.size })
         } catch (error) {
           logger.warn('Failed to download attachment', { filename: att.file_name, error: (error as Error).message })
         }

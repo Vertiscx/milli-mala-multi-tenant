@@ -104,6 +104,21 @@ describe('resolveTenantConfig', () => {
     const store = new FileTenantStore([makeValidTenant()])
     expect(await resolveTenantConfig('unknown', store)).toBeNull()
   })
+
+  it('should validate config and return null for invalid tenant', async () => {
+    // Tenant with missing webhookSecret — should fail validation
+    const badTenant = makeValidTenant()
+    badTenant.zendesk.webhookSecret = ''
+    const store = new FileTenantStore([badTenant])
+    expect(await resolveTenantConfig('360001234567', store)).toBeNull()
+  })
+
+  it('should validate config and return null for invalid subdomain', async () => {
+    const badTenant = makeValidTenant()
+    badTenant.zendesk.subdomain = 'evil.com/path#'
+    const store = new FileTenantStore([badTenant])
+    expect(await resolveTenantConfig('360001234567', store)).toBeNull()
+  })
 })
 
 describe('validateTenantConfig', () => {
@@ -161,6 +176,92 @@ describe('validateTenantConfig', () => {
         gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'u', password: 'p' }
       }
     }))).not.toThrow()
+  })
+
+  // ─── Subdomain validation ───────────────────────────────────────────
+
+  it('should reject subdomain with dots (URL injection)', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk.subdomain = 'evil.com/path#'
+    expect(() => validateTenantConfig(tenant)).toThrow('invalid characters')
+  })
+
+  it('should reject subdomain with slashes', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk.subdomain = 'evil/path'
+    expect(() => validateTenantConfig(tenant)).toThrow('invalid characters')
+  })
+
+  it('should accept valid subdomain with hyphens', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk.subdomain = 'my-company-123'
+    expect(() => validateTenantConfig(tenant)).not.toThrow()
+  })
+
+  // ─── baseUrl validation ─────────────────────────────────────────────
+
+  it('should reject HTTP baseUrl (requires HTTPS)', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'http://api.onesystems.test', appKey: 'k' }
+      }
+    }))).toThrow('HTTPS')
+  })
+
+  it('should reject baseUrl pointing to localhost', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://localhost/api', appKey: 'k' }
+      }
+    }))).toThrow('private')
+  })
+
+  it('should reject baseUrl pointing to 127.0.0.1', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://127.0.0.1/api', appKey: 'k' }
+      }
+    }))).toThrow('private')
+  })
+
+  it('should reject baseUrl pointing to 10.x.x.x', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://10.0.0.1/api', appKey: 'k' }
+      }
+    }))).toThrow('private')
+  })
+
+  it('should reject baseUrl pointing to 192.168.x.x', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://192.168.1.1/api', appKey: 'k' }
+      }
+    }))).toThrow('private')
+  })
+
+  it('should reject baseUrl pointing to 169.254.x.x (link-local)', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://169.254.169.254/latest', appKey: 'k' }
+      }
+    }))).toThrow('private')
+  })
+
+  it('should accept valid HTTPS baseUrl', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://api.onesystems.is', appKey: 'k' }
+      }
+    }))).not.toThrow()
+  })
+
+  it('should reject invalid baseUrl', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'not-a-url', appKey: 'k' }
+      }
+    }))).toThrow('invalid baseUrl')
   })
 })
 

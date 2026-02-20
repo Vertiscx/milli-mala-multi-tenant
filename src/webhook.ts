@@ -1,16 +1,15 @@
 /**
  * Core webhook handler - shared between Node.js server and CF Worker.
- * No node:http dependency so it can run in CF Workers.
+ * Requires nodejs_compat flag on Cloudflare Workers for node:crypto.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { ZendeskClient } from './zendesk.js'
 import { generateTicketPdf } from './pdf.js'
-import { OneSystemsClient } from './onesystems.js'
-import { GoProClient } from './gopro.js'
 import { createLogger } from './logger.js'
 import { resolveEndpoint } from './tenant.js'
-import type { HandlerResult, WebhookRequest, DocClient, ZendeskUser, TenantConfig, EndpointConfig, Logger } from './types.js'
+import { createDocClient } from './docClient.js'
+import type { HandlerResult, WebhookRequest, ZendeskUser, Logger } from './types.js'
 
 const logger: Logger = createLogger('webhook')
 
@@ -43,21 +42,6 @@ export function isTimestampFresh(timestamp: string, toleranceMs: number = WEBHOO
 }
 
 /**
- * Build a DocClient from an EndpointConfig.
- */
-function createDocClient(ep: EndpointConfig, user?: string): DocClient {
-  if (ep.type === 'gopro') {
-    return new GoProClient(ep.baseUrl, ep.username!, ep.password!, {
-      tokenTtlMs: ep.tokenTtlMs
-    })
-  }
-  return new OneSystemsClient(ep.baseUrl, ep.appKey!, {
-    tokenTtlMs: ep.tokenTtlMs,
-    user: user || 'Zendesk'
-  })
-}
-
-/**
  * Core webhook handler. Accepts tenantConfig + docEndpoint, returns { status, body }.
  * HTTP adaptation and tenant resolution are handled by the caller.
  */
@@ -80,15 +64,20 @@ export async function handleWebhook({ body, rawBody, headers, tenantConfig, docE
     }
 
     // Validate ticket_id as a positive integer
-    const ticket_id = Number((body as Record<string, unknown>).ticket_id)
+    const ticket_id = Number(body.ticket_id)
     if (!Number.isInteger(ticket_id) || ticket_id <= 0) {
       return { status: 400, body: { error: 'Invalid or missing ticket_id' } }
     }
 
     logger.info('Received webhook', { brand_id: brandId, ticket_id, doc_endpoint: docEndpoint })
 
-    // Validate doc_endpoint against tenant config
-    const ep = resolveEndpoint(tenantConfig, docEndpoint)
+    // Validate doc_endpoint against tenant config — 400 if invalid
+    let ep
+    try {
+      ep = resolveEndpoint(tenantConfig, docEndpoint)
+    } catch (err) {
+      return { status: 400, body: { error: (err as Error).message } }
+    }
 
     // 1. Fetch ticket from Zendesk
     const zendesk = new ZendeskClient(
@@ -97,6 +86,15 @@ export async function handleWebhook({ body, rawBody, headers, tenantConfig, docE
       tenantConfig.zendesk.email
     )
     const ticket = await zendesk.getTicket(ticket_id)
+
+    // Brand cross-check: verify the ticket belongs to this tenant's brand
+    if (ticket.brand_id !== undefined && String(ticket.brand_id) !== brandId) {
+      logger.warn('Brand mismatch: ticket belongs to different brand', {
+        brand_id: brandId, ticket_brand_id: ticket.brand_id, ticket_id
+      })
+      return { status: 403, body: { error: 'Ticket does not belong to this brand' } }
+    }
+
     const comments = await zendesk.getTicketComments(ticket_id)
     const attachments = await zendesk.fetchAttachments(comments)
 

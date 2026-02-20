@@ -172,12 +172,44 @@ describe('handleWebhook', () => {
     expect(result.status).toBe(400)
   })
 
+  it('should reject unknown doc_endpoint with 400', async () => {
+    const req = makeRequest({ ticket_id: 123 })
+    req.docEndpoint = 'sharepoint'
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(400)
+    expect(result.body.error).toContain('Unknown doc_endpoint')
+  })
+
+  it('should reject ticket with mismatched brand_id (brand cross-check)', async () => {
+    const mockTicket = {
+      id: 123,
+      subject: 'Test ticket',
+      status: 'closed',
+      created_at: '2025-01-01T00:00:00Z',
+      brand_id: 999999  // Different from tenant brand_id '360001234567'
+    }
+
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: mockTicket })
+      })
+
+    const req = makeRequest({ ticket_id: 123 })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(403)
+    expect(result.body.error).toContain('does not belong to this brand')
+  })
+
   it('should process valid webhook end-to-end', async () => {
     const mockTicket = {
       id: 123,
       subject: 'Test ticket',
       status: 'closed',
-      created_at: '2025-01-01T00:00:00Z'
+      created_at: '2025-01-01T00:00:00Z',
+      brand_id: 360001234567
     }
 
     ;(global.fetch as ReturnType<typeof vi.fn>)
@@ -238,6 +270,7 @@ describe('handleWebhook', () => {
       subject: 'GoPro test',
       status: 'closed',
       created_at: '2025-01-01T00:00:00Z',
+      brand_id: 360001234567,
       custom_fields: [{ id: 8888, value: 'GP-CASE-200' }]
     }
 

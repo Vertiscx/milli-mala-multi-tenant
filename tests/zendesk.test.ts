@@ -182,6 +182,100 @@ describe('ZendeskClient', () => {
       expect(result).toEqual([])
     })
 
+    it('should block SSRF via domain spoofing (evil-zendesk.com)', async () => {
+      const mockComments = [
+        {
+          id: 1,
+          attachments: [
+            {
+              id: 201,
+              file_name: 'ssrf.pdf',
+              content_url: 'https://evil-zendesk.com/steal-data',
+              content_type: 'application/pdf',
+              size: 100
+            }
+          ]
+        }
+      ]
+
+      // fetch should never be called for this attachment
+      const result = await client.fetchAttachments(mockComments as any)
+      expect(result).toEqual([])
+      expect(global.fetch).not.toHaveBeenCalled()
+    })
+
+    it('should block SSRF via non-HTTPS URLs', async () => {
+      const mockComments = [
+        {
+          id: 1,
+          attachments: [
+            {
+              id: 202,
+              file_name: 'http.pdf',
+              content_url: 'http://test-subdomain.zendesk.com/attachments/202',
+              content_type: 'application/pdf',
+              size: 100
+            }
+          ]
+        }
+      ]
+
+      const result = await client.fetchAttachments(mockComments as any)
+      expect(result).toEqual([])
+      expect(global.fetch).not.toHaveBeenCalled()
+    })
+
+    it('should allow legitimate Zendesk subdomain URLs', async () => {
+      const mockComments = [
+        {
+          id: 1,
+          attachments: [
+            {
+              id: 203,
+              file_name: 'legit.pdf',
+              content_url: 'https://my-company.zendesk.com/attachments/203',
+              content_type: 'application/pdf',
+              size: 100
+            }
+          ]
+        }
+      ]
+
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(100)
+      })
+
+      const result = await client.fetchAttachments(mockComments as any)
+      expect(result).toHaveLength(1)
+      expect(global.fetch).toHaveBeenCalled()
+    })
+
+    it('should allow zdassets.com URLs', async () => {
+      const mockComments = [
+        {
+          id: 1,
+          attachments: [
+            {
+              id: 204,
+              file_name: 'asset.png',
+              content_url: 'https://cdn.zdassets.com/files/asset.png',
+              content_type: 'image/png',
+              size: 50
+            }
+          ]
+        }
+      ]
+
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(50)
+      })
+
+      const result = await client.fetchAttachments(mockComments as any)
+      expect(result).toHaveLength(1)
+    })
+
     it('should skip failed attachment downloads gracefully', async () => {
       const mockComments = [
         {

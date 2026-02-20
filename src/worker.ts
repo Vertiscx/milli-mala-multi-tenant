@@ -31,11 +31,15 @@ function parseRequestBody(rawBody: string): {
   body: Record<string, unknown>
   brandId: string | undefined
   docEndpoint: string | undefined
-} {
-  const body = JSON.parse(rawBody) as Record<string, unknown>
-  const brandId = body.brand_id != null ? String(body.brand_id) : undefined
-  const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
-  return { body, brandId, docEndpoint }
+} | null {
+  try {
+    const body = JSON.parse(rawBody) as Record<string, unknown>
+    const brandId = body.brand_id != null ? String(body.brand_id) : undefined
+    const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
+    return { body, brandId, docEndpoint }
+  } catch {
+    return null
+  }
 }
 
 export default {
@@ -62,7 +66,11 @@ export default {
           return Response.json({ error: 'Request body too large' }, { status: 413 })
         }
 
-        const { body, brandId, docEndpoint } = parseRequestBody(rawBody)
+        const parsed = parseRequestBody(rawBody)
+        if (!parsed) {
+          return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
+        }
+        const { body, brandId, docEndpoint } = parsed
         if (!brandId) {
           return Response.json({ error: 'Missing brand_id' }, { status: 400 })
         }
@@ -104,7 +112,11 @@ export default {
           return Response.json({ error: 'Request body too large' }, { status: 413 })
         }
 
-        const { body, brandId, docEndpoint } = parseRequestBody(rawBody)
+        const parsed = parseRequestBody(rawBody)
+        if (!parsed) {
+          return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
+        }
+        const { body, brandId, docEndpoint } = parsed
         if (!brandId) {
           return Response.json({ error: 'Missing brand_id' }, { status: 400 })
         }
