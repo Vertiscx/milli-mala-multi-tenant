@@ -203,6 +203,28 @@ describe('handleWebhook', () => {
     expect(result.body.error).toContain('does not belong to this brand')
   })
 
+  it('should reject ticket with undefined brand_id (fail-closed)', async () => {
+    const mockTicket = {
+      id: 123,
+      subject: 'Test ticket',
+      status: 'closed',
+      created_at: '2025-01-01T00:00:00Z'
+      // brand_id intentionally omitted
+    }
+
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: mockTicket })
+      })
+
+    const req = makeRequest({ ticket_id: 123 })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(403)
+    expect(result.body.error).toContain('brand_id unavailable')
+  })
+
   it('should process valid webhook end-to-end', async () => {
     const mockTicket = {
       id: 123,
@@ -221,7 +243,12 @@ describe('handleWebhook', () => {
       // getTicketComments
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ comments: [{ id: 1, body: 'Hello', public: true }] })
+        json: async () => ({ comments: [{ id: 1, body: 'Hello', public: true, author_id: 100 }] })
+      })
+      // getUsersMany
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ users: [{ id: 100, name: 'Test Agent', email: 'agent@test.com' }] })
       })
       // OneSystems auth
       .mockResolvedValueOnce({
@@ -245,6 +272,10 @@ describe('handleWebhook', () => {
     expect(result.body.doc_endpoint).toBe('onesystems')
     expect(result.body.doc_system).toBe('onesystems')
     expect(result.body.duration_ms).toBeGreaterThanOrEqual(0)
+
+    // Verify OneSystems was actually called (not consumed by getUsersMany)
+    const calledUrls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0])
+    expect(calledUrls.some(u => u.includes('onesystems.test'))).toBe(true)
   })
 
   it('should route to GoPro client when docEndpoint points to gopro', async () => {
@@ -283,7 +314,12 @@ describe('handleWebhook', () => {
       // getTicketComments
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ comments: [{ id: 1, body: 'Hello', public: true }] })
+        json: async () => ({ comments: [{ id: 1, body: 'Hello', public: true, author_id: 100 }] })
+      })
+      // getUsersMany
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ users: [{ id: 100, name: 'Test Agent', email: 'agent@test.com' }] })
       })
       // GoPro auth
       .mockResolvedValueOnce({

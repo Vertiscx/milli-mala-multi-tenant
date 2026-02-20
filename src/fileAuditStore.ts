@@ -6,7 +6,10 @@
 
 import { mkdir, writeFile, readFile, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createLogger } from './logger.js'
 import type { AuditStore } from './types.js'
+
+const logger = createLogger('audit-store')
 
 interface StoredEntry {
   value: string
@@ -16,10 +19,17 @@ interface StoredEntry {
 export class FileAuditStore implements AuditStore {
   private dir: string
   private _ready: Promise<void>
+  private _initFailed = false
 
   constructor(dir = './audit-data') {
     this.dir = dir
-    this._ready = mkdir(this.dir, { recursive: true }).catch(() => {})
+    this._ready = mkdir(this.dir, { recursive: true }).catch((err) => {
+      this._initFailed = true
+      logger.error('Audit store directory creation failed — all audit writes will fail', {
+        dir: this.dir,
+        error: (err as Error).message
+      })
+    })
   }
 
   private _keyToFile(key: string): string {
@@ -32,6 +42,9 @@ export class FileAuditStore implements AuditStore {
 
   async put(key: string, value: string, { expirationTtl }: { expirationTtl?: number } = {}): Promise<void> {
     await this._ready
+    if (this._initFailed) {
+      throw new Error(`Audit store unavailable: directory "${this.dir}" could not be created`)
+    }
     const entry: StoredEntry = {
       value,
       expiresAt: expirationTtl ? Date.now() + expirationTtl * 1000 : null
@@ -41,6 +54,7 @@ export class FileAuditStore implements AuditStore {
 
   async get(key: string, format?: string): Promise<unknown> {
     await this._ready
+    if (this._initFailed) return null
     try {
       const raw = await readFile(join(this.dir, this._keyToFile(key)), 'utf8')
       const entry: StoredEntry = JSON.parse(raw)
@@ -56,6 +70,7 @@ export class FileAuditStore implements AuditStore {
 
   async list({ prefix = '', limit = 20 }: { prefix?: string; limit?: number } = {}): Promise<{ keys: { name: string }[] }> {
     await this._ready
+    if (this._initFailed) return { keys: [] }
     try {
       const files = await readdir(this.dir)
       const matching = files

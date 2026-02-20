@@ -102,6 +102,25 @@ describe('handleAttachments', () => {
     expect(result.body.error).toContain('does not belong to this brand')
   })
 
+  it('should reject ticket with undefined brand_id (fail-closed)', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket — brand_id missing from response
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 123, subject: 'Test' } })
+      })
+
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: 'C-100' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+
+    expect(result.status).toBe(403)
+    expect(result.body.error).toContain('brand_id unavailable')
+  })
+
   it('should return success with 0 attachments when ticket has none', async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>)
       // getTicket

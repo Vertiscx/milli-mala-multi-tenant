@@ -87,8 +87,14 @@ export async function handleWebhook({ body, rawBody, headers, tenantConfig, docE
     )
     const ticket = await zendesk.getTicket(ticket_id)
 
-    // Brand cross-check: verify the ticket belongs to this tenant's brand
-    if (ticket.brand_id !== undefined && String(ticket.brand_id) !== brandId) {
+    // Brand cross-check: verify the ticket belongs to this tenant's brand (fail-closed)
+    if (ticket.brand_id === undefined || ticket.brand_id === null) {
+      logger.error('Ticket missing brand_id — cannot verify tenant ownership', {
+        brand_id: brandId, ticket_id
+      })
+      return { status: 403, body: { error: 'Ticket brand_id unavailable' } }
+    }
+    if (String(ticket.brand_id) !== brandId) {
       logger.warn('Brand mismatch: ticket belongs to different brand', {
         brand_id: brandId, ticket_brand_id: ticket.brand_id, ticket_id
       })

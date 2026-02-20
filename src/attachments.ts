@@ -71,7 +71,14 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
     )
 
     const ticket = await zendesk.getTicket(ticketId)
-    if (ticket.brand_id !== undefined && String(ticket.brand_id) !== brandId) {
+    // Brand cross-check: fail-closed — if brand_id is missing, reject
+    if (ticket.brand_id === undefined || ticket.brand_id === null) {
+      logger.error('Ticket missing brand_id — cannot verify tenant ownership', {
+        brand_id: brandId, ticket_id: ticketId
+      })
+      return { status: 403, body: { error: 'Ticket brand_id unavailable' } }
+    }
+    if (String(ticket.brand_id) !== brandId) {
       logger.warn('Brand mismatch: ticket belongs to different brand', {
         brand_id: brandId, ticket_brand_id: ticket.brand_id, ticket_id: ticketId
       })
