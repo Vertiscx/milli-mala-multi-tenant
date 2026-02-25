@@ -5,7 +5,7 @@
   "serialNumber": "urn:uuid:***",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-02-25T10:25:53.946Z",
+    "timestamp": "2026-02-25T12:50:40.267Z",
     "lifecycles": [
       {
         "phase": "build"
@@ -2399,22 +2399,12 @@
       "properties": [],
       "externalReferences": [
         {
-          "type": "distribution",
-          "url": "https://registry.npmjs.org/jspdf/-/jspdf-4.1.0.tgz"
-        },
-        {
           "type": "vcs",
           "url": "https://github.com/parallax/jsPDF.git"
         },
         {
           "type": "website",
           "url": "https://github.com/parallax/jsPDF"
-        }
-      ],
-      "hashes": [
-        {
-          "alg": "SHA-512",
-          "content": "c5dd5dfd7464c2a9ecaba14fdf31f543e123aa7d942c825e0d9f854caa5a69b569651123b09291270ba891336076a394f9f979e4a81bbe0675a514d25823f691"
         }
       ],
       "licenses": [
