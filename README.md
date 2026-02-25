@@ -122,6 +122,20 @@ curl -H "Authorization: Bearer YOUR_AUDIT_SECRET" \
   https://your-endpoint/v1/audit?brand_id=360001234567&ticket_id=123
 ```
 
+## Environment variables (Node.js / Docker)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Listen port | `8080` |
+| `LOG_LEVEL` | Log level (`info`, `debug`, `error`) | `info` |
+| `TENANTS_FILE` | Path to tenant config file | `./tenants.json` |
+| `AUDIT_SECRET` | Bearer token for `/v1/audit` endpoint | (empty — audit endpoint disabled) |
+| `AUDIT_DIR` | Directory for persistent audit log | `./audit-data` |
+
+Tenant credentials (Zendesk, archive systems, API keys) are not environment variables — they live in the tenant config file. In production this file should be mounted from a secret store (e.g. Kubernetes Secret, Azure KeyVault). See [Tenant config structure](#tenant-config-structure) above.
+
+For Cloudflare Workers, tenant config is stored in KV (`TENANT_KV` binding) and `AUDIT_SECRET` is set as a Worker secret.
+
 ## Deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full deployment guides:
