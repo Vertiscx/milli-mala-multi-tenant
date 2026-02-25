@@ -34,7 +34,7 @@ Milli-mala acts as a DMZ gateway — Zendesk and Malaskra never see archive cred
 - **PDF**: jsPDF (CF Workers compatible, no filesystem needed)
 - **Audit**: Cloudflare KV (Workers) or file-based store (Docker/Node.js), 90-day TTL
 - **Tests**: Vitest (119 tests)
-- **License**: MIT
+- **License**: Apache 2.0
 
 ## Multi-tenant design
 
@@ -333,4 +333,4 @@ This is not required for the current deployment but is recommended before scalin
 
 ## License
 
-MIT
+Apache-2.0
