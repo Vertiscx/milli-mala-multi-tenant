@@ -1,0 +1,58 @@
+# Git
+.git
+.gitignore
+.github
+
+# Dependencies (will be installed in container)
+node_modules
+
+# Environment files (should be mounted or injected)
+.env
+.env.*
+
+# Testing
+tests
+coverage
+*.test.ts
+*.spec.ts
+vitest.config.ts
+test-output.pdf
+
+# Documentation
+*.md
+!README.md
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist
+.wrangler
+
+# Logs
+logs
+*.log
+
+# Runtime data (should be mounted)
+audit-data
+
+# CI/CD
+.github
+
+# Internal documents
+CLAUDE.md
+MEETING-BRIEF-*
+EFTIRFYLGNI-*
+
+# Cloudflare Workers specific (not needed for Docker)
+wrangler.toml
+
+# SBOM (not needed in runtime image)
+sbom.json
