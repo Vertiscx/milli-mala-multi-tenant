@@ -1,0 +1,19 @@
+# Protect GitHub Actions workflows and CI/CD configuration
+# Order is important; the last matching pattern takes the most precedence.
+# Make sure that team names are correct or everything stops working.
+# Organisation name is @island-is, not @island.is
+
+# Fallback - DevOps owns infrastructure and CI/CD
+*                                   @island-is/devops
+
+# Protect GitHub Actions workflows from unauthorized changes
+/.github/workflows/                 @island-is/devops
+
+# Protect CODEOWNERS itself
+/.github/CODEOWNERS                 @island-is/devops
+
+# Deployment and infrastructure configuration
+Dockerfile                          @island-is/devops
+docker-compose.yml                  @island-is/devops
+wrangler.toml                       @island-is/devops
+DEPLOYMENT.md                       @island-is/devops
