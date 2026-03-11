@@ -1,0 +1,47 @@
+name: Docker Build and Push
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOCKER_REGISTRY: 821090935708.dkr.ecr.eu-west-1.amazonaws.com
+  ECR_REPOSITORY: milli-mala
+  AWS_REGION: eu-west-1
+
+jobs:
+  build-and-push:
+    if: github.event.pull_request.merged == true || github.event_name == 'push'
+    runs-on: arc-shared
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          region: ${{ env.AWS_REGION }}
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION=latest
+          fi
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.version }} .
+          docker tag $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.version }} $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.sha_short }}
+          docker push $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.version }}
+          docker push $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.sha_short }}
