@@ -43,7 +43,7 @@ function parseRequestBody(rawBody: string): {
 }
 
 export default {
-  async fetch(request: Request, env: CfEnv, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: CfEnv, _ctx: unknown): Promise<Response> {
     const url = new URL(request.url)
 
     // Health check
