@@ -29,7 +29,8 @@ export class FileAuditStore implements AuditStore {
         dir: this.dir,
         error: (err as Error).message
       })
-    })
+      return undefined
+    }) as Promise<void>
   }
 
   private _keyToFile(key: string): string {
