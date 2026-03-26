@@ -325,6 +325,87 @@ describe('handleAttachments', () => {
     expect((result.body.errors as any[])[0].filename).toBe('b.pdf')
   })
 
+  // ─── case_number sanitization (SYN-MUT-28-3) ──────────────────────
+
+  it('should reject case_number longer than 100 characters', async () => {
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: 'A'.repeat(101) },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).toBe(400)
+    expect(result.body.error).toContain('too long')
+  })
+
+  it('should accept case_number of exactly 100 characters', async () => {
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: 'A'.repeat(100) },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).not.toBe(400)
+  })
+
+  it('should reject case_number with DEL character', async () => {
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: 'CASE\x7f-123' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).toBe(400)
+    expect(result.body.error).toContain('invalid characters')
+  })
+
+  it('should reject case_number with control characters', async () => {
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: 'CASE\x00-123' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).toBe(400)
+    expect(result.body.error).toContain('invalid characters')
+  })
+
+  it('should reject case_number with path traversal', async () => {
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: '../../etc/passwd' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).toBe(400)
+    expect(result.body.error).toContain('invalid characters')
+  })
+
+  it('should accept case_number with slashes (valid for some systems)', async () => {
+    // GP/2024/0042 is a valid GoPro case format — single slashes are OK
+    const result = await handleAttachments({
+      body: { ticket_id: 123, case_number: 'GP/2024/0042' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    // Should pass validation and proceed to auth check (which fails since no fetch mock)
+    // But it should NOT be rejected at the case_number validation stage
+    expect(result.status).not.toBe(400)
+  })
+
+  it('should accept typical case number formats', async () => {
+    for (const caseNum of ['MAL-2024-001', '12345', 'GP/2024/0042', 'CASE_123']) {
+      const result = await handleAttachments({
+        body: { ticket_id: 123, case_number: caseNum },
+        headers: { 'x-api-key': 'test-malaskra-key' },
+        tenantConfig: makeTenantConfig(),
+        docEndpoint: 'onesystems'
+      })
+      expect(result.status, `case_number "${caseNum}" should not be rejected`).not.toBe(400)
+    }
+  })
+
   it('should not leak internal error messages', async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Secret database info'))
 

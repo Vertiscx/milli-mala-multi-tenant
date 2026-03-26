@@ -216,3 +216,15 @@ export function sanitizeAuditParam(value: string | null): string | null {
   if (!value) return null
   return AUDIT_PARAM_PATTERN.test(value) ? value : null
 }
+
+/**
+ * Validate a case_number for safe use with archive systems (SYN-MUT-28-3).
+ * Returns null if valid, or an error message string if invalid.
+ * Format is kept flexible since case number patterns vary between institutions.
+ */
+export function validateCaseNumber(value: string): string | null {
+  if (value.length > 100) return 'case_number too long (max 100 characters)'
+  if (/[\x00-\x1f\x7f]/.test(value)) return 'case_number contains invalid characters'
+  if (value.includes('..')) return 'case_number contains invalid characters'
+  return null
+}

@@ -5,7 +5,8 @@ import {
   resolveTenantConfig,
   validateTenantConfig,
   resolveEndpoint,
-  sanitizeAuditParam
+  sanitizeAuditParam,
+  validateCaseNumber
 } from '../src/tenant.js'
 import type { TenantConfig } from '../src/types.js'
 
@@ -370,5 +371,39 @@ describe('validateTenantConfig — IPv6-mapped private IPs', () => {
         onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:169.254.169.254]/api', appKey: 'k' }
       }
     }))).toThrow('private')
+  })
+})
+
+// ─── case_number validation (SYN-MUT-28-3) ──────────────────────────
+
+describe('validateCaseNumber', () => {
+  it('should return null for valid case numbers', () => {
+    expect(validateCaseNumber('MAL-2024-001')).toBeNull()
+    expect(validateCaseNumber('12345')).toBeNull()
+    expect(validateCaseNumber('GP/2024/0042')).toBeNull()
+    expect(validateCaseNumber('CASE_123')).toBeNull()
+    expect(validateCaseNumber('A'.repeat(100))).toBeNull()
+  })
+
+  it('should reject case_number longer than 100 characters', () => {
+    expect(validateCaseNumber('A'.repeat(101))).toContain('too long')
+  })
+
+  it('should reject control characters', () => {
+    expect(validateCaseNumber('CASE\x00-123')).toContain('invalid characters')
+    expect(validateCaseNumber('CASE\x1f-123')).toContain('invalid characters')
+  })
+
+  it('should reject DEL character (0x7f)', () => {
+    expect(validateCaseNumber('CASE\x7f-123')).toContain('invalid characters')
+  })
+
+  it('should reject path traversal sequences', () => {
+    expect(validateCaseNumber('../../etc/passwd')).toContain('invalid characters')
+    expect(validateCaseNumber('case..number')).toContain('invalid characters')
+  })
+
+  it('should allow single dots', () => {
+    expect(validateCaseNumber('case.number')).toBeNull()
   })
 })
