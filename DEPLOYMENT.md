@@ -533,15 +533,11 @@ Brief downtime during restart.
 
 ## Troubleshooting
 
-### "Unknown tenant" (404)
+### "Invalid request" (400)
 
-- The `brand_id` in the request doesn't match any tenant config
+- The `brand_id` may not match any tenant config, or the request body is missing required fields
 - **CF Workers**: Verify the KV key exists: `wrangler kv key get --binding=TENANT_KV "tenant:BRAND_ID"`
 - **Docker/Node.js**: Check `tenants.json` contains the brand_id
-
-### "Missing brand_id" or "Missing doc_endpoint" (400)
-
-- The request body is missing required fields
 - Check the Zendesk trigger body includes `brand_id` and `doc_endpoint`
 
 ### "Unknown doc_endpoint" (500)
