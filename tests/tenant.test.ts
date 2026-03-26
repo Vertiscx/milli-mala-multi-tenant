@@ -16,17 +16,17 @@ function makeValidTenant(overrides: Partial<TenantConfig> = {}): TenantConfig {
     zendesk: {
       subdomain: 'test',
       email: 'test@example.com',
-      apiToken: 'test-token',
-      webhookSecret: 'test-webhook-secret'
+      apiToken: 'aaT5kX9mR2vL7nQ8pW3jY6cB4fH1gD0e',
+      webhookSecret: 'wS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD'
     },
     endpoints: {
       onesystems: {
         type: 'onesystems',
         baseUrl: 'https://api.onesystems.test',
-        appKey: 'test-key'
+        appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS'
       }
     },
-    malaskra: { apiKey: 'test-malaskra-key' },
+    malaskra: { apiKey: 'mK7xR3nT9pQ2vL5jW8cY6bA4fH1gS0eD' },
     pdf: {
       companyName: 'Test Company',
       locale: 'is-IS',
@@ -174,7 +174,7 @@ describe('validateTenantConfig', () => {
   it('should validate gopro endpoint with all required fields', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'u', password: 'p' }
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'gopro-user', password: 'gP4xR7mT9nQ2vL5j' }
       }
     }))).not.toThrow()
   })
@@ -204,7 +204,7 @@ describe('validateTenantConfig', () => {
   it('should reject HTTP baseUrl (requires HTTPS)', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'http://api.onesystems.test', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'http://api.onesystems.test', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('HTTPS')
   })
@@ -212,7 +212,7 @@ describe('validateTenantConfig', () => {
   it('should reject baseUrl pointing to localhost', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://localhost/api', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://localhost/api', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
   })
@@ -220,7 +220,7 @@ describe('validateTenantConfig', () => {
   it('should reject baseUrl pointing to 127.0.0.1', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://127.0.0.1/api', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://127.0.0.1/api', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
   })
@@ -228,7 +228,7 @@ describe('validateTenantConfig', () => {
   it('should reject baseUrl pointing to 10.x.x.x', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://10.0.0.1/api', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://10.0.0.1/api', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
   })
@@ -236,7 +236,7 @@ describe('validateTenantConfig', () => {
   it('should reject baseUrl pointing to 192.168.x.x', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://192.168.1.1/api', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://192.168.1.1/api', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
   })
@@ -244,7 +244,7 @@ describe('validateTenantConfig', () => {
   it('should reject baseUrl pointing to 169.254.x.x (link-local)', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://169.254.169.254/latest', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://169.254.169.254/latest', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
   })
@@ -252,7 +252,7 @@ describe('validateTenantConfig', () => {
   it('should accept valid HTTPS baseUrl', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://api.onesystems.is', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://api.onesystems.is', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).not.toThrow()
   })
@@ -260,7 +260,7 @@ describe('validateTenantConfig', () => {
   it('should reject invalid baseUrl', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'not-a-url', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'not-a-url', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('invalid baseUrl')
   })
@@ -282,8 +282,8 @@ describe('resolveEndpoint', () => {
   it('should not leak available endpoint names in error message', () => {
     const tenant = makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://a.test', appKey: 'k' },
-        gopro: { type: 'gopro', baseUrl: 'https://b.test', username: 'u', password: 'p' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://a.test', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' },
+        gopro: { type: 'gopro', baseUrl: 'https://b.test', username: 'gopro-user', password: 'gP4xR7mT9nQ2vL5j' }
       }
     })
     try {
@@ -351,7 +351,7 @@ describe('validateTenantConfig — IPv6-mapped private IPs', () => {
   it('should reject baseUrl pointing to ::ffff:127.0.0.1', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:127.0.0.1]/api', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:127.0.0.1]/api', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
   })
@@ -359,7 +359,7 @@ describe('validateTenantConfig — IPv6-mapped private IPs', () => {
   it('should reject baseUrl pointing to ::ffff:10.0.0.1', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:10.0.0.1]/api', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:10.0.0.1]/api', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
   })
@@ -367,8 +367,87 @@ describe('validateTenantConfig — IPv6-mapped private IPs', () => {
   it('should reject baseUrl pointing to ::ffff:169.254.169.254', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:169.254.169.254]/api', appKey: 'k' }
+        onesystems: { type: 'onesystems', baseUrl: 'https://[::ffff:169.254.169.254]/api', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
       }
     }))).toThrow('private')
+  })
+})
+
+// ─── Secret strength validation (SYN-MUT-28-1) ─────────────────────
+
+describe('validateTenantConfig — secret strength', () => {
+  it('should reject apiToken shorter than 32 characters', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk.apiToken = 'short-token-abc'
+    expect(() => validateTenantConfig(tenant)).toThrow('zendesk.apiToken must be at least 32 characters')
+  })
+
+  it('should reject webhookSecret shorter than 32 characters', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk.webhookSecret = 'short-secret'
+    expect(() => validateTenantConfig(tenant)).toThrow('zendesk.webhookSecret must be at least 32 characters')
+  })
+
+  it('should reject malaskra.apiKey shorter than 32 characters', () => {
+    const tenant = makeValidTenant()
+    tenant.malaskra.apiKey = 'too-short'
+    expect(() => validateTenantConfig(tenant)).toThrow('malaskra.apiKey must be at least 32 characters')
+  })
+
+  it('should reject onesystems appKey shorter than 32 characters', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://api.test', appKey: 'short' }
+      }
+    }))).toThrow('endpoints.onesystems.appKey must be at least 32 characters')
+  })
+
+  it('should reject gopro password shorter than 16 characters', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'user', password: 'short' }
+      }
+    }))).toThrow('endpoints.gopro.password must be at least 16 characters')
+  })
+
+  it('should accept gopro password at exactly 16 characters', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'user', password: 'gP4xR7mT9nQ2vL5j' }
+      }
+    }))).not.toThrow()
+  })
+
+  it('should reject secret that is a single repeated character', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk.apiToken = 'A'.repeat(32)
+    expect(() => validateTenantConfig(tenant)).toThrow('must not be a repeated character')
+  })
+
+  it('should accept a valid 32+ character random secret', () => {
+    expect(() => validateTenantConfig(makeValidTenant())).not.toThrow()
+  })
+})
+
+describe('FileTenantStore — cross-tenant uniqueness', () => {
+  it('should reject duplicate malaskra.apiKey across tenants', () => {
+    const sharedKey = 'mK7xR3nT9pQ2vL5jW8cY6bA4fH1gS0eD'
+    const json = JSON.stringify({
+      tenants: [
+        makeValidTenant({ brand_id: 'brand-a', name: 'Tenant A', malaskra: { apiKey: sharedKey } }),
+        makeValidTenant({ brand_id: 'brand-b', name: 'Tenant B', malaskra: { apiKey: sharedKey } })
+      ]
+    })
+    expect(() => FileTenantStore.fromJson(json)).toThrow('Duplicate malaskra.apiKey')
+  })
+
+  it('should accept unique malaskra.apiKey across tenants', () => {
+    const json = JSON.stringify({
+      tenants: [
+        makeValidTenant({ brand_id: 'brand-a', name: 'Tenant A', malaskra: { apiKey: 'aK7xR3nT9pQ2vL5jW8cY6bA4fH1gS0eD' } }),
+        makeValidTenant({ brand_id: 'brand-b', name: 'Tenant B', malaskra: { apiKey: 'bK7xR3nT9pQ2vL5jW8cY6bA4fH1gS0eD' } })
+      ]
+    })
+    expect(() => FileTenantStore.fromJson(json)).not.toThrow()
   })
 })

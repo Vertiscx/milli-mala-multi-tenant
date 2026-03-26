@@ -26,6 +26,10 @@ const PRIVATE_IP_PATTERNS = [
 /** Audit query params must be alphanumeric/hyphens only — prevents prefix injection */
 const AUDIT_PARAM_PATTERN = /^[a-zA-Z0-9_-]+$/
 
+/** Minimum length for API keys and secrets (SYN-MUT-28-1) */
+const MIN_SECRET_LENGTH = 32
+const MIN_PASSWORD_LENGTH = 16
+
 // ─── Tenant Store Interface ──────────────────────────────────────────
 
 export interface TenantStore {
@@ -72,6 +76,23 @@ export class FileTenantStore implements TenantStore {
 
   static fromJson(json: string): FileTenantStore {
     const data = JSON.parse(json) as { tenants: TenantConfig[] }
+
+    // Cross-tenant uniqueness check (SYN-MUT-28-1)
+    // KvTenantStore loads tenants one at a time, so this check only applies to file-based stores.
+    const seenApiKeys = new Map<string, string>()
+    for (const tenant of data.tenants) {
+      const key = tenant.malaskra?.apiKey
+      if (key) {
+        const existingTenant = seenApiKeys.get(key)
+        if (existingTenant) {
+          throw new Error(
+            `Duplicate malaskra.apiKey: tenants "${existingTenant}" and "${tenant.name || tenant.brand_id}" share the same key`
+          )
+        }
+        seenApiKeys.set(key, tenant.name || tenant.brand_id)
+      }
+    }
+
     return new FileTenantStore(data.tenants)
   }
 }
@@ -151,13 +172,43 @@ export function validateTenantConfig(config: TenantConfig): void {
     throw new Error(`Invalid tenant config for "${config.name || config.brand_id}": missing ${missing.join(', ')}`)
   }
 
+  // Secret strength validation (SYN-MUT-28-1)
+  const label = config.name || config.brand_id
+  if (config.zendesk?.apiToken) {
+    validateSecretStrength(config.zendesk.apiToken, 'zendesk.apiToken', label, MIN_SECRET_LENGTH)
+  }
+  if (config.zendesk?.webhookSecret) {
+    validateSecretStrength(config.zendesk.webhookSecret, 'zendesk.webhookSecret', label, MIN_SECRET_LENGTH)
+  }
+  if (config.malaskra?.apiKey) {
+    validateSecretStrength(config.malaskra.apiKey, 'malaskra.apiKey', label, MIN_SECRET_LENGTH)
+  }
+
   // Validate each endpoint
   for (const [name, ep] of Object.entries(config.endpoints)) {
-    validateEndpoint(name, ep)
+    validateEndpoint(name, ep, label)
   }
 }
 
-function validateEndpoint(name: string, ep: EndpointConfig): void {
+/**
+ * Validate that a secret meets minimum strength requirements (SYN-MUT-28-1).
+ * Rejects secrets that are too short or use only one repeated character.
+ */
+function validateSecretStrength(value: string, fieldName: string, tenantLabel: string, minLength: number): void {
+  if (value.length < minLength) {
+    throw new Error(
+      `Invalid tenant config for "${tenantLabel}": ${fieldName} must be at least ${minLength} characters`
+    )
+  }
+
+  if (new Set(value).size === 1) {
+    throw new Error(
+      `Invalid tenant config for "${tenantLabel}": ${fieldName} must not be a repeated character`
+    )
+  }
+}
+
+function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string = name): void {
   const missing: string[] = []
 
   if (!ep.type) missing.push('type')
@@ -193,6 +244,14 @@ function validateEndpoint(name: string, ep: EndpointConfig): void {
 
   if (missing.length > 0) {
     throw new Error(`Endpoint "${name}": missing ${missing.join(', ')}`)
+  }
+
+  // Endpoint secret strength validation (SYN-MUT-28-1)
+  if (ep.type === 'onesystems' && ep.appKey) {
+    validateSecretStrength(ep.appKey, `endpoints.${name}.appKey`, tenantLabel, MIN_SECRET_LENGTH)
+  }
+  if (ep.type === 'gopro' && ep.password) {
+    validateSecretStrength(ep.password, `endpoints.${name}.password`, tenantLabel, MIN_PASSWORD_LENGTH)
   }
 }
 
