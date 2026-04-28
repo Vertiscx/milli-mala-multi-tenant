@@ -1,0 +1,57 @@
+name: Deploy to ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        default: 'latest'
+  push:
+    tags:
+      - 'v*'
+
+env:
+  AWS_REGION: eu-west-1
+  ECS_CLUSTER: tooling-prod
+  ECS_SERVICE: tooling-milli-mala-multi-tenant
+
+jobs:
+  deploy:
+    runs-on: arc-shared
+    environment: tooling
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.TOOLING_OIDC_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Extract image tag
+        id: meta
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}
+          elif [[ "${{ github.event.inputs.image_tag }}" != "" ]]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            TAG="latest"
+          fi
+          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Checkout infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: island-is/infrastructure
+          path: infrastructure
+
+      - name: Deploy to ECS
+        uses: ./infrastructure/.github/actions/deploy-ecs-service
+        with:
+          cluster-name: ${{ env.ECS_CLUSTER }}
+          service-name: ${{ env.ECS_SERVICE }}
+          image-tag: ${{ steps.meta.outputs.image_tag }}
