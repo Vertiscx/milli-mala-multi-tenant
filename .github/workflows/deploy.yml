@@ -1,30 +1,36 @@
-name: Deploy to ECS
+name: Build and Deploy
 
 on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Docker image tag to deploy'
-        required: true
-        default: 'latest'
+        description: 'Deploy specific image tag (skip build)'
+        required: false
+  pull_request:
+    types: [closed]
+    branches: [main]
   push:
     tags:
       - 'v*'
 
 env:
+  DOCKER_REGISTRY: 821090935708.dkr.ecr.eu-west-1.amazonaws.com
+  ECR_REPOSITORY: milli-mala-multi-tenant
   AWS_REGION: eu-west-1
   ECS_CLUSTER: tooling-prod
   ECS_SERVICE: tooling-milli-mala-multi-tenant
 
 jobs:
-  deploy:
+  build-and-deploy:
+    if: github.event.pull_request.merged == true || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: arc-shared
-    environment: tooling
     permissions:
       id-token: write
       contents: read
-    
+
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -34,24 +40,53 @@ jobs:
       - name: Extract image tag
         id: meta
         run: |
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-            TAG=${GITHUB_REF#refs/tags/}
-          elif [[ "${{ github.event.inputs.image_tag }}" != "" ]]; then
-            TAG="${{ github.event.inputs.image_tag }}"
+          if [[ -n "${{ github.event.inputs.image_tag }}" ]]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          elif [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "skip_build=false" >> $GITHUB_OUTPUT
           else
-            TAG="latest"
+            echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
-          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Checkout infrastructure repo
-        uses: actions/checkout@v4
+      - name: Login to Amazon ECR
+        if: steps.meta.outputs.skip_build == 'false'
+        uses: aws-actions/amazon-ecr-login@v2
         with:
-          repository: island-is/infrastructure
-          path: infrastructure
+          registries: "821090935708"
+
+      - name: Build and push Docker image
+        if: steps.meta.outputs.skip_build == 'false'
+        run: |
+          docker build -t $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }} .
+          docker push $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }}
 
       - name: Deploy to ECS
-        uses: ./infrastructure/.github/actions/deploy-ecs-service
-        with:
-          cluster-name: ${{ env.ECS_CLUSTER }}
-          service-name: ${{ env.ECS_SERVICE }}
-          image-tag: ${{ steps.meta.outputs.image_tag }}
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition $ECS_SERVICE \
+            --query 'taskDefinition' \
+            --output json)
+
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg TAG "${{ steps.meta.outputs.tag }}" '
+            .containerDefinitions[0].image = (.containerDefinitions[0].image | split(":")[0] + ":" + $TAG) |
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
+          ')
+
+          NEW_ARN=$(echo $NEW_TASK_DEF | aws ecs register-task-definition \
+            --cli-input-json file:///dev/stdin \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --task-definition $NEW_ARN
+
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE
+
+          echo "✅ Deployed ${{ steps.meta.outputs.tag }}"
