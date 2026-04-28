@@ -23,7 +23,7 @@ COPY entrypoint.sh ./
 
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 -G nodejs && \
-    mkdir -p /app/audit-data && chown nodejs:nodejs /app/audit-data && \
+    mkdir -p /app/audit-data && chown -R nodejs:nodejs /app && \
     chmod +x /app/entrypoint.sh
 
 USER nodejs
