@@ -33,7 +33,7 @@ Milli-mala acts as a DMZ gateway — Zendesk and Malaskra never see archive cred
 - **Runtime**: Cloudflare Workers (primary), Node.js / Docker / K8s also supported
 - **PDF**: jsPDF (CF Workers compatible, no filesystem needed)
 - **Audit**: Cloudflare KV (Workers) or file-based store (Docker/Node.js), 90-day TTL
-- **Tests**: Vitest (119 tests)
+- **Tests**: Vitest (170+ tests)
 - **License**: Apache 2.0
 
 ## Multi-tenant design
@@ -43,45 +43,45 @@ Each Zendesk brand maps to a tenant. The caller sends `brand_id` and `doc_endpoi
 | Deployment | Tenant config store |
 |-----------|-------------------|
 | Cloudflare Workers | KV namespace (`TENANT_KV`) — one key per tenant: `tenant:{brand_id}` |
-| Docker / K8s | `tenants.json` file (path configurable via `TENANTS_FILE`) |
+| Docker / K8s | `src/tenants.config.ts` (committed structure) + environment variables (secrets) |
 
 ### Tenant config structure
 
-```json
+The `TenantConfig` shape is the same regardless of where it's stored — see `src/types.ts` for the canonical definition. A populated example:
+
+```ts
 {
-  "brand_id": "360001234567",
-  "name": "Samgongustofa",
-  "zendesk": {
-    "subdomain": "samgongustofa",
-    "email": "integration@samgongustofa.is",
-    "apiToken": "...",
-    "webhookSecret": "..."
+  brand_id: '360001234567',
+  name: 'Samgongustofa',
+  zendesk: {
+    subdomain: 'samgongustofa',
+    email: 'integration@samgongustofa.is',
+    apiToken: '...',
+    webhookSecret: '...'
   },
-  "endpoints": {
-    "onesystems": {
-      "type": "onesystems",
-      "baseUrl": "https://api.onesystems.is",
-      "appKey": "..."
-    },
-    "gopro": {
-      "type": "gopro",
-      "baseUrl": "https://api.gopro.is",
-      "username": "...",
-      "password": "..."
-    }
+  endpoints: {
+    onesystems: { type: 'onesystems', baseUrl: 'https://api.onesystems.is', appKey: '...' },
+    gopro:      { type: 'gopro',      baseUrl: 'https://api.gopro.is', username: '...', password: '...' }
   },
-  "malaskra": {
-    "apiKey": "..."
-  },
-  "pdf": {
-    "companyName": "Samgongustofa",
-    "locale": "is-IS",
-    "includeInternalNotes": false
-  }
+  malaskra: { apiKey: '...' },
+  pdf: { companyName: 'Samgongustofa', locale: 'is-IS', includeInternalNotes: false }
 }
 ```
 
 The `endpoints` map allows each institution to have multiple archive systems. The `doc_endpoint` field in the request selects which one. Each endpoint's `type` field (`"onesystems"` or `"gopro"`) determines which client is used.
+
+### Adding or rotating tenants (Docker / K8s)
+
+Tenant *structure* lives in `src/tenants.config.ts` (committed, code-reviewed). Tenant *secrets* live with DevOps as flat environment variables. See [`.env.example`](.env.example) for the full list of required variables.
+
+| Operation | Where the change happens |
+|---|---|
+| Add a new tenant | PR appending an entry to `src/tenants.config.ts` + ask DevOps to provision the new env vars listed by `requireEnv` calls in that entry |
+| Rotate a secret | DevOps updates the env var on the deployment and restarts the container — no code change |
+| Update a non-secret (PDF copy, endpoint URL) | PR to `src/tenants.config.ts` only |
+| Remove a tenant | PR removing the entry + ask DevOps to deprovision the now-orphaned env vars |
+
+The container fails to start if any required env var is missing — intentional, surfaces misconfiguration immediately rather than per-request.
 
 ### Request format
 
@@ -124,15 +124,16 @@ curl -H "Authorization: Bearer YOUR_AUDIT_SECRET" \
 
 ## Environment variables (Node.js / Docker)
 
+Service-level settings:
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | Listen port | `8080` |
 | `LOG_LEVEL` | Log level (`info`, `debug`, `error`) | `info` |
-| `TENANTS_FILE` | Path to tenant config file | `./tenants.json` |
 | `AUDIT_SECRET` | Bearer token for `/v1/audit` endpoint | (empty — audit endpoint disabled) |
 | `AUDIT_DIR` | Directory for persistent audit log | `./audit-data` |
 
-Tenant credentials (Zendesk, archive systems, API keys) are not environment variables — they live in the tenant config file. In production this file should be mounted from a secret store (e.g. Kubernetes Secret, Azure KeyVault). See [Tenant config structure](#tenant-config-structure) above.
+Tenant credentials (Zendesk API token, archive system keys, Málaskrá API keys) are also environment variables — see [`.env.example`](.env.example) for the complete list. They are read at startup by `src/tenants.config.ts` via the `requireEnv` helper; missing variables cause startup to fail loudly.
 
 For Cloudflare Workers, tenant config is stored in KV (`TENANT_KV` binding) and `AUDIT_SECRET` is set as a Worker secret.
 
@@ -140,7 +141,7 @@ For Cloudflare Workers, tenant config is stored in KV (`TENANT_KV` binding) and 
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full deployment guides:
 
-- Cloudflare Workers (primary)
+- Cloudflare Workers
 - Docker / Docker Compose
 - Kubernetes
 - Node.js on server

@@ -9,7 +9,7 @@
 import { timingSafeEqual, createHash } from 'node:crypto'
 import { ZendeskClient } from './zendesk.js'
 import { createLogger } from './logger.js'
-import { resolveEndpoint } from './tenant.js'
+import { resolveEndpoint, validateCaseNumber } from './tenant.js'
 import { createDocClient } from './docClient.js'
 import type { HandlerResult, AttachmentsRequest, TenantConfig, Logger } from './types.js'
 
@@ -51,6 +51,12 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
     const caseNumber = body.case_number
     if (!caseNumber || typeof caseNumber !== 'string') {
       return { status: 400, body: { error: 'Invalid or missing case_number' } }
+    }
+
+    // Sanitize case_number (SYN-MUT-28-3)
+    const caseNumberError = validateCaseNumber(caseNumber)
+    if (caseNumberError) {
+      return { status: 400, body: { error: caseNumberError } }
     }
 
     logger.info('Attachment forwarding request', { brand_id: brandId, ticketId, caseNumber, docEndpoint })

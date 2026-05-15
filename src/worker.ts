@@ -85,7 +85,7 @@ export default {
         const tenantStore = new KvTenantStore(env.TENANT_KV)
         const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
         if (!tenantConfig) {
-          return Response.json({ error: 'Unknown tenant' }, { status: 404 })
+          return Response.json({ error: 'Invalid request' }, { status: 400 })
         }
 
         const headers = Object.fromEntries(request.headers)
@@ -131,7 +131,7 @@ export default {
         const tenantStore = new KvTenantStore(env.TENANT_KV)
         const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
         if (!tenantConfig) {
-          return Response.json({ error: 'Unknown tenant' }, { status: 404 })
+          return Response.json({ error: 'Invalid request' }, { status: 400 })
         }
 
         const headers = Object.fromEntries(request.headers)

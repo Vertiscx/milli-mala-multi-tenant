@@ -32,13 +32,17 @@ Málaskrá app    ──→  (container)  ──→ (OneSystems / GoPro)
 
 ## Tenant config
 
-Hver stofnun er skilgreind í `tenants.json` með:
-- Zendesk tengingu (subdomain, API token, webhook secret)
-- Eitt eða fleiri skjalakerfi með credentials og URL
-- API lykil fyrir Málaskrá
-- PDF stillingar (nafn stofnunar, tungumál)
+Tenant uppbygging — brand_id, Zendesk subdomain, baseUrl-ar á skjalakerfi, PDF stillingar — er skilgreind í `src/tenants.config.ts` í kóða og fer í gegnum venjulegt code review. Secrets (Zendesk API token, OneSystems appKey, GoPro lykilorð, Málaskrá API lykill) eru ekki í kóða — þau koma inn sem flatar umhverfisbreytur sem DevOps hýsir og setur á deployinu.
 
-Ný stofnun bætist við með nýrri færslu í `tenants.json`. Hvernig gögn eru send í skjalakerfi er skilgreint í módúlum per kerfi (`onesystems.ts`, `gopro.ts`) — allar stofnanir á sama skjalakerfi fá sama format.
+Allar nauðsynlegar umhverfisbreytur eru taldar upp í `.env.example`. Vanti einhver gildi við ræsingu kastar `requireEnv()` villu og gámurinn fer ekki upp — vísvitandi: betra að sjá villu strax en á fyrsta requesti.
+
+**Bæta við stofnun:**
+1. PR sem bætir nýrri færslu í `src/tenants.config.ts`.
+2. Senda DevOps nýju umhverfisbreyturnar (sjá `requireEnv` köllin í færslunni).
+
+**Rotation:** Engin kóðabreyting. DevOps uppfærir umhverfisbreytuna og endurræsir gáminn.
+
+Hvernig gögn eru send í skjalakerfi er skilgreint í módúlum per kerfi (`onesystems.ts`, `gopro.ts`) — allar stofnanir á sama skjalakerfi fá sama format.
 
 ## Logging
 
@@ -71,7 +75,7 @@ Engin önnur netumferð. Engin inbound tenging við innri net.
 | Engin leyndarmál í kóða | Allt kemur úr tenant config |
 | Almenn villuboð | Engir stacktrace eða leyndarmál í svörum |
 
-154 unit tests, `npm audit` sýnir engin þekkt veikleiki. SBOM (CycloneDX) fylgir í repo.
+170+ unit tests, `npm audit` sýnir enga þekkta veikleika. SBOM (CycloneDX) fylgir í repo.
 
 ## X-Road
 
@@ -87,7 +91,7 @@ Health check:     GET /v1/health
 Dependencies:     1 (jsPDF, MIT leyfi)
 Gagnagrunnur:     Enginn
 Geymsla:          Engin (valkvæður audit log)
-Tenant config:    tenants.json / Kubernetes Secret
-Tests:            154
+Tenant config:    src/tenants.config.ts + umhverfisbreytur
+Tests:            170+
 Leyfi:            Apache 2.0
 ```

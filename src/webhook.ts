@@ -7,7 +7,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { ZendeskClient } from './zendesk.js'
 import { generateTicketPdf } from './pdf.js'
 import { createLogger } from './logger.js'
-import { resolveEndpoint } from './tenant.js'
+import { resolveEndpoint, validateCaseNumber } from './tenant.js'
 import { createDocClient } from './docClient.js'
 import type { HandlerResult, WebhookRequest, ZendeskUser, Logger } from './types.js'
 
@@ -139,6 +139,12 @@ export async function handleWebhook({ body, rawBody, headers, tenantConfig, docE
       if (field?.value) caseNumber = String(field.value)
     }
     if (!caseNumber) caseNumber = `ZD-${ticket_id}`
+
+    // Sanitize case_number (SYN-MUT-28-3)
+    const caseNumberError = validateCaseNumber(caseNumber)
+    if (caseNumberError) {
+      return { status: 400, body: { error: caseNumberError } }
+    }
 
     const uploadFilename = `ticket-${ticket_id}.pdf`
 

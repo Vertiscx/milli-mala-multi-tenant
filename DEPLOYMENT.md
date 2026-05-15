@@ -3,11 +3,11 @@
 Deployment guide for milli-mala, the multi-tenant Zendesk-to-archive gateway. Each deployment requires:
 
 1. **Instance-level config** — port, log level, audit secret (environment variables)
-2. **Tenant config** — per-institution Zendesk credentials, archive endpoints, PDF settings (stored in KV or `tenants.json`)
+2. **Tenant config** — per-institution Zendesk credentials, archive endpoints, PDF settings. Cloudflare Workers store these in KV; Docker/Node.js builds them at startup from `src/tenants.config.ts` (committed structure) plus environment variables (secrets).
 
 ## Table of Contents
 
-- [Option 1: Cloudflare Workers (Recommended)](#option-1-cloudflare-workers-recommended)
+- [Option 1: Cloudflare Workers](#option-1-cloudflare-workers-recommended)
 - [Option 2: Docker / Docker Compose](#option-2-docker--docker-compose)
 - [Option 3: Kubernetes](#option-3-kubernetes)
 - [Option 4: Node.js on Server](#option-4-nodejs-on-server)
@@ -19,7 +19,7 @@ Deployment guide for milli-mala, the multi-tenant Zendesk-to-archive gateway. Ea
 
 ---
 
-## Option 1: Cloudflare Workers (Recommended)
+## Option 1: Cloudflare Workers
 
 Serverless, globally distributed deployment with no infrastructure to manage.
 
@@ -108,62 +108,30 @@ For on-premises or cloud VM deployments.
 ### Prerequisites
 
 - Docker and Docker Compose installed
-- `tenants.json` file with tenant configurations
+- An entry per tenant in `src/tenants.config.ts` (committed)
+- All env vars listed in `.env.example` provisioned as secrets
 
 ### Step 1: Clone and install
 
 ```bash
-git clone https://github.com/Vertiscx/milli-mala-multi-tenant.git
+git clone https://github.com/island-is/milli-mala-multi-tenant.git
 cd milli-mala-multi-tenant
 ```
 
-### Step 2: Create tenants.json
+### Step 2: Configure tenants
 
-Create a `tenants.json` file with all tenant configurations:
-
-```json
-{
-  "tenants": [
-    {
-      "brand_id": "360001234567",
-      "name": "Samgongustofa",
-      "zendesk": {
-        "subdomain": "samgongustofa",
-        "email": "integration@samgongustofa.is",
-        "apiToken": "...",
-        "webhookSecret": "..."
-      },
-      "endpoints": {
-        "onesystems": {
-          "type": "onesystems",
-          "baseUrl": "https://api.onesystems.is",
-          "appKey": "..."
-        }
-      },
-      "malaskra": {
-        "apiKey": "..."
-      },
-      "pdf": {
-        "companyName": "Samgongustofa",
-        "locale": "is-IS",
-        "includeInternalNotes": false
-      }
-    }
-  ]
-}
-```
+Tenant *structure* lives in `src/tenants.config.ts` (committed, code-reviewed). Tenant *secrets* are environment variables provisioned by your operations team. See [Tenant Configuration](#tenant-configuration) below for the full schema and onboarding flow.
 
 ### Step 3: Create .env file
 
-Instance-level configuration only:
+Copy `.env.example` to `.env` and fill in real values from your secrets store:
 
 ```bash
-PORT=8080
-LOG_LEVEL=info
-AUDIT_SECRET=your-random-audit-secret
-TENANTS_FILE=./tenants.json
-AUDIT_DIR=./audit-data
+cp .env.example .env
+# edit .env — fill in every variable with its real value
 ```
+
+The container will fail to start if any required variable is missing. Service-level settings (`PORT`, `LOG_LEVEL`, `AUDIT_SECRET`, `AUDIT_DIR`) and all tenant secrets share the same `.env` file in this deployment.
 
 ### Step 4: Start the service
 
@@ -179,7 +147,6 @@ Or build and run manually:
 docker build -t milli-mala .
 docker run -d -p 8080:8080 \
   --env-file .env \
-  -v $(pwd)/tenants.json:/app/tenants.json:ro \
   --name milli-mala milli-mala
 ```
 
@@ -250,11 +217,13 @@ docker build -t your-registry/milli-mala:latest .
 docker push your-registry/milli-mala:latest
 ```
 
-### Step 2: Create the tenant config secret
+### Step 2: Create the tenant secret
+
+Create one Kubernetes Secret containing every tenant env var listed in `.env.example`. Keep them in a private `.env` file (never committed) and load it via `--from-env-file`:
 
 ```bash
 kubectl create secret generic milli-mala-tenants \
-  --from-file=tenants.json=./tenants.json
+  --from-env-file=./.env
 ```
 
 ### Step 3: Create instance config
@@ -267,6 +236,8 @@ kubectl create configmap milli-mala-config \
 kubectl create secret generic milli-mala-secrets \
   --from-literal=AUDIT_SECRET=your-random-audit-secret
 ```
+
+The deployment manifest should reference both secrets via `envFrom` so all tenant variables and the audit secret reach the container at startup.
 
 ### Step 4: Deploy
 
@@ -306,17 +277,12 @@ npm run build
 
 ### Step 2: Configure
 
-Create `.env` with instance-level config:
+Copy `.env.example` to `.env` and fill in real values for every variable listed (service settings + every tenant secret). See [Tenant Configuration](#tenant-configuration) for what each variable does.
 
 ```bash
-PORT=8080
-LOG_LEVEL=info
-AUDIT_SECRET=your-random-audit-secret
-TENANTS_FILE=./tenants.json
-AUDIT_DIR=./audit-data
+cp .env.example .env
+# edit .env — fill in ZENDESK_API_TOKEN, AUDIT_SECRET, every tenant secret, etc.
 ```
-
-Create `tenants.json` with tenant configurations (see [Tenant Configuration](#tenant-configuration)).
 
 ### Step 3: Start
 
@@ -407,7 +373,11 @@ wrangler kv key put --binding=TENANT_KV \
 
 **Docker / K8s / Node.js:**
 
-Add a new entry to the `tenants` array in `tenants.json` and restart the service.
+1. PR a new entry into the `tenants` array in `src/tenants.config.ts` (uses `requireEnv` for each new secret).
+2. Provision the new environment variables on the deployment (Kubernetes Secret, `.env` file, etc.).
+3. Restart the service. `requireEnv` fails fast if any variable is missing.
+
+Rotating a secret is just step 2 + restart — no code change.
 
 ### Instance-level environment variables
 
@@ -418,8 +388,9 @@ These are not per-tenant — they configure the service itself:
 | `PORT` | No | `8080` | HTTP server port (Docker/Node.js only) |
 | `LOG_LEVEL` | No | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `AUDIT_SECRET` | No | — | Bearer token for `/v1/audit` endpoint |
-| `TENANTS_FILE` | No | `./tenants.json` | Path to tenants config file (Docker/Node.js only) |
 | `AUDIT_DIR` | No | `./audit-data` | Audit log directory (Docker/Node.js only) |
+
+Tenant secrets (Zendesk, archive systems, Málaskrá) are also environment variables — see [`.env.example`](.env.example) for the full list. They are required at startup; missing values cause the container to fail fast.
 
 ---
 
@@ -533,15 +504,16 @@ Brief downtime during restart.
 
 ## Troubleshooting
 
-### "Unknown tenant" (404)
+### "Invalid request" (400)
 
-- The `brand_id` in the request doesn't match any tenant config
+- The `brand_id` may not match any tenant config, or the request body is missing required fields
 - **CF Workers**: Verify the KV key exists: `wrangler kv key get --binding=TENANT_KV "tenant:BRAND_ID"`
-- **Docker/Node.js**: Check `tenants.json` contains the brand_id
+- **Docker/Node.js**: Check `src/tenants.config.ts` contains the brand_id and that the corresponding env vars are set on the deployment
 
 ### "Missing brand_id" or "Missing doc_endpoint" (400)
 
 - The request body is missing required fields
+
 - Check the Zendesk trigger body includes `brand_id` and `doc_endpoint`
 
 ### "Unknown doc_endpoint" (500)

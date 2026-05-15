@@ -1,0 +1,92 @@
+name: Build and Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Deploy specific image tag (skip build)'
+        required: false
+  pull_request:
+    types: [closed]
+    branches: [main]
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOCKER_REGISTRY: 821090935708.dkr.ecr.eu-west-1.amazonaws.com
+  ECR_REPOSITORY: milli-mala-multi-tenant
+  AWS_REGION: eu-west-1
+  ECS_CLUSTER: tooling-prod
+  ECS_SERVICE: prod-milli-mala-multi-tenant
+
+jobs:
+  build-and-deploy:
+    if: github.event.pull_request.merged == true || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: arc-shared
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.TOOLING_OIDC_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Extract image tag
+        id: meta
+        run: |
+          if [[ -n "${{ github.event.inputs.image_tag }}" ]]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          elif [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Login to Amazon ECR
+        if: steps.meta.outputs.skip_build == 'false'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: "821090935708"
+
+      - name: Build and push Docker image
+        if: steps.meta.outputs.skip_build == 'false'
+        run: |
+          docker build -t $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }} .
+          docker push $DOCKER_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }}
+
+      - name: Deploy to ECS
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition $ECS_SERVICE \
+            --query 'taskDefinition' \
+            --output json)
+
+          echo "$TASK_DEF" | jq --arg TAG "${{ steps.meta.outputs.tag }}" '
+            .containerDefinitions[0].image = (.containerDefinitions[0].image | split(":")[0] + ":" + $TAG) |
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy, .enableFaultInjection)
+          ' > /tmp/new-task-def.json
+
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/new-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --task-definition $NEW_ARN
+
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE
+
+          echo "✅ Deployed ${{ steps.meta.outputs.tag }}"
