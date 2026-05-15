@@ -379,6 +379,83 @@ wrangler kv key put --binding=TENANT_KV \
 
 Rotating a secret is just step 2 + restart — no code change.
 
+#### Environment variable naming convention
+
+Every per-tenant secret follows the pattern:
+
+```
+{TENANT_PREFIX}_{GROUP}_{FIELD}
+```
+
+- **`TENANT_PREFIX`** — an uppercase, ASCII, snake-case slug for the institution (e.g. `KERFISSTJORN`, `VINNUEFTIRLIT`). Pick it once per tenant and keep it stable; it is the only link between the code entry and the provisioned secrets.
+- **`GROUP`** — `ZENDESK`, the endpoint type (`ONESYSTEMS` or `GOPRO`), or `MALASKRA`.
+- **`FIELD`** — the specific value (`API_TOKEN`, `WEBHOOK_SECRET`, `BASE_URL`, `APP_KEY`, `USERNAME`, `PASSWORD`, `API_KEY`, …).
+
+The variable name is whatever string you pass to `requireEnv(...)` in the tenant entry — there is no magic, the name in code **is** the name DevOps provisions. Keep the two in lockstep.
+
+#### Worked example: adding "Skipulagsstofnun" on a OneSystems endpoint
+
+**Step 1 — append this entry to the `tenants` array in `src/tenants.config.ts`:**
+
+```ts
+{
+  brand_id: '33979411223344',
+  name: 'Skipulagsstofnun',
+  zendesk: {
+    subdomain: requireEnv('SKIPULAG_ZENDESK_SUBDOMAIN', env),
+    email: requireEnv('SKIPULAG_ZENDESK_EMAIL', env),
+    apiToken: requireEnv('SKIPULAG_ZENDESK_API_TOKEN', env),
+    webhookSecret: requireEnv('SKIPULAG_ZENDESK_WEBHOOK_SECRET', env),
+  },
+  endpoints: {
+    onesystems: {
+      type: 'onesystems',
+      baseUrl: requireEnv('SKIPULAG_ONESYSTEMS_BASE_URL', env),
+      appKey: requireEnv('SKIPULAG_ONESYSTEMS_APP_KEY', env),
+    },
+  },
+  malaskra: { apiKey: requireEnv('SKIPULAG_MALASKRA_API_KEY', env) },
+  pdf: {
+    companyName: 'Skipulagsstofnun',
+    locale: 'is-IS',
+    includeInternalNotes: false,
+  },
+},
+```
+
+**Step 2 — hand DevOps exactly these variable names to provision** (values come from the institution, never committed):
+
+```
+SKIPULAG_ZENDESK_SUBDOMAIN
+SKIPULAG_ZENDESK_EMAIL
+SKIPULAG_ZENDESK_API_TOKEN
+SKIPULAG_ZENDESK_WEBHOOK_SECRET
+SKIPULAG_ONESYSTEMS_BASE_URL
+SKIPULAG_ONESYSTEMS_APP_KEY
+SKIPULAG_MALASKRA_API_KEY
+```
+
+For a **GoPro** tenant instead, the endpoint block and its three vars would be:
+
+```ts
+endpoints: {
+  gopro: {
+    type: 'gopro',
+    baseUrl: requireEnv('SKIPULAG_GOPRO_BASE_URL', env),
+    username: requireEnv('SKIPULAG_GOPRO_USERNAME', env),
+    password: requireEnv('SKIPULAG_GOPRO_PASSWORD', env),
+  },
+},
+```
+
+```
+SKIPULAG_GOPRO_BASE_URL
+SKIPULAG_GOPRO_USERNAME
+SKIPULAG_GOPRO_PASSWORD
+```
+
+**Step 3 — also add the new variables (keys only, empty values) to [`.env.example`](.env.example)** so the required-variable list stays complete, then restart the service. `requireEnv` aborts startup if any value is missing.
+
 ### Instance-level environment variables
 
 These are not per-tenant — they configure the service itself:
