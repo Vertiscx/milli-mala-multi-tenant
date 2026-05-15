@@ -89,7 +89,7 @@ async function handleWebhookHttp(
     if (!docEndpoint) return sendJson(res, 400, { error: 'Missing doc_endpoint' })
 
     const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
-    if (!tenantConfig) return sendJson(res, 404, { error: 'Unknown tenant' })
+    if (!tenantConfig) return sendJson(res, 400, { error: 'Invalid request' })
 
     const headers = req.headers as Record<string, string>
     const result = await handleWebhook({ body, rawBody, headers, tenantConfig, docEndpoint, auditStore })
@@ -120,7 +120,7 @@ async function handleAttachmentsHttp(
     if (!docEndpoint) return sendJson(res, 400, { error: 'Missing doc_endpoint' })
 
     const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
-    if (!tenantConfig) return sendJson(res, 404, { error: 'Unknown tenant' })
+    if (!tenantConfig) return sendJson(res, 400, { error: 'Invalid request' })
 
     const headers = req.headers as Record<string, string>
     const result = await handleAttachments({ body, headers, tenantConfig, docEndpoint })
