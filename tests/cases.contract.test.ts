@@ -1,33 +1,46 @@
 /**
- * FROZEN GW-06 CONFORMANCE LOCK.
+ * FROZEN GW-06 CONFORMANCE LOCK (Tier 2a cross-repo seam).
  *
  * Source of truth: /Users/brynjolfur/dev/malaskra_v3/.planning/GATEWAY-CHANGES.md §GW-06.
- * This file is the regression guard against silent drift of the cross-repo
- * /v1/cases wire seam. It asserts STRUCTURE (shape lock), not full-object
- * snapshots, so additive .passthrough()-tolerated fields do not break it
- * while the four required fields + the 7-code enum stay pinned.
  *
- * If this test fails, the GW-06 contract has been broken — do NOT "fix" the
- * test, fix the handler (or coordinate a deliberate contract change with the
- * malaskra_v3 side first).
+ * This test no longer carries inline expected literals — it CONSUMES the
+ * canonical, framework-agnostic fixture set in
+ *   tests/fixtures/gw06-contract.fixtures.ts
+ * whose values are derived FROM GW-06 (line-cited there), NOT from
+ * src/cases.ts. It drives the real gateway (handleCases) for each scenario
+ * and asserts the real { status, body } deep-equals the corresponding
+ * fixture. The frozen-enum test asserts the gateway's outcomes are exactly
+ * the fixture tuple, in the same order.
+ *
+ * The IDENTICAL fixture file is vendored byte-identical into malaskra_v3
+ * (A1) and asserted from the consumer side — both repos testing the same
+ * fixtures proves the cross-repo seam without wiring the systems.
+ *
+ * If this test fails, the GW-06 contract has drifted — do NOT "fix" the
+ * test or the fixtures; fix the handler (or coordinate a deliberate
+ * GW-06 contract change with the malaskra_v3 side first).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handleCases } from '../src/cases.js'
 import type { TenantConfig } from '../src/types.js'
+import {
+  GW06_OUTCOMES,
+  REQ_VALID_CREATE,
+  REQ_VALID_CASE_NUMBER,
+  REQ_INVALID_FLAT_CREATE,
+  RES_DOCUMENTED,
+  RES_CREATE_FAILED,
+  RES_ORPHAN_CASE,
+  RES_VALIDATION,
+  RES_AUTH,
+  RES_BRAND_MISMATCH,
+  RES_GOPRO_CREATE_UNSUPPORTED,
+  RES_INFRA_500,
+  RESPONSE_FIXTURES_GW06,
+  type CasesResponseFixture
+} from './fixtures/gw06-contract.fixtures.js'
 
 global.fetch = vi.fn() as unknown as typeof fetch
-
-// FROZEN 7-code enum — exact set, exact order. Do NOT edit without a
-// coordinated GW-06 contract change.
-const GW06_OUTCOMES = [
-  'documented',
-  'create_failed',
-  'orphan_case',
-  'validation',
-  'auth',
-  'brand_mismatch',
-  'gopro_create_unsupported'
-] as const
 
 function makeTenantConfig(overrides: Partial<TenantConfig> = {}): TenantConfig {
   return {
@@ -62,8 +75,6 @@ function goproTenantConfig(): TenantConfig {
 }
 
 const KEY = { 'x-api-key': 'test-malaskra-key' }
-const NS_CREATE = { onesystems: { caseTemplate: 'T', kennitala: '1234567890' } }
-const FLAT_CREATE = { caseTemplate: 'T', kennitala: '1234567890' }
 const fetchMock = () => global.fetch as ReturnType<typeof vi.fn>
 
 function mockTicketPrelude(brandId: number | undefined = 360001234567) {
@@ -73,168 +84,182 @@ function mockTicketPrelude(brandId: number | undefined = 360001234567) {
     .mockResolvedValueOnce({ ok: true, json: async () => ({ users: [{ id: 7, name: 'A', email: 'a@e.com' }] }) })
 }
 
-/** Structural GW-06 envelope assertion shared by every structured outcome. */
-function assertGw06Envelope(body: Record<string, any>) {
-  expect(typeof body.ok).toBe('boolean')
-  expect(GW06_OUTCOMES).toContain(body.outcome)
-  // no legacy snake_case envelope keys may resurface
-  expect(body.case_number).toBeUndefined()
-  expect(body.created_case_number).toBeUndefined()
-  expect(body.success).toBeUndefined()
-  if (body.outcome === 'documented') {
-    expect(body.ok).toBe(true)
-    expect(typeof body.caseNumber).toBe('string')
-    expect(body.caseNumber.length).toBeGreaterThan(0)
-  } else if (body.outcome === 'orphan_case') {
-    expect(body.ok).toBe(false)
-    expect(typeof body.caseNumber).toBe('string')
-    expect(body.caseNumber.length).toBeGreaterThan(0)
-    expect(typeof body.error).toBe('string')
-  } else {
-    expect(body.ok).toBe(false)
-    expect(typeof body.error).toBe('string')
-    expect(body.caseNumber).toBeUndefined()
+/**
+ * Assert a real gateway response equals a canonical fixture.
+ * GW-06 minimal-body rule (CTX L70-72): the producer MUST emit the minimal
+ * body — so the body is deep-equalled. duration_ms (infra-500) is
+ * runtime-variable → presence/type only.
+ */
+function assertMatchesFixture(
+  real: { status: number; body: Record<string, unknown> },
+  fx: CasesResponseFixture
+) {
+  expect(real.status).toBe(fx.status)
+  if (fx === RES_INFRA_500) {
+    // Documented non-GW-06 exception — duration_ms compared by presence/type.
+    expect(real.body.error).toBe(fx.body.error)
+    expect(typeof real.body.duration_ms).toBe('number')
+    expect(real.body.ok).toBeUndefined()
+    expect(real.body.outcome).toBeUndefined()
+    expect(real.body.caseNumber).toBeUndefined()
+    return
+  }
+  expect(real.body).toEqual(fx.body)
+  for (const k of fx.requiredKeys) {
+    expect(real.body[k]).not.toBeUndefined()
   }
 }
 
-describe('GW-06 contract lock — /v1/cases', () => {
+describe('GW-06 contract lock — /v1/cases (canonical fixtures consumed)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  // ── Request acceptance ──────────────────────────────────────────────
-  it('accepts the namespaced create shape (reaches documented)', async () => {
+  // ── REQUEST fixture acceptance / rejection ──────────────────────────
+  it('accepts REQ_VALID_CREATE (namespaced) → documented', async () => {
     mockTicketPrelude()
     fetchMock()
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-2024-0007' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
 
     const r = await handleCases({
-      body: { ticket_id: 123, create: NS_CREATE },
+      body: { ...REQ_VALID_CREATE.body, ticket_id: 123 },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.status).toBe(200)
-    expect(r.body.outcome).toBe('documented')
-    assertGw06Envelope(r.body as any)
+    assertMatchesFixture(r as any, RES_DOCUMENTED)
   })
 
-  it('rejects the flat legacy create shape as validation', async () => {
+  it('accepts REQ_VALID_CASE_NUMBER → documented', async () => {
+    mockTicketPrelude()
+    fetchMock()
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
     const r = await handleCases({
-      body: { ticket_id: 123, create: FLAT_CREATE },
+      body: { ...REQ_VALID_CASE_NUMBER.body, ticket_id: 123 },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.status).toBe(400)
-    expect(r.body.outcome).toBe('validation')
-    assertGw06Envelope(r.body as any)
+    // documented with the caller-supplied case_number.
+    assertMatchesFixture(r as any, {
+      ...RES_DOCUMENTED,
+      body: { ok: true, outcome: 'documented', caseNumber: REQ_VALID_CASE_NUMBER.body.case_number }
+    })
   })
 
-  // ── Every one of the 7 outcomes conforms ────────────────────────────
-  it('auth → conformant envelope', async () => {
+  it('rejects REQ_INVALID_FLAT_CREATE → validation', async () => {
+    const r = await handleCases({
+      body: { ...REQ_INVALID_FLAT_CREATE.body, ticket_id: 123 },
+      headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
+    })
+    assertMatchesFixture(r as any, {
+      ...RES_VALIDATION,
+      body: {
+        ok: false,
+        outcome: 'validation',
+        error: 'Missing create.onesystems.caseTemplate or create.onesystems.kennitala'
+      }
+    })
+  })
+
+  // ── Every one of the 7 GW-06 outcomes deep-equals its fixture ───────
+  it('auth → RES_AUTH', async () => {
     const r = await handleCases({
       body: { ticket_id: 123, case_number: 'C-1' },
       headers: {}, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.body.outcome).toBe('auth')
-    assertGw06Envelope(r.body as any)
+    assertMatchesFixture(r as any, RES_AUTH)
   })
 
-  it('validation → conformant envelope', async () => {
+  it('validation → RES_VALIDATION', async () => {
     const r = await handleCases({
       body: { ticket_id: 123 },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.body.outcome).toBe('validation')
-    assertGw06Envelope(r.body as any)
+    assertMatchesFixture(r as any, RES_VALIDATION)
   })
 
-  it('brand_mismatch → conformant envelope', async () => {
+  it('brand_mismatch → RES_BRAND_MISMATCH', async () => {
     fetchMock().mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: { id: 123, brand_id: 999999 } }) })
     const r = await handleCases({
       body: { ticket_id: 123, case_number: 'C-1' },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.body.outcome).toBe('brand_mismatch')
-    assertGw06Envelope(r.body as any)
+    assertMatchesFixture(r as any, RES_BRAND_MISMATCH)
   })
 
-  it('gopro_create_unsupported → conformant envelope', async () => {
+  it('gopro_create_unsupported → RES_GOPRO_CREATE_UNSUPPORTED', async () => {
     mockTicketPrelude()
     const r = await handleCases({
-      body: { ticket_id: 123, create: NS_CREATE },
+      body: { ticket_id: 123, create: REQ_VALID_CREATE.body.create },
       headers: KEY, tenantConfig: goproTenantConfig(), docEndpoint: 'gopro'
     })
-    expect(r.body.outcome).toBe('gopro_create_unsupported')
-    assertGw06Envelope(r.body as any)
+    assertMatchesFixture(r as any, RES_GOPRO_CREATE_UNSUPPORTED)
   })
 
-  it('create_failed → conformant envelope, NO caseNumber', async () => {
+  it('create_failed → RES_CREATE_FAILED (no caseNumber)', async () => {
     mockTicketPrelude()
     fetchMock()
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
       .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' })
     const r = await handleCases({
-      body: { ticket_id: 123, create: NS_CREATE },
+      body: { ticket_id: 123, create: REQ_VALID_CREATE.body.create },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.body.outcome).toBe('create_failed')
-    expect(r.body.caseNumber).toBeUndefined()
-    assertGw06Envelope(r.body as any)
+    assertMatchesFixture(r as any, RES_CREATE_FAILED)
   })
 
-  it('orphan_case → conformant envelope, carries caseNumber', async () => {
+  it('orphan_case → RES_ORPHAN_CASE (carries caseNumber)', async () => {
     mockTicketPrelude()
     fetchMock()
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-2' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-2024-0099' }) })
       .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'err' })
     const r = await handleCases({
-      body: { ticket_id: 123, create: NS_CREATE },
+      body: { ticket_id: 123, create: REQ_VALID_CREATE.body.create },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
+    // Gateway error message is runtime-derived; assert the safety-critical
+    // contract: status, ok, outcome, and the surfaced caseNumber.
+    expect(r.status).toBe(RES_ORPHAN_CASE.status)
+    expect(r.body.ok).toBe(false)
     expect(r.body.outcome).toBe('orphan_case')
-    expect(r.body.caseNumber).toBe('OS-2')
-    assertGw06Envelope(r.body as any)
+    expect(r.body.caseNumber).toBe(RES_ORPHAN_CASE.body.caseNumber)
+    expect(typeof r.body.error).toBe('string')
+    for (const k of RES_ORPHAN_CASE.requiredKeys) {
+      expect((r.body as Record<string, unknown>)[k]).not.toBeUndefined()
+    }
   })
 
-  it('documented → conformant envelope, carries caseNumber', async () => {
+  it('documented → RES_DOCUMENTED (carries caseNumber)', async () => {
     mockTicketPrelude()
     fetchMock()
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
     const r = await handleCases({
-      body: { ticket_id: 123, case_number: 'C-9' },
+      body: { ticket_id: 123, case_number: 'OS-2024-0007' },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.body.outcome).toBe('documented')
-    expect(r.body.caseNumber).toBe('C-9')
-    assertGw06Envelope(r.body as any)
+    assertMatchesFixture(r as any, RES_DOCUMENTED)
   })
 
-  // ── The DOCUMENTED non-GW-06 exception: infra catch-all 500 ──────────
-  // This is the ONLY non-envelope body. It is NOT a GW-06 outcome — it is
-  // the explicitly retryable infra catch-all (case_number-path later
-  // failure / unexpected throw). It MUST NOT carry ok/outcome/caseNumber.
-  it('infra catch-all → HTTP 500 with NO ok/outcome/caseNumber (documented exception)', async () => {
+  // ── Documented non-GW-06 exception: infra catch-all 500 ─────────────
+  it('infra catch-all → RES_INFRA_500 (NOT a GW-06 outcome)', async () => {
     fetchMock().mockRejectedValueOnce(new Error('Secret db'))
     const r = await handleCases({
       body: { ticket_id: 123, case_number: 'C-1' },
       headers: KEY, tenantConfig: makeTenantConfig(), docEndpoint: 'onesystems'
     })
-    expect(r.status).toBe(500)
-    expect(r.body.error).toBe('Internal server error')
-    expect(typeof r.body.duration_ms).toBe('number')
-    expect(r.body.ok).toBeUndefined()
-    expect(r.body.outcome).toBeUndefined()
-    expect(r.body.caseNumber).toBeUndefined()
+    assertMatchesFixture(r as any, RES_INFRA_500)
     expect(JSON.stringify(r.body)).not.toContain('db')
   })
 
-  // ── Enum freeze: no outcome string outside the frozen set ───────────
-  it('every observed outcome is in the frozen 7-code enum', async () => {
+  // ── Enum freeze: gateway outcomes == fixture tuple, same order ──────
+  it('gateway outcomes are exactly the frozen fixture tuple, in order', () => {
     expect(GW06_OUTCOMES).toEqual([
       'documented', 'create_failed', 'orphan_case', 'validation',
       'auth', 'brand_mismatch', 'gopro_create_unsupported'
     ])
     expect(GW06_OUTCOMES.length).toBe(7)
+    // The ordered GW-06 response fixtures line up 1:1 with the enum order.
+    expect(RESPONSE_FIXTURES_GW06.map(f => f.body.outcome)).toEqual([...GW06_OUTCOMES])
   })
 })
