@@ -346,7 +346,7 @@ Each tenant object has this structure:
 | `name` | string | Yes | Institution name (for logging) |
 | `zendesk.subdomain` | string | Yes | Zendesk subdomain |
 | `zendesk.email` | string | Yes | Zendesk admin email |
-| `zendesk.apiToken` | string | Yes | Zendesk API token |
+| `zendesk.apiToken` | string | Yes | Zendesk API token (requires **ticket-write** scope — see [Zendesk Setup](#zendesk-setup)) |
 | `zendesk.webhookSecret` | string | Yes | Zendesk webhook signing secret |
 | `endpoints` | map | Yes | At least one archive endpoint |
 | `endpoints.{name}.type` | string | Yes | `"onesystems"` or `"gopro"` |
@@ -397,6 +397,8 @@ Tenant secrets (Zendesk, archive systems, Málaskrá) are also environment varia
 ## Zendesk Setup
 
 Each institution needs a webhook and trigger configured in their Zendesk account.
+
+> **API token scope:** The tenant's `zendesk.apiToken` now requires **ticket-write** scope. The gateway can issue `PUT /tickets/{id}.json` to set a ticket custom field (e.g. writing back the archive case number). This capability is unwired in the current release — it is consumed by the future `POST /v1/cases` endpoint — but provisioning the token with ticket-write scope now avoids a re-issue later.
 
 ### Step 1: Create webhook
 
