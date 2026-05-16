@@ -24,6 +24,7 @@ import type {
   ZendeskTicket,
   ZendeskComment,
   ZendeskUser,
+  DocClient,
   DownloadedAttachment,
   AuditStore,
   Logger
@@ -142,19 +143,19 @@ export function resolveCaseNumber(
 }
 
 /**
- * Construct the doc client and upload the document.
+ * Upload the document using an already-constructed doc client.
+ * The client is built earlier (in documentTicket) so createDocClient's
+ * misconfigured-endpoint throw keeps its original precedence relative
+ * to validateCaseNumber's 400 (behavior-preserving).
  */
 export async function postToCase(
-  ep: EndpointConfig,
-  solvingAgentEmail: string,
+  docClient: DocClient,
   caseNumber: string,
   ticket: ZendeskTicket,
   ticketId: number,
   pdfBuffer: Buffer,
   attachments: DownloadedAttachment[]
 ): Promise<void> {
-  const docClient = createDocClient(ep, solvingAgentEmail)
-
   const uploadFilename = `ticket-${ticketId}.pdf`
 
   await docClient.uploadDocument({
@@ -273,11 +274,16 @@ export async function documentTicket(
   const pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
 
   // 4. Upload to document system
+  // createDocClient is constructed here (original line-134 position) so a
+  // misconfigured-endpoint throw keeps its precedence BEFORE the
+  // validateCaseNumber 400 — preserving byte-identical error ordering.
+  const docClient = createDocClient(ep, solvingAgentEmail)
+
   const resolved = resolveCaseNumber(ep, ticket, ticketId)
   if (!resolved.ok) return resolved.result
   const { caseNumber } = resolved
 
-  await postToCase(ep, solvingAgentEmail, caseNumber, ticket, ticketId, pdfBuffer, attachments)
+  await postToCase(docClient, caseNumber, ticket, ticketId, pdfBuffer, attachments)
 
   const duration = Date.now() - startTime
 

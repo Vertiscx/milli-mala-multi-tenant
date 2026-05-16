@@ -202,6 +202,48 @@ describe('documentTicket extraction — risk hardening', () => {
     expect(result.body.error).toBe('case_number contains invalid characters')
   })
 
+  it('misconfigured endpoint throws (500) BEFORE invalid case_number 400 — precedence preserved', async () => {
+    // Resolved endpoint is misconfigured (OneSystems with NO appKey) AND the
+    // ticket carries an invalid custom-field case_number. Original handleWebhook
+    // builds the doc client (throws -> outer catch -> 500) before
+    // validateCaseNumber's 400. The fix restores that precedence.
+    const tenantConfig = makeTenantConfig({
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: 'https://api.onesystems.test',
+          caseNumberFieldId: 7777
+          // appKey intentionally omitted -> createDocClient throws synchronously
+        }
+      }
+    })
+    const badTicket = {
+      ...baseTicket,
+      custom_fields: [{ id: 7777, value: 'BAD..NUM' }]
+    }
+    const f = global.fetch as ReturnType<typeof vi.fn>
+    f
+      // getTicket
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: badTicket }) })
+      // getTicketComments
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ comments: [{ id: 1, body: 'Hello', public: true, author_id: 100 }] })
+      })
+      // getUsersMany
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ users: [{ id: 100, name: 'Test Agent', email: 'agent@test.com' }] })
+      })
+
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig })
+    const result = await handleWebhook(req)
+
+    // createDocClient throws -> 500, NOT the invalid-case_number 400
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+  })
+
   it('duration_ms parity: success body equals persisted auditEntry duration_ms', async () => {
     mockHappyFetchSequence()
     const captured: string[] = []
