@@ -3,9 +3,44 @@
  */
 
 import { createLogger } from './logger.js'
-import type { UploadDocumentParams, DocClient, Logger } from './types.js'
+import type { UploadDocumentParams, DocClient, Logger, CreateCaseParams, CreateCaseResult } from './types.js'
 
 const logger: Logger = createLogger('onesystems')
+
+// Ported verbatim from app malaskra_v3/src/clients/onesystems/cases.ts:104
+const DEFAULT_EXTERNAL_USER = 'Zendesk'
+
+// Ported verbatim from cases.ts:151-153 — strip every non-digit. No length assertion.
+function normalizeKennitala(raw: string): string {
+  return raw.replace(/\D+/g, '')
+}
+
+/**
+ * Re-derived (no zod) from cases.ts:171-198 — exact 7-branch waterfall,
+ * first-match-wins, matched-but-empty-string yields '' and does NOT fall
+ * through. Only string|number accepted at a key (StringOrNumber union);
+ * anything else at a matched key → treated as missing ('').
+ */
+function extractCaseNumber(res: unknown): string {
+  if (typeof res === 'string') return res
+  if (typeof res === 'number') return String(res)
+  if (typeof res !== 'object' || res === null) return ''
+
+  const obj = res as Record<string, unknown>
+  const coerce = (v: unknown): string => {
+    if (typeof v !== 'string' && typeof v !== 'number') return ''
+    return v === '' ? '' : String(v)
+  }
+
+  if ('caseNumber' in obj) return coerce(obj.caseNumber)
+  if ('CaseNumber' in obj) return coerce(obj.CaseNumber)
+  if ('id' in obj) return coerce(obj.id)
+  if ('Id' in obj) return coerce(obj.Id)
+  if (typeof obj.result === 'object' && obj.result !== null && 'id' in (obj.result as Record<string, unknown>)) {
+    return coerce((obj.result as Record<string, unknown>).id)
+  }
+  return ''
+}
 
 export class OneSystemsClient implements DocClient {
   baseUrl: string
@@ -122,5 +157,54 @@ export class OneSystemsClient implements DocClient {
 
     logger.info('Upload successful', { caseNumber })
     return response.json().catch(() => ({ success: true }))
+  }
+
+  /**
+   * Create a case in OneSystems. Wire contract ported byte-faithfully from
+   * app cases.ts (endpoint, 5-field body, kennitala digits-only, 7-branch
+   * caseNumber waterfall). App returns a Result and never throws; the gateway
+   * has no Result type so both failure exits become thrown Error (mirrors
+   * uploadDocument). PII guard: the bearer token NEVER appears in a message.
+   */
+  async createCase(params: CreateCaseParams): Promise<CreateCaseResult> {
+    await this.ensureAuthenticated()
+
+    const { caseTemplate, kennitala, externalId, caseName, currentUser } = params
+    const timestamp = Date.now()
+
+    // cases.ts:228-234 — EXACTLY these 5 fields, this order.
+    const payload = {
+      idNumber: normalizeKennitala(kennitala),
+      caseTemplate,
+      caseName: caseName ?? `ZendeskCase_${String(timestamp)}`,
+      externalId: String(externalId ?? `ticket_${String(timestamp)}`),
+      currentUser: currentUser ?? DEFAULT_EXTERNAL_USER
+    }
+
+    logger.info('Creating OneSystems case', { caseTemplate })
+
+    const response = await fetch(`${this.baseUrl}/api/OneRecord/CreateCaseUid`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`OneSystems createCase failed: ${response.status} - ${text}`)
+    }
+
+    const res = await response.json().catch(() => null)
+    const caseNumber = extractCaseNumber(res)
+    if (!caseNumber) {
+      throw new Error('OneSystems createCase: missing case number in response')
+    }
+
+    logger.info('Case created', { caseNumber })
+    return { caseNumber }
   }
 }
