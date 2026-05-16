@@ -46,23 +46,20 @@ function goproTenantConfig(): TenantConfig {
 }
 
 const KEY = { 'x-api-key': 'test-malaskra-key' }
+const NS_CREATE = { onesystems: { caseTemplate: 'T', kennitala: '1234567890' } }
 const fetchMock = () => global.fetch as ReturnType<typeof vi.fn>
 
-// Mock the Zendesk getTicket + getTicketComments + getUsersMany prelude.
-// No attachments → no downloads (postToCase still uploads the rendered PDF).
+// getTicket → getTicketComments → getUsersMany prelude (no attachments).
 function mockTicketPrelude(brandId: number | undefined = 360001234567) {
   fetchMock()
-    // getTicket
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({ ticket: { id: 123, subject: 'Test', brand_id: brandId } })
     })
-    // getTicketComments
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({ comments: [{ id: 1, body: 'Hi', public: true, author_id: 7 }] })
     })
-    // getUsersMany
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({ users: [{ id: 7, name: 'Agent', email: 'agent@example.com' }] })
@@ -74,8 +71,8 @@ describe('handleCases', () => {
     vi.clearAllMocks()
   })
 
-  // (1) auth
-  it('rejects requests without API key → 401 outcome=auth', async () => {
+  // (1) auth → GW-06 { ok:false, outcome:'auth', error }
+  it('rejects requests without API key → 401 { ok:false, outcome:auth }', async () => {
     const result = await handleCases({
       body: { ticket_id: 123, case_number: 'C-1' },
       headers: {},
@@ -83,11 +80,13 @@ describe('handleCases', () => {
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(401)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('auth')
+    expect(typeof result.body.error).toBe('string')
   })
 
   // (2) validation: ticket_id missing
-  it('rejects missing ticket_id → 400 outcome=validation', async () => {
+  it('rejects missing ticket_id → 400 { ok:false, outcome:validation }', async () => {
     const result = await handleCases({
       body: { case_number: 'C-1' },
       headers: KEY,
@@ -95,19 +94,21 @@ describe('handleCases', () => {
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(400)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('validation')
-    expect(result.body.error).toContain('ticket_id')
+    expect(String(result.body.error)).toContain('ticket_id')
   })
 
   // (3) XOR both
   it('rejects both create and case_number → 400 validation ~exactly one', async () => {
     const result = await handleCases({
-      body: { ticket_id: 123, case_number: 'C-1', create: { caseTemplate: 't', kennitala: '1' } },
+      body: { ticket_id: 123, case_number: 'C-1', create: NS_CREATE },
       headers: KEY,
       tenantConfig: makeTenantConfig(),
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(400)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('validation')
     expect(String(result.body.error)).toContain('exactly one')
   })
@@ -121,6 +122,7 @@ describe('handleCases', () => {
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(400)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('validation')
     expect(String(result.body.error)).toContain('exactly one')
   })
@@ -134,11 +136,26 @@ describe('handleCases', () => {
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(400)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('validation')
   })
 
-  // (6) brand_mismatch + fail-closed variant
-  it('rejects ticket with mismatched brand_id → 403 outcome=brand_mismatch', async () => {
+  // (6) NEW — namespaced create parsing: missing create.onesystems.caseTemplate
+  it('rejects missing create.onesystems.caseTemplate → 400 validation', async () => {
+    const result = await handleCases({
+      body: { ticket_id: 123, create: { onesystems: { kennitala: '1234567890' } } },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).toBe(400)
+    expect(result.body.ok).toBe(false)
+    expect(result.body.outcome).toBe('validation')
+    expect(String(result.body.error)).toContain('create.onesystems')
+  })
+
+  // (7) brand_mismatch + fail-closed variant — clean envelope, no leak
+  it('rejects ticket with mismatched brand_id → 403 { ok:false, outcome:brand_mismatch }', async () => {
     fetchMock().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ ticket: { id: 123, brand_id: 999999 } })
@@ -150,7 +167,11 @@ describe('handleCases', () => {
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(403)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('brand_mismatch')
+    expect(typeof result.body.error).toBe('string')
+    expect(result.body.ticket_id).toBeUndefined()
+    expect(result.body.doc_system).toBeUndefined()
   })
 
   it('rejects ticket with undefined brand_id (fail-closed) → 403 brand_mismatch', async () => {
@@ -165,98 +186,93 @@ describe('handleCases', () => {
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(403)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('brand_mismatch')
   })
 
-  // (7) gopro_create_unsupported — NO CreateCaseUid fetch
-  it('create against GoPro → 422 gopro_create_unsupported, no CreateCaseUid', async () => {
+  // (8) gopro_create_unsupported — NO CreateCaseUid fetch
+  it('namespaced create against GoPro → 422 gopro_create_unsupported, no CreateCaseUid', async () => {
     mockTicketPrelude()
     const result = await handleCases({
-      body: { ticket_id: 123, create: { caseTemplate: 'tpl', kennitala: '1234567890' } },
+      body: { ticket_id: 123, create: NS_CREATE },
       headers: KEY,
       tenantConfig: goproTenantConfig(),
       docEndpoint: 'gopro'
     })
     expect(result.status).toBe(422)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('gopro_create_unsupported')
     const urls = fetchMock().mock.calls.map(c => String(c[0]))
     expect(urls.some(u => u.includes('CreateCaseUid'))).toBe(false)
   })
 
-  // (8) create_failed — no created_case_number
-  it('createCase fetch fails → 502 create_failed, no created_case_number', async () => {
+  // (9) create_failed — no caseNumber
+  it('createCase fetch fails → 502 create_failed, no caseNumber', async () => {
     mockTicketPrelude()
     fetchMock()
-      // OneSystems auth
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      // CreateCaseUid — fails
       .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' })
 
     const result = await handleCases({
-      body: { ticket_id: 123, create: { caseTemplate: 'tpl', kennitala: '1234567890' } },
+      body: { ticket_id: 123, create: NS_CREATE },
       headers: KEY,
       tenantConfig: makeTenantConfig(),
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(502)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('create_failed')
-    expect(result.body.created_case_number).toBeUndefined()
+    expect(result.body.caseNumber).toBeUndefined()
   })
 
-  // (9) orphan_case — stamp (setTicketCustomField) fails
-  it('create OK then setTicketCustomField fails → 207 orphan_case + created_case_number', async () => {
+  // (10) orphan_case — stamp (setTicketCustomField) fails
+  it('create OK then setTicketCustomField fails → 207 orphan_case + caseNumber', async () => {
     mockTicketPrelude()
     fetchMock()
-      // OneSystems auth
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      // CreateCaseUid OK
       .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-1' }) })
-      // setTicketCustomField PUT /tickets/123.json — fails
       .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'err' })
 
     const result = await handleCases({
-      body: { ticket_id: 123, create: { caseTemplate: 'tpl', kennitala: '1234567890' } },
+      body: { ticket_id: 123, create: NS_CREATE },
       headers: KEY,
       tenantConfig: makeTenantConfig(),
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(207)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('orphan_case')
-    expect(result.body.created_case_number).toBe('OS-1')
-    expect(result.body.case_number).toBe('OS-1')
+    expect(result.body.caseNumber).toBe('OS-1')
+    expect(typeof result.body.error).toBe('string')
+    expect(result.body.created_case_number).toBeUndefined()
   })
 
-  // (10) orphan_case — upload (postToCase) fails
-  it('create OK, stamp OK, then AddDocument2 fails → 207 orphan_case + created_case_number', async () => {
+  // (11) orphan_case — upload (postToCase) fails
+  it('create OK, stamp OK, then AddDocument2 fails → 207 orphan_case + caseNumber', async () => {
     mockTicketPrelude()
     fetchMock()
-      // OneSystems auth
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      // CreateCaseUid OK
       .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-2' }) })
-      // setTicketCustomField OK
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
-      // AddDocument2 — fails
       .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'upload boom' })
 
     const result = await handleCases({
-      body: { ticket_id: 123, create: { caseTemplate: 'tpl', kennitala: '1234567890' } },
+      body: { ticket_id: 123, create: NS_CREATE },
       headers: KEY,
       tenantConfig: makeTenantConfig(),
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(207)
+    expect(result.body.ok).toBe(false)
     expect(result.body.outcome).toBe('orphan_case')
-    expect(result.body.created_case_number).toBe('OS-2')
+    expect(result.body.caseNumber).toBe('OS-2')
   })
 
-  // (11) NEW — case_number path upload fail → generic 500, nothing minted
-  it('case_number path upload fail → 500 Internal server error, no created_case_number, not orphan_case, no CreateCaseUid', async () => {
+  // (12) case_number path upload fail → generic 500, NOT a GW-06 outcome
+  it('case_number path upload fail → 500 { error,duration_ms } no ok/outcome/caseNumber, no CreateCaseUid', async () => {
     mockTicketPrelude()
     fetchMock()
-      // OneSystems auth
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      // AddDocument2 — fails
       .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'upload boom' })
 
     const result = await handleCases({
@@ -267,46 +283,44 @@ describe('handleCases', () => {
     })
     expect(result.status).toBe(500)
     expect(result.body.error).toBe('Internal server error')
-    expect(result.body.duration_ms).toBeDefined()
-    expect(result.body.created_case_number).toBeUndefined()
+    expect(typeof result.body.duration_ms).toBe('number')
+    expect(result.body.ok).toBeUndefined()
     expect(result.body.outcome).toBeUndefined()
+    expect(result.body.caseNumber).toBeUndefined()
     const urls = fetchMock().mock.calls.map(c => String(c[0]))
     expect(urls.some(u => u.includes('CreateCaseUid'))).toBe(false)
   })
 
-  // (12) documented — create path happy
-  it('happy create path → 200 documented success created=true, CreateCaseUid fetched', async () => {
+  // (13) documented — create path happy
+  it('happy namespaced create path → 200 { ok:true, outcome:documented, caseNumber }, CreateCaseUid fetched', async () => {
     mockTicketPrelude()
     fetchMock()
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      // CreateCaseUid OK
       .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-9' }) })
-      // setTicketCustomField OK
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
-      // AddDocument2 OK
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
 
     const result = await handleCases({
-      body: { ticket_id: 123, create: { caseTemplate: 'tpl', kennitala: '1234567890' } },
+      body: { ticket_id: 123, create: NS_CREATE },
       headers: KEY,
       tenantConfig: makeTenantConfig(),
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(200)
+    expect(result.body.ok).toBe(true)
     expect(result.body.outcome).toBe('documented')
-    expect(result.body.success).toBe(true)
-    expect(result.body.created).toBe(true)
-    expect(result.body.case_number).toBe('OS-9')
+    expect(result.body.caseNumber).toBe('OS-9')
+    expect(result.body.success).toBeUndefined()
+    expect(result.body.case_number).toBeUndefined()
     const urls = fetchMock().mock.calls.map(c => String(c[0]))
     expect(urls.some(u => u.includes('CreateCaseUid'))).toBe(true)
   })
 
-  // (13) documented — case_number path happy
-  it('happy case_number path → 200 documented, no CreateCaseUid', async () => {
+  // (14) documented — case_number path happy
+  it('happy case_number path → 200 documented caseNumber, no CreateCaseUid', async () => {
     mockTicketPrelude()
     fetchMock()
       .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
-      // AddDocument2 OK
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
 
     const result = await handleCases({
@@ -316,14 +330,15 @@ describe('handleCases', () => {
       docEndpoint: 'onesystems'
     })
     expect(result.status).toBe(200)
+    expect(result.body.ok).toBe(true)
     expect(result.body.outcome).toBe('documented')
-    expect(result.body.case_number).toBe('C-9')
-    expect(result.body.created).toBe(false)
+    expect(result.body.caseNumber).toBe('C-9')
+    expect(result.body.case_number).toBeUndefined()
     const urls = fetchMock().mock.calls.map(c => String(c[0]))
     expect(urls.some(u => u.includes('CreateCaseUid'))).toBe(false)
   })
 
-  // (14) LOCKED ORDER — createCase < setTicketCustomField < postToCase
+  // (15) LOCKED ORDER — CreateCaseUid < PUT /tickets/ < AddDocument2
   it('locked order: CreateCaseUid before PUT /tickets/ before AddDocument2', async () => {
     mockTicketPrelude()
     fetchMock()
@@ -333,7 +348,7 @@ describe('handleCases', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
 
     const result = await handleCases({
-      body: { ticket_id: 123, create: { caseTemplate: 'tpl', kennitala: '1234567890' } },
+      body: { ticket_id: 123, create: NS_CREATE },
       headers: KEY,
       tenantConfig: makeTenantConfig(),
       docEndpoint: 'onesystems'
@@ -354,7 +369,7 @@ describe('handleCases', () => {
     expect(iStamp).toBeLessThan(iUpload)
   })
 
-  // (15) error-leak
+  // (16) error-leak
   it('does not leak internal error messages → 500 generic', async () => {
     fetchMock().mockRejectedValueOnce(new Error('Secret database info'))
     const result = await handleCases({
