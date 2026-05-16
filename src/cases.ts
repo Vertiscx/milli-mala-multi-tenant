@@ -1,9 +1,20 @@
 /**
  * Cases endpoint — synchronous manual documentation, called by the Malaskrá app.
  *
+ * GW-06 is the authoritative wire contract (single source of truth,
+ * /Users/brynjolfur/dev/malaskra_v3/.planning/GATEWAY-CHANGES.md §GW-06).
+ *
  * Malaskrá sends: { ticket_id, brand_id, doc_endpoint } plus EXACTLY ONE OF
- *   - create: { caseTemplate, kennitala, caseName? }  → mint a new case
+ *   - create: { onesystems: { caseTemplate, kennitala, caseName? } }  → mint a new case
+ *                                                                       (backend-namespaced)
  *   - case_number: string                             → document into an existing case
+ *
+ * Every structured response body is the GW-06 envelope:
+ *   success: { ok:true,  outcome:'documented', caseNumber }
+ *   failure: { ok:false, outcome:'<code>', error }
+ *   orphan:  { ok:false, outcome:'orphan_case', error, caseNumber:<created> }
+ * 7-code enum (LOCKED order):
+ *   documented|create_failed|orphan_case|validation|auth|brand_mismatch|gopro_create_unsupported
  *
  * Composes G1's documentTicket stage fns with G2's createCase /
  * setTicketCustomField. Mirrors src/attachments.ts (the proven sibling
@@ -11,9 +22,10 @@
  *
  * Core value: on the CREATE path a minted case number is NEVER silently
  * lost — if createCase succeeds but a later step fails, the response is
- * HTTP 207 outcome=orphan_case carrying created_case_number. On the
- * case_number path nothing is minted, so a later failure propagates to the
- * generic 500 envelope (retry-safe), exactly like the sibling handlers.
+ * HTTP 207 outcome=orphan_case carrying caseNumber. On the case_number
+ * path nothing is minted, so a later failure propagates to the generic
+ * HTTP 500 { error:'Internal server error', duration_ms } envelope
+ * (retry-safe, NOT a GW-06 outcome), exactly like the sibling handlers.
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
@@ -61,43 +73,52 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
   try {
     // Auth check
     if (!verifyApiKey(headers, tenantConfig)) {
-      return { status: 401, body: { error: 'Invalid or missing API key', outcome: 'auth' } }
+      return { status: 401, body: { ok: false, outcome: 'auth', error: 'Invalid or missing API key' } }
     }
 
     // Validate ticket_id
     const ticketId = Number(body.ticket_id)
     if (!Number.isInteger(ticketId) || ticketId <= 0) {
-      return { status: 400, body: { error: 'Invalid or missing ticket_id', outcome: 'validation' } }
+      return { status: 400, body: { ok: false, outcome: 'validation', error: 'Invalid or missing ticket_id' } }
     }
 
     // Exactly-one-of: create XOR case_number
     const hasCreate = body.create != null
     const hasCase = typeof body.case_number === 'string' && (body.case_number as string).length > 0
     if (hasCreate === hasCase) {
-      return { status: 400, body: { error: 'Provide exactly one of create or case_number', outcome: 'validation' } }
+      return { status: 400, body: { ok: false, outcome: 'validation', error: 'Provide exactly one of create or case_number' } }
     }
 
     // case_number path: validate the supplied number
     if (hasCase) {
       const caseNumberError = validateCaseNumber(body.case_number as string)
       if (caseNumberError) {
-        return { status: 400, body: { error: caseNumberError, outcome: 'validation' } }
+        return { status: 400, body: { ok: false, outcome: 'validation', error: caseNumberError } }
       }
     }
 
-    // create path: validate the create sub-shape
+    // create path: validate the GW-06 backend-namespaced create sub-shape
+    // (body.create.onesystems.caseTemplate / .kennitala — NOT flat).
     let createParams: { caseTemplate: string; kennitala: string; caseName?: string } | undefined
     if (hasCreate) {
       const c = body.create as Record<string, unknown>
-      const caseTemplate = typeof c?.caseTemplate === 'string' ? c.caseTemplate : ''
-      const kennitala = typeof c?.kennitala === 'string' ? c.kennitala : ''
+      const ns = c?.onesystems as Record<string, unknown> | undefined
+      const caseTemplate = typeof ns?.caseTemplate === 'string' ? ns.caseTemplate : ''
+      const kennitala = typeof ns?.kennitala === 'string' ? ns.kennitala : ''
       if (!caseTemplate || !kennitala) {
-        return { status: 400, body: { error: 'Missing caseTemplate or kennitala', outcome: 'validation' } }
+        return {
+          status: 400,
+          body: {
+            ok: false,
+            outcome: 'validation',
+            error: 'Missing create.onesystems.caseTemplate or create.onesystems.kennitala'
+          }
+        }
       }
       createParams = {
         caseTemplate,
         kennitala,
-        caseName: typeof c?.caseName === 'string' ? c.caseName : undefined
+        caseName: typeof ns?.caseName === 'string' ? ns.caseName : undefined
       }
     }
 
@@ -108,7 +129,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     try {
       ep = resolveEndpoint(tenantConfig, docEndpoint)
     } catch (err) {
-      return { status: 400, body: { error: (err as Error).message, outcome: 'validation' } }
+      return { status: 400, body: { ok: false, outcome: 'validation', error: (err as Error).message } }
     }
 
     // ─── LOCKED order (post-gate) ─────────────────────────────────────
@@ -118,9 +139,16 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     // 1. fetchTicketInfo (owns the fail-closed brand cross-check)
     const fetched = await fetchTicketInfo(tenantConfig, ticketId)
     if (!fetched.ok) {
+      // GW-06: emit ONLY the clean envelope — do NOT spread fetched.result.body
+      // (it carries snake_case fields that must not leak).
+      const brandErr = (fetched.result.body as Record<string, unknown>)?.error
       return {
         status: fetched.result.status,
-        body: { ...fetched.result.body, outcome: 'brand_mismatch' }
+        body: {
+          ok: false,
+          outcome: 'brand_mismatch',
+          error: typeof brandErr === 'string' ? brandErr : 'Ticket does not belong to this brand'
+        }
       }
     }
     const { ticket, comments, attachments, userMap, solvingAgentEmail } = fetched.info
@@ -138,7 +166,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
       if (!canCreateCase) {
         return {
           status: 422,
-          body: { error: 'Case creation not supported for this doc system', outcome: 'gopro_create_unsupported' }
+          body: { ok: false, outcome: 'gopro_create_unsupported', error: 'Case creation not supported for this doc system' }
         }
       }
 
@@ -158,7 +186,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         logger.error('createCase failed', { brand_id: brandId, ticketId, error: (err as Error).message })
         return {
           status: 502,
-          body: { error: 'Case creation failed', outcome: 'create_failed' }
+          body: { ok: false, outcome: 'create_failed', error: 'Case creation failed' }
         }
       }
     }
@@ -209,16 +237,10 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         return {
           status: 207,
           body: {
-            error: (err as Error).message,
+            ok: false,
             outcome: 'orphan_case',
-            created_case_number: createdCaseNumber,
-            case_number: createdCaseNumber,
-            ticket_id: ticketId,
-            brand_id: brandId,
-            doc_endpoint: docEndpoint,
-            doc_system: ep.type,
-            created: true,
-            duration_ms: Date.now() - startTime
+            error: (err as Error).message,
+            caseNumber: createdCaseNumber
           }
         }
       }
@@ -242,15 +264,9 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     return {
       status: 200,
       body: {
-        success: true,
-        ticket_id: ticketId,
-        brand_id: brandId,
-        case_number: caseNumber,
-        doc_endpoint: docEndpoint,
-        doc_system: ep.type,
-        created: hasCreate,
+        ok: true,
         outcome: 'documented',
-        duration_ms: duration
+        caseNumber
       }
     }
   } catch (error) {
