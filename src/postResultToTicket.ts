@@ -71,7 +71,8 @@ export function buildNote(o: DocumentationOutcome, ep: EndpointConfig): string {
  * Build the custom_fields array per the locked decision.
  *  - SUCCESS (documented): caseNumberFieldId (doc-system-sourced) +
  *    templateFieldId (OS create only) + lastStatusFieldId='success' +
- *    lastExportFieldId=ISO.
+ *    lastExportFieldId=YYYY-MM-DD (Zendesk date field; full ISO stays
+ *    in the note + audit).
  *  - FAILURE: ONLY lastStatusFieldId='failed:<short reason>'.
  * Any field whose *FieldId is unset/null is skipped (graceful).
  */

@@ -265,8 +265,11 @@ export async function writeAudit(args: {
  * pre-audit) and reused for both the audit entry and the success body.
  *
  * Returns either an early-exit HandlerResult or the 200 success body.
- * Has NO try/catch of its own beyond the preserved inner best-effort
- * ones — the 500 envelope stays in handleWebhook.
+ * Wraps the orchestration in an outer try/catch ONLY to fire the
+ * best-effort GW-01 failure post-back (recordOutcome) and then RETHROW
+ * the original error unchanged — so the 500 envelope still effectively
+ * stays in handleWebhook (this catch produces no response). The
+ * preserved inner best-effort try/catch blocks are unaffected.
  */
 export async function documentTicket(
   req: WebhookRequest,
