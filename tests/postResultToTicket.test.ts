@@ -96,14 +96,18 @@ describe('buildNote', () => {
 })
 
 describe('buildCustomFields', () => {
-  it('documented → all 4 fields', () => {
-    const f = buildCustomFields(baseOutcome(), fullEp)
+  it('documented → all 4 fields; lastExport is date-only YYYY-MM-DD', () => {
+    const o = baseOutcome()
+    const f = buildCustomFields(o, fullEp)
     expect(f).toEqual([
       { id: 11, value: 'OS-9' },
       { id: 22, value: 'TPL' },
       { id: 33, value: 'success' },
-      { id: 44, value: '2026-05-17T10:00:00.000Z' }
+      { id: 44, value: '2026-05-17' }
     ])
+    const lastExport = f.find(x => x.id === 44)!
+    expect(lastExport.value).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(lastExport.value).toBe(o.timestamp.slice(0, 10))
   })
 
   it('failure → ONLY lastStatusFieldId failed:<reason>', () => {

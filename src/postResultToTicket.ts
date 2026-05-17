@@ -91,7 +91,10 @@ export function buildCustomFields(
       fields.push({ id: ep.lastStatusFieldId, value: 'success' })
     }
     if (ep.lastExportFieldId != null) {
-      fields.push({ id: ep.lastExportFieldId, value: o.timestamp })
+      // Zendesk DATE custom field — accepts YYYY-MM-DD only. o.timestamp
+      // is new Date().toISOString(); the first 10 chars are YYYY-MM-DD.
+      // Full ISO precision is kept in the note + audit, not this field.
+      fields.push({ id: ep.lastExportFieldId, value: o.timestamp.slice(0, 10) })
     }
   } else {
     if (ep.lastStatusFieldId != null) {
