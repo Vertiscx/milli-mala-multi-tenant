@@ -205,6 +205,6 @@ export class OneSystemsClient implements DocClient {
     }
 
     logger.info('Case created', { caseNumber })
-    return { caseNumber }
+    return { caseNumber, caseTemplate }
   }
 }

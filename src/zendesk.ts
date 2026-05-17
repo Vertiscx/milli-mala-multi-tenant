@@ -3,7 +3,7 @@
  */
 
 import { createLogger } from './logger.js'
-import type { ZendeskTicket, ZendeskComment, ZendeskUser, DownloadedAttachment, Logger } from './types.js'
+import type { ZendeskTicket, ZendeskComment, ZendeskUser, DownloadedAttachment, AttachmentsResult, Logger } from './types.js'
 
 const logger: Logger = createLogger('zendesk')
 
@@ -75,24 +75,40 @@ export class ZendeskClient {
     return (data.users as ZendeskUser[]) || []
   }
 
+  /**
+   * Returns the downloaded attachments AS the array (byte-compatible with
+   * the pre-G4 array contract — `.length`, indexing, `toEqual([])` all
+   * unchanged). The list of attachments that were skipped/failed to
+   * download is exposed via a NON-ENUMERABLE `.failed` property so
+   * structural array equality in the pre-g3 test suite is unaffected,
+   * while G4 callers can read `.failed` for the GW-01 post-back note.
+   */
   async fetchAttachments(
     comments: ZendeskComment[],
     { maxFiles = 50, maxTotalBytes = 100 * 1024 * 1024 }: { maxFiles?: number; maxTotalBytes?: number } = {}
-  ): Promise<DownloadedAttachment[]> {
+  ): Promise<AttachmentsResult> {
     const attachments: DownloadedAttachment[] = []
+    const failed: { filename: string; reason: string }[] = []
     let totalBytes = 0
+    const finalize = (): AttachmentsResult => {
+      Object.defineProperty(attachments, 'failed', {
+        value: failed, enumerable: false, configurable: true, writable: true
+      })
+      return attachments as AttachmentsResult
+    }
     for (const comment of comments) {
       if (!comment.attachments) continue
       for (const att of comment.attachments) {
         if (attachments.length >= maxFiles) {
           logger.warn('Attachment count limit reached', { maxFiles })
-          return attachments
+          return finalize()
         }
         try {
           // SSRF protection: only allow genuine Zendesk URLs
           const attUrl = new URL(att.content_url)
           if (attUrl.protocol !== 'https:') {
             logger.warn('Skipping non-HTTPS attachment URL', { url: att.content_url })
+            failed.push({ filename: att.file_name, reason: 'non-HTTPS URL' })
             continue
           }
           // Proper domain check: extract the last two labels and compare exactly.
@@ -101,6 +117,7 @@ export class ZendeskClient {
           const domain = hostParts.slice(-2).join('.')
           if (domain !== 'zendesk.com' && domain !== 'zdassets.com') {
             logger.warn('Skipping non-Zendesk attachment URL', { url: att.content_url })
+            failed.push({ filename: att.file_name, reason: 'non-Zendesk URL' })
             continue
           }
           const response = await fetch(att.content_url, {
@@ -110,12 +127,14 @@ export class ZendeskClient {
             logger.warn('Attachment download returned non-OK status', {
               filename: att.file_name, status: response.status
             })
+            failed.push({ filename: att.file_name, reason: `download status ${response.status}` })
             continue
           }
           const buffer = Buffer.from(await response.arrayBuffer())
           if (totalBytes + buffer.length > maxTotalBytes) {
             logger.warn('Attachment total size limit reached', { maxTotalBytes, currentBytes: totalBytes })
-            return attachments
+            failed.push({ filename: att.file_name, reason: 'total size limit reached' })
+            return finalize()
           }
           totalBytes += buffer.length
           attachments.push({
@@ -127,9 +146,10 @@ export class ZendeskClient {
           logger.debug('Downloaded attachment', { filename: att.file_name, size: att.size })
         } catch (error) {
           logger.warn('Failed to download attachment', { filename: att.file_name, error: (error as Error).message })
+          failed.push({ filename: att.file_name, reason: 'download error' })
         }
       }
     }
-    return attachments
+    return finalize()
   }
 }

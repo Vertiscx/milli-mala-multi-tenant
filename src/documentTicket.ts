@@ -37,6 +37,7 @@ interface TicketInfo {
   ticket: ZendeskTicket
   comments: ZendeskComment[]
   attachments: DownloadedAttachment[]
+  failedAttachments: { filename: string; reason: string }[]
   userMap: Record<number, string>
   solvingAgentEmail: string
 }
@@ -77,6 +78,7 @@ export async function fetchTicketInfo(
 
   const comments = await zendesk.getTicketComments(ticketId)
   const attachments = await zendesk.fetchAttachments(comments)
+  const failedAttachments = attachments.failed ?? []
 
   // 2. Resolve all comment author names in one batch
   const authorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))]
@@ -98,7 +100,7 @@ export async function fetchTicketInfo(
     }
   }
 
-  return { ok: true, info: { zendesk, ticket, comments, attachments, userMap, solvingAgentEmail } }
+  return { ok: true, info: { zendesk, ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail } }
 }
 
 /**
@@ -284,7 +286,7 @@ export async function documentTicket(
 
   const fetched = await fetchTicketInfo(tenantConfig, ticketId)
   if (!fetched.ok) return fetched.result
-  const { ticket, comments, attachments, userMap, solvingAgentEmail } = fetched.info
+  const { ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail } = fetched.info
 
   // 3. Generate PDF
   const pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
@@ -303,20 +305,29 @@ export async function documentTicket(
 
   const duration = Date.now() - startTime
 
-  await writeAudit({
-    brandId,
-    ticketId,
-    ticket,
-    comments,
-    attachments,
-    tenantConfig,
-    docEndpoint,
-    ep,
-    caseNumber,
-    pdfBuffer,
-    durationMs: duration,
-    auditStore
-  })
+  // GW-01 finalizer — once per request. The webhook path passes
+  // intent:'webhook' so the persisted audit entry stays byte-identical
+  // (recordOutcome → writeAudit with NO enrichment args). The post-back
+  // note + (configured) custom fields are the net-new GW-01 behavior;
+  // a post-back failure is swallowed and does NOT change this response.
+  const { recordOutcome } = await import('./postResultToTicket.js')
+  await recordOutcome(
+    {
+      ok: true,
+      outcome: 'documented',
+      intent: 'webhook',
+      caseNumber,
+      caseNumberSource: caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field',
+      docSystem: ep.type,
+      ticketId,
+      durationMs: duration,
+      pdfFilename: `ticket-${ticketId}.pdf`,
+      pdfSizeBytes: pdfBuffer.length,
+      failedAttachments,
+      timestamp: new Date().toISOString()
+    },
+    { tenantConfig, ep, docEndpoint, ticket, comments, attachments, pdfBuffer, auditStore }
+  )
 
   return {
     status: 200,

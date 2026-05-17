@@ -27,6 +27,9 @@ export interface EndpointConfig {
   username?: string         // GoPro
   password?: string         // GoPro
   caseNumberFieldId?: number | null
+  lastStatusFieldId?: number | null   // GW-01/GW-02 — status custom field
+  lastExportFieldId?: number | null   // GW-01/GW-02 — last-export timestamp
+  templateFieldId?: number | null     // NET-NEW — OneSystems caseTemplate
   tokenTtlMs?: number
 }
 
@@ -91,6 +94,15 @@ export interface DownloadedAttachment {
   data: Buffer
 }
 
+/**
+ * fetchAttachments result: the downloaded attachments AS a plain array
+ * (byte-compatible with the pre-G4 contract) plus a non-enumerable
+ * `failed` list of skipped/errored downloads for the GW-01 post-back.
+ */
+export type AttachmentsResult = DownloadedAttachment[] & {
+  failed: { filename: string; reason: string }[]
+}
+
 export interface UploadDocumentParams {
   caseNumber: string
   filename: string
@@ -113,6 +125,32 @@ export interface CreateCaseParams {
 
 export interface CreateCaseResult {
   caseNumber: string
+  caseTemplate: string
+}
+
+// ─── Documentation Outcome (GW-01 finalization seam) ─────────────────
+
+/**
+ * Typed object built by each pipeline path at its terminal point and
+ * passed once to recordOutcome(). Carries everything writeAudit +
+ * postResultToTicket need; no path-specific branching downstream.
+ */
+export interface DocumentationOutcome {
+  ok: boolean
+  outcome: 'documented' | 'orphan_case' | 'create_failed' | 'failed'
+  intent: 'create' | 'case_number' | 'webhook'
+  caseNumber?: string
+  caseNumberSource: string
+  docSystem: string
+  template?: string                       // OneSystems create path only
+  ticketId: number
+  durationMs: number
+  pdfFilename: string
+  pdfSizeBytes: number
+  failedAttachments: { filename: string; reason: string }[]
+  sanitizedReason?: string
+  timestamp: string
+  auditRef?: string
 }
 
 // ─── Handler Types ───────────────────────────────────────────────────
