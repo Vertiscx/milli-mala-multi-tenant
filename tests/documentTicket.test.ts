@@ -326,7 +326,12 @@ describe('documentTicket extraction — risk hardening', () => {
     const body = JSON.parse(String((postBack![1] as { body: string }).body))
     expect(body.ticket.comment.public).toBe(false)
     expect(body.ticket.comment.body).toContain('❌')
-    expect(body.ticket.custom_fields).toEqual([{ id: 33, value: 'failed:Sjálfvirk skjalfesting mistókst' }])
+    expect(body.ticket.custom_fields.map((x: { id: number }) => x.id)).toEqual([33])
+    const ls = JSON.parse(body.ticket.custom_fields[0].value)
+    expect(ls).toMatchObject({
+      v: 1, status: 'failed', outcome: 'failed',
+      docSystem: 'onesystems', reason: 'Sjálfvirk skjalfesting mistókst'
+    })
   })
 
   it('webhook failure path: post-back write itself rejecting does NOT change the 500', async () => {

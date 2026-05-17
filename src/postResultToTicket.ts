@@ -41,20 +41,36 @@ export interface RecordContext {
   auditStore?: AuditStore
 }
 
+/**
+ * Format an ISO-8601-UTC timestamp as the human note line
+ * `DD.MM.YYYY HH:MM:SS` in UTC. Full ISO precision is kept elsewhere
+ * (the JSON last_status `timestamp` + audit) — only this note line is
+ * reformatted for readability.
+ */
+function formatNoteTimestamp(iso: string): string {
+  const d = new Date(iso)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return (
+    `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  )
+}
+
 /** Build the verbatim GW-01 Icelandic internal note. */
 export function buildNote(o: DocumentationOutcome, ep: EndpointConfig): string {
   const lines: string[] = []
+  const tsLine = `Tímastimpill: ${formatNoteTimestamp(o.timestamp)}`
   if (o.outcome === 'documented') {
     // ✅ success template (GW-01)
     lines.push(`✅ Skjalfest í ${ep.type} mál ${o.caseNumber ?? ''}`)
-    lines.push(`Tímastimpill: ${o.timestamp}`)
+    lines.push(tsLine)
     lines.push(`Skjal: ${o.pdfFilename} (${o.pdfSizeBytes} bytes)`)
     if (o.auditRef) lines.push(`Vísun: ${o.auditRef}`)
   } else {
     // ❌ failure template (GW-01) — sanitized reason only
     lines.push(`❌ Skjalfesting mistókst`)
     lines.push(`Ástæða: ${o.sanitizedReason ?? 'Óþekkt villa'}`)
-    lines.push(`Tímastimpill: ${o.timestamp}`)
+    lines.push(tsLine)
     if (o.auditRef) lines.push(`Vísun: ${o.auditRef}`)
   }
   if (o.failedAttachments.length > 0) {
@@ -68,12 +84,39 @@ export function buildNote(o: DocumentationOutcome, ep: EndpointConfig): string {
 }
 
 /**
+ * Build the ratified GW-01 last_status JSON value (compact single-line,
+ * cross-repo contract v1). Absent fields are OMITTED, never null.
+ *  - status:    'success' iff outcome==='documented', else 'failed'
+ *  - outcome:   verbatim o.outcome
+ *  - timestamp: full ISO-8601 UTC (unchanged precision)
+ *  - caseNumber present → included (documented + orphan_case)
+ *  - docSystem: always
+ *  - template present → included (OneSystems create path)
+ *  - reason:    included only when status==='failed'
+ */
+export function buildLastStatusValue(o: DocumentationOutcome): string {
+  const isSuccess = o.outcome === 'documented'
+  const payload: Record<string, unknown> = {
+    v: 1,
+    status: isSuccess ? 'success' : 'failed',
+    outcome: o.outcome,
+    timestamp: o.timestamp
+  }
+  if (o.caseNumber) payload.caseNumber = o.caseNumber
+  payload.docSystem = o.docSystem
+  if (o.template) payload.template = o.template
+  if (!isSuccess) payload.reason = o.sanitizedReason ?? 'error'
+  return JSON.stringify(payload)
+}
+
+/**
  * Build the custom_fields array per the locked decision.
  *  - SUCCESS (documented): caseNumberFieldId (doc-system-sourced) +
- *    templateFieldId (OS create only) + lastStatusFieldId='success' +
- *    lastExportFieldId=YYYY-MM-DD (Zendesk date field; full ISO stays
- *    in the note + audit).
- *  - FAILURE: ONLY lastStatusFieldId='failed:<short reason>'.
+ *    templateFieldId (OS create only) + lastStatusFieldId (=ratified
+ *    JSON) + lastExportFieldId=YYYY-MM-DD (Zendesk date field; full ISO
+ *    stays in the JSON + note + audit).
+ *  - FAILURE: ONLY lastStatusFieldId (=ratified JSON — itself carrying
+ *    caseNumber for orphan_case + reason for failures).
  * Any field whose *FieldId is unset/null is skipped (graceful).
  */
 export function buildCustomFields(
@@ -89,18 +132,17 @@ export function buildCustomFields(
       fields.push({ id: ep.templateFieldId, value: o.template })
     }
     if (ep.lastStatusFieldId != null) {
-      fields.push({ id: ep.lastStatusFieldId, value: 'success' })
+      fields.push({ id: ep.lastStatusFieldId, value: buildLastStatusValue(o) })
     }
     if (ep.lastExportFieldId != null) {
       // Zendesk DATE custom field — accepts YYYY-MM-DD only. o.timestamp
       // is new Date().toISOString(); the first 10 chars are YYYY-MM-DD.
-      // Full ISO precision is kept in the note + audit, not this field.
+      // Full ISO precision is kept in the JSON + note + audit.
       fields.push({ id: ep.lastExportFieldId, value: o.timestamp.slice(0, 10) })
     }
   } else {
     if (ep.lastStatusFieldId != null) {
-      const short = (o.sanitizedReason ?? 'error').slice(0, 80)
-      fields.push({ id: ep.lastStatusFieldId, value: `failed:${short}` })
+      fields.push({ id: ep.lastStatusFieldId, value: buildLastStatusValue(o) })
     }
   }
   return fields

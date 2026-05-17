@@ -517,7 +517,12 @@ describe('handleCases', () => {
       const body = JSON.parse(String(puts[0][1].body))
       expect(body.ticket.comment.public).toBe(false)
       expect(body.ticket.comment.body).toContain('✅')
-      expect(body.ticket.custom_fields.some((f: any) => f.id === 33 && f.value === 'success')).toBe(true)
+      const ls33 = body.ticket.custom_fields.find((f: any) => f.id === 33)
+      expect(ls33).toBeTruthy()
+      const ls = JSON.parse(ls33.value)
+      expect(ls.v).toBe(1)
+      expect(ls.status).toBe('success')
+      expect(ls.outcome).toBe('documented')
     })
 
     it('create_failed → 502 unchanged AND post-back PUT with ❌ + only status field', async () => {
@@ -541,7 +546,13 @@ describe('handleCases', () => {
       expect(puts).toHaveLength(1)
       const body = JSON.parse(String(puts[0][1].body))
       expect(body.ticket.comment.body).toContain('❌')
-      expect(body.ticket.custom_fields).toEqual([{ id: 33, value: 'failed:Stofnun máls mistókst' }])
+      expect(body.ticket.custom_fields.map((f: any) => f.id)).toEqual([33])
+      const ls = JSON.parse(body.ticket.custom_fields[0].value)
+      expect(ls).toMatchObject({
+        v: 1, status: 'failed', outcome: 'create_failed',
+        docSystem: 'onesystems', reason: 'Stofnun máls mistókst'
+      })
+      expect('caseNumber' in ls).toBe(false)
     })
 
     it('post-back failure does NOT change the HTTP response (best-effort)', async () => {

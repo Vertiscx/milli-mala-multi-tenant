@@ -75,17 +75,28 @@ const ctx = () => ({
 })
 
 describe('buildNote', () => {
-  it('documented → ✅ Icelandic, special chars preserved', () => {
-    const n = buildNote(baseOutcome(), fullEp)
+  it('documented → ✅ Icelandic, special chars preserved; UTC human timestamp', () => {
+    const o = baseOutcome()
+    const n = buildNote(o, fullEp)
     expect(n).toContain('✅ Skjalfest í onesystems mál OS-9')
-    expect(n).toContain('Tímastimpill: 2026-05-17T10:00:00.000Z')
     expect(n).toContain('Skjal: ticket-123.pdf (4000 bytes)')
+    const tsLine = n.split('\n').find(l => l.startsWith('Tímastimpill:'))!
+    expect(tsLine).toMatch(/^Tímastimpill: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}$/)
+    const d = new Date(o.timestamp)
+    const p = (x: number) => String(x).padStart(2, '0')
+    const expected = `Tímastimpill: ${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+    expect(tsLine).toBe(expected)
+    expect(tsLine).toBe('Tímastimpill: 17.05.2026 10:00:00')
   })
 
-  it('failure → ❌ sanitized reason, Icelandic', () => {
-    const n = buildNote(baseOutcome({ ok: false, outcome: 'create_failed', sanitizedReason: 'Stofnun máls mistókst' }), fullEp)
+  it('failure → ❌ sanitized reason, Icelandic; UTC human timestamp', () => {
+    const o = baseOutcome({ ok: false, outcome: 'create_failed', sanitizedReason: 'Stofnun máls mistókst' })
+    const n = buildNote(o, fullEp)
     expect(n).toContain('❌ Skjalfesting mistókst')
     expect(n).toContain('Ástæða: Stofnun máls mistókst')
+    const tsLine = n.split('\n').find(l => l.startsWith('Tímastimpill:'))!
+    expect(tsLine).toMatch(/^Tímastimpill: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}$/)
+    expect(tsLine).toBe('Tímastimpill: 17.05.2026 10:00:00')
   })
 
   it('lists failed attachments', () => {
@@ -96,28 +107,70 @@ describe('buildNote', () => {
 })
 
 describe('buildCustomFields', () => {
-  it('documented → all 4 fields; lastExport is date-only YYYY-MM-DD', () => {
+  it('documented → all 4 fields; lastStatus JSON v1; lastExport date-only', () => {
     const o = baseOutcome()
     const f = buildCustomFields(o, fullEp)
-    expect(f).toEqual([
-      { id: 11, value: 'OS-9' },
-      { id: 22, value: 'TPL' },
-      { id: 33, value: 'success' },
-      { id: 44, value: '2026-05-17' }
-    ])
+    expect(f.map(x => x.id)).toEqual([11, 22, 33, 44])
+    expect(f.find(x => x.id === 11)!.value).toBe('OS-9')
+    expect(f.find(x => x.id === 22)!.value).toBe('TPL')
+
+    const lsRaw = f.find(x => x.id === 33)!.value as string
+    expect(() => JSON.parse(lsRaw)).not.toThrow()
+    const ls = JSON.parse(lsRaw)
+    expect(ls).toEqual({
+      v: 1,
+      status: 'success',
+      outcome: 'documented',
+      timestamp: o.timestamp,
+      caseNumber: 'OS-9',
+      docSystem: 'onesystems',
+      template: 'TPL'
+    })
+    expect('reason' in ls).toBe(false)
+    expect(ls.timestamp).toBe(o.timestamp) // full ISO precision retained
+
     const lastExport = f.find(x => x.id === 44)!
     expect(lastExport.value).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(lastExport.value).toBe(o.timestamp.slice(0, 10))
   })
 
-  it('failure → ONLY lastStatusFieldId failed:<reason>', () => {
-    const f = buildCustomFields(baseOutcome({ ok: false, outcome: 'create_failed', sanitizedReason: 'Stofnun máls mistókst' }), fullEp)
-    expect(f).toEqual([{ id: 33, value: 'failed:Stofnun máls mistókst' }])
+  it('documented WITHOUT template → template key OMITTED (not null)', () => {
+    const o = baseOutcome({ template: undefined })
+    const ls = JSON.parse(buildCustomFields(o, fullEp).find(x => x.id === 33)!.value as string)
+    expect('template' in ls).toBe(false)
+    expect(ls.caseNumber).toBe('OS-9')
   })
 
-  it('orphan_case → ONLY lastStatusFieldId (case# NOT re-written)', () => {
-    const f = buildCustomFields(baseOutcome({ ok: false, outcome: 'orphan_case', caseNumber: 'OS-1', sanitizedReason: 'x' }), fullEp)
-    expect(f).toEqual([{ id: 33, value: 'failed:x' }])
+  it('create_failed → ONLY lastStatus JSON; no caseNumber/template keys', () => {
+    const f = buildCustomFields(baseOutcome({ ok: false, outcome: 'create_failed', caseNumber: undefined, template: undefined, sanitizedReason: 'Stofnun máls mistókst' }), fullEp)
+    expect(f.map(x => x.id)).toEqual([33])
+    const ls = JSON.parse(f[0].value as string)
+    expect(ls).toEqual({
+      v: 1,
+      status: 'failed',
+      outcome: 'create_failed',
+      timestamp: '2026-05-17T10:00:00.000Z',
+      docSystem: 'onesystems',
+      reason: 'Stofnun máls mistókst'
+    })
+    expect('caseNumber' in ls).toBe(false)
+    expect('template' in ls).toBe(false)
+  })
+
+  it('orphan_case → ONLY lastStatus JSON carrying caseNumber + reason', () => {
+    const f = buildCustomFields(baseOutcome({ ok: false, outcome: 'orphan_case', caseNumber: 'OS-1', template: undefined, sanitizedReason: 'x' }), fullEp)
+    expect(f.map(x => x.id)).toEqual([33])
+    const ls = JSON.parse(f[0].value as string)
+    expect(ls).toEqual({
+      v: 1,
+      status: 'failed',
+      outcome: 'orphan_case',
+      timestamp: '2026-05-17T10:00:00.000Z',
+      caseNumber: 'OS-1',
+      docSystem: 'onesystems',
+      reason: 'x'
+    })
+    expect('template' in ls).toBe(false)
     expect(f.some(x => x.id === 11)).toBe(false)
   })
 
@@ -146,17 +199,27 @@ describe('postResultToTicket — single atomic PUT', () => {
     expect(t.custom_fields).toHaveLength(4)
   })
 
-  it('create_failed → one PUT, ❌ note + ONLY status field', async () => {
-    await postResultToTicket(baseOutcome({ ok: false, outcome: 'create_failed', sanitizedReason: 'Stofnun máls mistókst' }), ctx())
+  it('create_failed → one PUT, ❌ note + ONLY status JSON field', async () => {
+    await postResultToTicket(baseOutcome({ ok: false, outcome: 'create_failed', caseNumber: undefined, template: undefined, sanitizedReason: 'Stofnun máls mistókst' }), ctx())
     const t = (putMock.mock.calls[0][2] as any).ticket
     expect(t.comment.body).toContain('❌')
-    expect(t.custom_fields).toEqual([{ id: 33, value: 'failed:Stofnun máls mistókst' }])
+    expect(t.custom_fields.map((x: any) => x.id)).toEqual([33])
+    expect(JSON.parse(t.custom_fields[0].value)).toEqual({
+      v: 1, status: 'failed', outcome: 'create_failed',
+      timestamp: '2026-05-17T10:00:00.000Z', docSystem: 'onesystems',
+      reason: 'Stofnun máls mistókst'
+    })
   })
 
-  it('orphan_case → note + ONLY status field, case# not re-written', async () => {
-    await postResultToTicket(baseOutcome({ ok: false, outcome: 'orphan_case', caseNumber: 'OS-1', sanitizedReason: 'x' }), ctx())
+  it('orphan_case → note + ONLY status JSON (carries caseNumber), case# field not re-written', async () => {
+    await postResultToTicket(baseOutcome({ ok: false, outcome: 'orphan_case', caseNumber: 'OS-1', template: undefined, sanitizedReason: 'x' }), ctx())
     const t = (putMock.mock.calls[0][2] as any).ticket
-    expect(t.custom_fields).toEqual([{ id: 33, value: 'failed:x' }])
+    expect(t.custom_fields.map((x: any) => x.id)).toEqual([33])
+    expect(JSON.parse(t.custom_fields[0].value)).toEqual({
+      v: 1, status: 'failed', outcome: 'orphan_case',
+      timestamp: '2026-05-17T10:00:00.000Z', caseNumber: 'OS-1',
+      docSystem: 'onesystems', reason: 'x'
+    })
   })
 
   it('NEVER throws when requestWrite rejects', async () => {
