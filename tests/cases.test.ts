@@ -382,4 +382,91 @@ describe('handleCases', () => {
     expect(result.body.error).toBe('Internal server error')
     expect(JSON.stringify(result.body)).not.toContain('database')
   })
+
+  // (G3) audit-correctness: enriched persisted audit entry on /v1/cases
+  function captureAuditStore() {
+    const entries: Record<string, unknown>[] = []
+    return {
+      store: {
+        put: async (_k: string, v: string) => { entries.push(JSON.parse(v)) }
+      },
+      entries
+    }
+  }
+
+  it('documented (create) → audit entry: outcome=documented, source=created, intent=create, last_status=OK, last_export present', async () => {
+    mockTicketPrelude()
+    fetchMock()
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-9' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
+
+    const audit = captureAuditStore()
+    const result = await handleCases({
+      body: { ticket_id: 123, create: NS_CREATE },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems',
+      auditStore: audit.store as never
+    })
+    expect(result.status).toBe(200)
+    const e = audit.entries[0] as { event: string; outcome: string; intent: string; last_status: string; last_export: string; destination: { case_number_source: string } }
+    expect(e.event).toBe('ticket_archived')
+    expect(e.outcome).toBe('documented')
+    expect(e.destination.case_number_source).toBe('created')
+    expect(e.intent).toBe('create')
+    expect(e.last_status).toBe('OK')
+    expect(typeof e.last_export).toBe('string')
+    expect(e.last_export.length).toBeGreaterThan(0)
+  })
+
+  it('documented (case_number) → audit entry: outcome=documented, source=provided, intent=case_number', async () => {
+    mockTicketPrelude()
+    fetchMock()
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
+
+    const audit = captureAuditStore()
+    const result = await handleCases({
+      body: { ticket_id: 123, case_number: 'C-9' },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems',
+      auditStore: audit.store as never
+    })
+    expect(result.status).toBe(200)
+    const e = audit.entries[0] as { outcome: string; intent: string; destination: { case_number_source: string } }
+    expect(e.outcome).toBe('documented')
+    expect(e.destination.case_number_source).toBe('provided')
+    expect(e.intent).toBe('case_number')
+  })
+
+  it('forced orphan_case → 207 unchanged AND persisted audit entry event=orphan_case, distinguishable from documented', async () => {
+    mockTicketPrelude()
+    fetchMock()
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-1' }) })
+      .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'err' })
+
+    const audit = captureAuditStore()
+    const result = await handleCases({
+      body: { ticket_id: 123, create: NS_CREATE },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems',
+      auditStore: audit.store as never
+    })
+    expect(result.status).toBe(207)
+    expect(result.body.ok).toBe(false)
+    expect(result.body.outcome).toBe('orphan_case')
+    expect(result.body.caseNumber).toBe('OS-1')
+    const e = audit.entries[0] as { event: string; outcome: string; last_status: string; destination: { case_number: string } }
+    expect(e.event).toBe('orphan_case')
+    expect(e.outcome).toBe('orphan_case')
+    expect(e.last_status).toBe('ORPHAN')
+    expect(e.destination.case_number).toBe('OS-1')
+    // distinguishable from a true documented success
+    expect(e.event).not.toBe('ticket_archived')
+  })
 })

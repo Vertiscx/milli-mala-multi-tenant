@@ -229,7 +229,12 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
           await writeAudit({
             brandId, ticketId, ticket, comments, attachments, tenantConfig,
             docEndpoint, ep, caseNumber: createdCaseNumber, pdfBuffer,
-            durationMs: Date.now() - startTime, auditStore
+            durationMs: Date.now() - startTime, auditStore,
+            event: 'orphan_case',
+            outcome: 'orphan_case',
+            caseNumberSource: 'created',
+            intent: 'create',
+            lastStatus: 'ORPHAN'
           })
         } catch {
           // writeAudit never rejects, but stay defensive — the 207 is what matters.
@@ -252,13 +257,20 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
 
     // 6. Success
     const duration = Date.now() - startTime
+    const lastExport = new Date().toISOString()
     await writeAudit({
       brandId, ticketId, ticket, comments, attachments, tenantConfig,
-      docEndpoint, ep, caseNumber, pdfBuffer, durationMs: duration, auditStore
+      docEndpoint, ep, caseNumber, pdfBuffer, durationMs: duration, auditStore,
+      event: 'ticket_archived',
+      outcome: 'documented',
+      caseNumberSource: hasCreate ? 'created' : 'provided',
+      intent: hasCreate ? 'create' : 'case_number',
+      lastStatus: 'OK',
+      lastExport
     })
     logger.info('Cases request complete', {
       brand_id: brandId, ticketId, docEndpoint, doc_system: ep.type,
-      caseNumber, created: hasCreate, last_status: 'OK', last_export: new Date().toISOString()
+      caseNumber, created: hasCreate, last_status: 'OK', last_export: lastExport
     })
 
     return {
