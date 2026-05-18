@@ -273,4 +273,88 @@ describe('documentTicket extraction — risk hardening', () => {
     const persisted = JSON.parse(captured[0])
     expect(persisted.duration_ms).toBe(bodyDuration)
   })
+
+  // ─── G4 gap: webhook FAILURE-path GW-01 post-back ────────────────────
+  it('webhook failure path: upload throws → unchanged 500 AND GW-01 ❌ post-back fired', async () => {
+    // Endpoint with field IDs so the failure post-back writes last_status.
+    const tenantConfig = makeTenantConfig({
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: 'https://api.onesystems.test',
+          appKey: 'test-key',
+          lastStatusFieldId: 33
+        }
+      }
+    })
+    const f = global.fetch as ReturnType<typeof vi.fn>
+    f
+      // getTicket
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: baseTicket }) })
+      // getTicketComments
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ comments: [{ id: 1, body: 'Hi', public: true, author_id: 100 }] })
+      })
+      // getUsersMany
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ users: [{ id: 100, name: 'A', email: 'a@test.com' }] })
+      })
+      // OneSystems auth
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      // OneSystems upload → FAILS (postToCase throws)
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'upload boom' })
+      // GW-01 failure post-back PUT /tickets/123.json
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
+
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig })
+    const result = await handleWebhook(req)
+
+    // 500 envelope unchanged (rethrow preserved)
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+    expect(typeof result.body.duration_ms).toBe('number')
+
+    // GW-01 failure post-back fired: PUT carrying ❌ note + last_status=failed
+    const postBack = f.mock.calls.find(
+      c => String(c[0]).includes('/tickets/123.json')
+        && (c[1] as { method?: string })?.method === 'PUT'
+        && String((c[1] as { body?: string })?.body ?? '').includes('"comment"')
+    )
+    expect(postBack).toBeTruthy()
+    const body = JSON.parse(String((postBack![1] as { body: string }).body))
+    expect(body.ticket.comment.public).toBe(false)
+    expect(body.ticket.comment.body).toContain('❌')
+    expect(body.ticket.custom_fields.map((x: { id: number }) => x.id)).toEqual([33])
+    const ls = JSON.parse(body.ticket.custom_fields[0].value)
+    expect(ls).toMatchObject({
+      v: 1, status: 'failed', outcome: 'failed',
+      docSystem: 'onesystems', reason: 'Sjálfvirk skjalfesting mistókst'
+    })
+  })
+
+  it('webhook failure path: post-back write itself rejecting does NOT change the 500', async () => {
+    const f = global.fetch as ReturnType<typeof vi.fn>
+    f
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: baseTicket }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ comments: [{ id: 1, body: 'Hi', public: true, author_id: 100 }] })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ users: [{ id: 100, name: 'A', email: 'a@test.com' }] })
+      })
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'upload boom' })
+      // GW-01 failure post-back PUT itself rejects → must be swallowed
+      .mockRejectedValueOnce(new Error('Zendesk down'))
+
+    const req = makeRequest({ ticket_id: 123 })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+  })
 })

@@ -483,4 +483,108 @@ describe('handleCases', () => {
     // distinguishable from a true documented success
     expect(e.event).not.toBe('ticket_archived')
   })
+
+  // ─── G4 GW-01: post-back fires once, response byte-unchanged ─────────
+  describe('G4 — recordOutcome / GW-01 post-back', () => {
+    const epWithFields = () =>
+      makeTenantConfig({
+        endpoints: {
+          onesystems: {
+            type: 'onesystems',
+            baseUrl: 'https://api.onesystems.test',
+            appKey: 'test-key',
+            caseNumberFieldId: 42,
+            templateFieldId: 22,
+            lastStatusFieldId: 33,
+            lastExportFieldId: 44
+          }
+        }
+      })
+
+    // Count PUT /tickets/{id}.json that carry a comment (the post-back).
+    const postBackPuts = () =>
+      fetchMock().mock.calls.filter(
+        c => String(c[0]).includes('/tickets/123.json')
+          && (c[1] as any)?.method === 'PUT'
+          && String((c[1] as any)?.body ?? '').includes('"comment"')
+      )
+
+    it('documented (case_number) → 200 unchanged AND exactly one post-back PUT (✅ + fields)', async () => {
+      mockTicketPrelude()
+      fetchMock()
+        .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) }) // post-back PUT
+
+      const result = await handleCases({
+        body: { ticket_id: 123, case_number: 'C-9' },
+        headers: KEY,
+        tenantConfig: epWithFields(),
+        docEndpoint: 'onesystems'
+      })
+      expect(result.status).toBe(200)
+      expect(result.body.outcome).toBe('documented')
+      expect(result.body.caseNumber).toBe('C-9')
+
+      const puts = postBackPuts()
+      expect(puts).toHaveLength(1)
+      const body = JSON.parse(String(puts[0][1].body))
+      expect(body.ticket.comment.public).toBe(false)
+      expect(body.ticket.comment.body).toContain('✅')
+      const ls33 = body.ticket.custom_fields.find((f: any) => f.id === 33)
+      expect(ls33).toBeTruthy()
+      const ls = JSON.parse(ls33.value)
+      expect(ls.v).toBe(1)
+      expect(ls.status).toBe('success')
+      expect(ls.outcome).toBe('documented')
+    })
+
+    it('create_failed → 502 unchanged AND post-back PUT with ❌ + only status field', async () => {
+      mockTicketPrelude()
+      fetchMock()
+        .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+        .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) }) // post-back PUT
+
+      const result = await handleCases({
+        body: { ticket_id: 123, create: NS_CREATE },
+        headers: KEY,
+        tenantConfig: epWithFields(),
+        docEndpoint: 'onesystems'
+      })
+      expect(result.status).toBe(502)
+      expect(result.body.outcome).toBe('create_failed')
+      expect(result.body.caseNumber).toBeUndefined()
+
+      const puts = postBackPuts()
+      expect(puts).toHaveLength(1)
+      const body = JSON.parse(String(puts[0][1].body))
+      expect(body.ticket.comment.body).toContain('❌')
+      expect(body.ticket.custom_fields.map((f: any) => f.id)).toEqual([33])
+      const ls = JSON.parse(body.ticket.custom_fields[0].value)
+      expect(ls).toMatchObject({
+        v: 1, status: 'failed', outcome: 'create_failed',
+        docSystem: 'onesystems', reason: 'Stofnun máls mistókst'
+      })
+      expect('caseNumber' in ls).toBe(false)
+    })
+
+    it('post-back failure does NOT change the HTTP response (best-effort)', async () => {
+      mockTicketPrelude()
+      fetchMock()
+        .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
+        .mockRejectedValueOnce(new Error('Zendesk down')) // post-back PUT rejects
+
+      const result = await handleCases({
+        body: { ticket_id: 123, case_number: 'C-9' },
+        headers: KEY,
+        tenantConfig: epWithFields(),
+        docEndpoint: 'onesystems'
+      })
+      expect(result.status).toBe(200)
+      expect(result.body.ok).toBe(true)
+      expect(result.body.outcome).toBe('documented')
+    })
+  })
 })

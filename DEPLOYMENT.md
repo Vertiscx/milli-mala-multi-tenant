@@ -354,9 +354,14 @@ Each tenant object has this structure:
 | `endpoints.{name}.appKey` | string | If OneSystems | OneSystems app key |
 | `endpoints.{name}.username` | string | If GoPro | GoPro login username |
 | `endpoints.{name}.password` | string | If GoPro | GoPro login password |
-| `endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID for case number |
+| `endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID the gateway writes the archive case number to (GW-01 post-back) |
+| `endpoints.{name}.lastStatusFieldId` | number | No | Zendesk custom field ID for the GW-01 `last_status` value (ratified JSON v1 — see [Result post-back](README.md#result-post-back-gw-01)) |
+| `endpoints.{name}.lastExportFieldId` | number | No | Zendesk **date** custom field ID for the last successful export (`YYYY-MM-DD`) |
+| `endpoints.{name}.templateFieldId` | number | No | Zendesk custom field ID for the case template (written on the OneSystems create path only) |
 | `endpoints.{name}.tokenTtlMs` | number | No | Auth token TTL in ms (default: 1500000) |
-| `malaskra.apiKey` | string | Yes | API key for `/v1/attachments` authentication |
+| `malaskra.apiKey` | string | Yes | API key for `/v1/cases` and `/v1/attachments` authentication (`X-Api-Key`) |
+
+> **Post-back field IDs are optional and graceful.** Any `*FieldId` left unset is skipped — the gateway still posts the internal note. Custom fields are **account-level** in Zendesk: the same numeric IDs apply across every brand on one Zendesk account, so they are configured per Zendesk account, not per brand. They are written back to the ticket by every documentation path (`/v1/cases`, `/v1/webhook`, `/v1/attachments`).
 | `pdf.companyName` | string | No | Company name in PDF header |
 | `pdf.locale` | string | No | Date formatting locale (default: `is-IS`) |
 | `pdf.includeInternalNotes` | boolean | No | Include internal notes in PDF (default: `false`) |
@@ -426,6 +431,17 @@ Each institution needs a webhook and trigger configured in their Zendesk account
 ```
 
 The `doc_endpoint` value should match one of the keys in the tenant's `endpoints` map. It is hardcoded per trigger — each brand knows which archive system to target.
+
+> ### ⚠️ Loop-safety — required (GW-04)
+>
+> After documenting, the gateway writes the result **back onto the ticket** (an internal note plus the status custom fields — the GW-01 post-back). That ticket update will **re-fire the trigger** if its condition can still match, causing an infinite loop (repeated archive uploads and ticket notes for one ticket).
+>
+> The trigger **must be one-shot**. Use a marker tag the trigger both requires and removes in the same run:
+>
+> - **Condition:** ticket has tag `malaskra_doc_pending` (the institution's own automation adds this tag when documentation is wanted).
+> - **Actions:** Notify webhook (as above) **and** *Remove tag* `malaskra_doc_pending`.
+>
+> Because the trigger removes its own trigger condition, the post-back ticket update cannot satisfy it again — it fires exactly once per request. A trigger that fires on a general condition (e.g. "ticket solved") **without** a self-removing marker **will loop in production**. This is load-bearing operational safety, not optional. The manual Málaskrá sidebar path is user-initiated and not subject to this, but any trigger/automation path is.
 
 ### Step 3: Activate
 

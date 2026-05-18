@@ -32,9 +32,10 @@ import { timingSafeEqual, createHash } from 'node:crypto'
 import { createLogger } from './logger.js'
 import { resolveEndpoint, validateCaseNumber } from './tenant.js'
 import { createDocClient } from './docClient.js'
-import { fetchTicketInfo, renderPdf, postToCase, writeAudit } from './documentTicket.js'
+import { fetchTicketInfo, renderPdf, postToCase } from './documentTicket.js'
+import { recordOutcome } from './postResultToTicket.js'
 import type { OneSystemsClient } from './onesystems.js'
-import type { HandlerResult, TenantConfig, AuditStore, Logger } from './types.js'
+import type { HandlerResult, TenantConfig, AuditStore, Logger, DocumentationOutcome, EndpointConfig } from './types.js'
 
 const logger: Logger = createLogger('cases')
 
@@ -135,6 +136,19 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     // ─── LOCKED order (post-gate) ─────────────────────────────────────
     // Latched ONLY on the create path; stays undefined on the case_number path.
     let createdCaseNumber: string | undefined
+    let createdTemplate: string | undefined
+
+    // GW-01 finalizer wrapper. Short, safe Icelandic reasons are passed
+    // per terminal point; raw error detail stays in the existing
+    // logger.error calls + audit/stdout only (never in the note).
+    const finalize = async (o: DocumentationOutcome, epc: EndpointConfig): Promise<void> => {
+      try {
+        await recordOutcome(o, {
+          tenantConfig, ep: epc, docEndpoint,
+          ticket, comments, attachments, pdfBuffer, auditStore
+        })
+      } catch { /* recordOutcome never throws; stay defensive */ }
+    }
 
     // 1. fetchTicketInfo (owns the fail-closed brand cross-check)
     const fetched = await fetchTicketInfo(tenantConfig, ticketId)
@@ -151,7 +165,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         }
       }
     }
-    const { ticket, comments, attachments, userMap, solvingAgentEmail } = fetched.info
+    const { ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail } = fetched.info
 
     // 2. renderPdf
     const pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
@@ -180,10 +194,28 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         })
         // LATCH — create path only, the INSTANT createCase resolves
         createdCaseNumber = result.caseNumber
+        createdTemplate = result.caseTemplate
       } catch (err) {
         // SEPARATE catch — distinct from the inner steps-4-5 catch and the
         // outer 500. Nothing was minted, so NO created_case_number.
         logger.error('createCase failed', { brand_id: brandId, ticketId, error: (err as Error).message })
+        await finalize(
+          {
+            ok: false,
+            outcome: 'create_failed',
+            intent: 'create',
+            caseNumberSource: 'created',
+            docSystem: ep.type,
+            ticketId,
+            durationMs: Date.now() - startTime,
+            pdfFilename: `ticket-${ticketId}.pdf`,
+            pdfSizeBytes: pdfBuffer.length,
+            failedAttachments,
+            sanitizedReason: 'Stofnun máls mistókst',
+            timestamp: new Date().toISOString()
+          },
+          ep
+        )
         return {
           status: 502,
           body: { ok: false, outcome: 'create_failed', error: 'Case creation failed' }
@@ -225,20 +257,27 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         logger.error('Post-create step failed — orphan case', {
           brand_id: brandId, ticketId, caseNumber: createdCaseNumber, error: (err as Error).message
         })
-        try {
-          await writeAudit({
-            brandId, ticketId, ticket, comments, attachments, tenantConfig,
-            docEndpoint, ep, caseNumber: createdCaseNumber, pdfBuffer,
-            durationMs: Date.now() - startTime, auditStore,
-            event: 'orphan_case',
+        await finalize(
+          {
+            ok: false,
             outcome: 'orphan_case',
-            caseNumberSource: 'created',
             intent: 'create',
-            lastStatus: 'ORPHAN'
-          })
-        } catch {
-          // writeAudit never rejects, but stay defensive — the 207 is what matters.
-        }
+            caseNumber: createdCaseNumber,
+            caseNumberSource: 'created',
+            docSystem: ep.type,
+            // orphan_case: case# is NOT re-written by the post-back
+            // (the step-4 stamp already owns the field). Only the
+            // status field + note are written via finalize.
+            ticketId,
+            durationMs: Date.now() - startTime,
+            pdfFilename: `ticket-${ticketId}.pdf`,
+            pdfSizeBytes: pdfBuffer.length,
+            failedAttachments,
+            sanitizedReason: 'Skjalfesting eftir stofnun máls mistókst',
+            timestamp: new Date().toISOString()
+          },
+          ep
+        )
         return {
           status: 207,
           body: {
@@ -250,6 +289,27 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         }
       }
       // CASE_NUMBER PATH — pre-existing case, nothing minted, retry safe.
+      // GW-01 finalizer fires here (terminal failure) so the agent sees a
+      // ❌ note + last_status. The HTTP 500 envelope from the OUTER catch
+      // is UNCHANGED — finalize is a best-effort side-effect only.
+      await finalize(
+        {
+          ok: false,
+          outcome: 'failed',
+          intent: 'case_number',
+          caseNumber,
+          caseNumberSource: 'provided',
+          docSystem: ep.type,
+          ticketId,
+          durationMs: Date.now() - startTime,
+          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfSizeBytes: pdfBuffer.length,
+          failedAttachments,
+          sanitizedReason: 'Skjalfesting í fyrirliggjandi mál mistókst',
+          timestamp: new Date().toISOString()
+        },
+        ep
+      )
       // Rethrow to the OUTER catch → generic 500. NOT orphan_case, NO
       // created_case_number, no 8th code.
       throw err
@@ -258,16 +318,25 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     // 6. Success
     const duration = Date.now() - startTime
     const lastExport = new Date().toISOString()
-    await writeAudit({
-      brandId, ticketId, ticket, comments, attachments, tenantConfig,
-      docEndpoint, ep, caseNumber, pdfBuffer, durationMs: duration, auditStore,
-      event: 'ticket_archived',
-      outcome: 'documented',
-      caseNumberSource: hasCreate ? 'created' : 'provided',
-      intent: hasCreate ? 'create' : 'case_number',
-      lastStatus: 'OK',
-      lastExport
-    })
+    await finalize(
+      {
+        ok: true,
+        outcome: 'documented',
+        intent: hasCreate ? 'create' : 'case_number',
+        caseNumber,
+        caseNumberSource: hasCreate ? 'created' : 'provided',
+        docSystem: ep.type,
+        // templateFieldId written ONLY on the OneSystems create path.
+        template: hasCreate ? createdTemplate : undefined,
+        ticketId,
+        durationMs: duration,
+        pdfFilename: `ticket-${ticketId}.pdf`,
+        pdfSizeBytes: pdfBuffer.length,
+        failedAttachments,
+        timestamp: lastExport
+      },
+      ep
+    )
     logger.info('Cases request complete', {
       brand_id: brandId, ticketId, docEndpoint, doc_system: ep.type,
       caseNumber, created: hasCreate, last_status: 'OK', last_export: lastExport

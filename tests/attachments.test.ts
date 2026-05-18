@@ -420,4 +420,113 @@ describe('handleAttachments', () => {
     expect(result.body.error).toBe('Internal server error')
     expect(JSON.stringify(result.body)).not.toContain('database')
   })
+
+  describe('GW-01 post-back on the attachments path', () => {
+    // GoPro tenant with the four account-level field IDs configured.
+    const goproWithFields = (): TenantConfig =>
+      makeTenantConfig({
+        endpoints: {
+          gopro: {
+            type: 'gopro',
+            baseUrl: 'https://api.gopro.test',
+            username: 'guser',
+            password: 'gpass',
+            caseNumberFieldId: 42,
+            lastStatusFieldId: 33,
+            lastExportFieldId: 44
+          }
+        }
+      })
+
+    // PUT /tickets/{id}.json that carries a comment (the GW-01 post-back).
+    const postBackPuts = (id: number) =>
+      (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+        c => String(c[0]).includes(`/tickets/${id}.json`)
+          && (c[1] as { method?: string } | undefined)?.method === 'PUT'
+          && String((c[1] as { body?: string } | undefined)?.body ?? '').includes('"comment"')
+      )
+
+    it('forwards an attachment AND posts ✅ note + caseNumber/last_status fields', async () => {
+      const fakeFile = Buffer.from('file-bytes')
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: { id: 500, brand_id: 360001234567 } }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ comments: [{ id: 1, public: true, attachments: [{ file_name: 'a.pdf', content_type: 'application/pdf', size: 9, content_url: 'https://test.zendesk.com/att/a' }] }] }) })
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => fakeFile.buffer })
+        .mockResolvedValueOnce({ ok: true, text: async () => 'gopro-token' })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ succeeded: true, identifier: 'doc-1' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) }) // post-back PUT
+
+      const result = await handleAttachments({
+        body: { ticket_id: 500, case_number: 'GP-500' },
+        headers: { 'x-api-key': 'test-malaskra-key' },
+        tenantConfig: goproWithFields(),
+        docEndpoint: 'gopro'
+      })
+
+      expect(result.status).toBe(200)
+      expect(result.body.attachments_forwarded).toBe(1)
+
+      const puts = postBackPuts(500)
+      expect(puts).toHaveLength(1)
+      const body = JSON.parse(String(puts[0][1].body))
+      expect(body.ticket.comment.public).toBe(false)
+      expect(body.ticket.comment.body).toContain('✅')
+      const cf = body.ticket.custom_fields as { id: number; value: string }[]
+      expect(cf.find(f => f.id === 42)?.value).toBe('GP-500')
+      const ls = JSON.parse(cf.find(f => f.id === 33)!.value)
+      expect(ls).toMatchObject({ v: 1, status: 'success', outcome: 'documented', caseNumber: 'GP-500' })
+    })
+
+    it('posts ❌ note + only last_status field when an attachment upload fails', async () => {
+      const fakeFile = Buffer.from('file-bytes')
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: { id: 501, brand_id: 360001234567 } }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ comments: [{ id: 1, public: true, attachments: [{ file_name: 'a.pdf', content_type: 'application/pdf', size: 9, content_url: 'https://test.zendesk.com/att/a' }] }] }) })
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => fakeFile.buffer })
+        .mockResolvedValueOnce({ ok: true, text: async () => 'gopro-token' })
+        .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' }) // gopro upload fails
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) }) // post-back PUT
+
+      const result = await handleAttachments({
+        body: { ticket_id: 501, case_number: 'GP-501' },
+        headers: { 'x-api-key': 'test-malaskra-key' },
+        tenantConfig: goproWithFields(),
+        docEndpoint: 'gopro'
+      })
+
+      expect(result.status).toBe(200)
+      expect(result.body.success).toBe(false)
+
+      const puts = postBackPuts(501)
+      expect(puts).toHaveLength(1)
+      const body = JSON.parse(String(puts[0][1].body))
+      expect(body.ticket.comment.body).toContain('❌')
+      expect((body.ticket.custom_fields as { id: number }[]).map(f => f.id)).toEqual([33])
+      const ls = JSON.parse(body.ticket.custom_fields[0].value)
+      expect(ls).toMatchObject({ v: 1, status: 'failed' })
+    })
+
+    it('still posts a ✅ note when the ticket has no attachments', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: { id: 502, brand_id: 360001234567 } }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ comments: [{ id: 1, body: 'no files', public: true }] }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) }) // post-back PUT
+
+      const result = await handleAttachments({
+        body: { ticket_id: 502, case_number: 'GP-502' },
+        headers: { 'x-api-key': 'test-malaskra-key' },
+        tenantConfig: goproWithFields(),
+        docEndpoint: 'gopro'
+      })
+
+      expect(result.status).toBe(200)
+      expect(result.body.success).toBe(true)
+
+      const puts = postBackPuts(502)
+      expect(puts).toHaveLength(1)
+      const body = JSON.parse(String(puts[0][1].body))
+      expect(body.ticket.comment.body).toContain('✅')
+      expect((body.ticket.custom_fields as { id: number }[]).find(f => f.id === 42)?.value).toBe('GP-502')
+    })
+  })
 })

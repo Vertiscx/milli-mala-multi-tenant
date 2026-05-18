@@ -37,6 +37,7 @@ interface TicketInfo {
   ticket: ZendeskTicket
   comments: ZendeskComment[]
   attachments: DownloadedAttachment[]
+  failedAttachments: { filename: string; reason: string }[]
   userMap: Record<number, string>
   solvingAgentEmail: string
 }
@@ -77,6 +78,7 @@ export async function fetchTicketInfo(
 
   const comments = await zendesk.getTicketComments(ticketId)
   const attachments = await zendesk.fetchAttachments(comments)
+  const failedAttachments = attachments.failed ?? []
 
   // 2. Resolve all comment author names in one batch
   const authorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))]
@@ -98,7 +100,7 @@ export async function fetchTicketInfo(
     }
   }
 
-  return { ok: true, info: { zendesk, ticket, comments, attachments, userMap, solvingAgentEmail } }
+  return { ok: true, info: { zendesk, ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail } }
 }
 
 /**
@@ -263,8 +265,11 @@ export async function writeAudit(args: {
  * pre-audit) and reused for both the audit entry and the success body.
  *
  * Returns either an early-exit HandlerResult or the 200 success body.
- * Has NO try/catch of its own beyond the preserved inner best-effort
- * ones — the 500 envelope stays in handleWebhook.
+ * Wraps the orchestration in an outer try/catch ONLY to fire the
+ * best-effort GW-01 failure post-back (recordOutcome) and then RETHROW
+ * the original error unchanged — so the 500 envelope still effectively
+ * stays in handleWebhook (this catch produces no response). The
+ * preserved inner best-effort try/catch blocks are unaffected.
  */
 export async function documentTicket(
   req: WebhookRequest,
@@ -282,52 +287,128 @@ export async function documentTicket(
     return { status: 400, body: { error: (err as Error).message } }
   }
 
-  const fetched = await fetchTicketInfo(tenantConfig, ticketId)
-  if (!fetched.ok) return fetched.result
-  const { ticket, comments, attachments, userMap, solvingAgentEmail } = fetched.info
+  // Context captured progressively so the failure-finalize catch can
+  // build the richest DocumentationOutcome possible regardless of how
+  // far the pipeline got before throwing. The webhook 500 envelope and
+  // src/webhook.ts stay byte-identical — the catch RETHROWS.
+  let ticket: import('./types.js').ZendeskTicket | undefined
+  let comments: ZendeskComment[] | undefined
+  let attachments: DownloadedAttachment[] | undefined
+  let failedAttachments: { filename: string; reason: string }[] | undefined
+  let pdfBuffer: Buffer | undefined
+  let resolvedCaseNumber: string | undefined
 
-  // 3. Generate PDF
-  const pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
+  try {
+    const fetched = await fetchTicketInfo(tenantConfig, ticketId)
+    if (!fetched.ok) return fetched.result
+    ;({ ticket, comments, attachments, failedAttachments } = fetched.info)
+    const { userMap, solvingAgentEmail } = fetched.info
 
-  // 4. Upload to document system
-  // createDocClient is constructed here (original line-134 position) so a
-  // misconfigured-endpoint throw keeps its precedence BEFORE the
-  // validateCaseNumber 400 — preserving byte-identical error ordering.
-  const docClient = createDocClient(ep, solvingAgentEmail)
+    // 3. Generate PDF
+    pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
 
-  const resolved = resolveCaseNumber(ep, ticket, ticketId)
-  if (!resolved.ok) return resolved.result
-  const { caseNumber } = resolved
+    // 4. Upload to document system
+    // createDocClient is constructed here (original line-134 position) so a
+    // misconfigured-endpoint throw keeps its precedence BEFORE the
+    // validateCaseNumber 400 — preserving byte-identical error ordering.
+    const docClient = createDocClient(ep, solvingAgentEmail)
 
-  await postToCase(docClient, caseNumber, ticket, ticketId, pdfBuffer, attachments)
+    const resolved = resolveCaseNumber(ep, ticket, ticketId)
+    if (!resolved.ok) return resolved.result
+    const { caseNumber } = resolved
+    resolvedCaseNumber = caseNumber
 
-  const duration = Date.now() - startTime
+    await postToCase(docClient, caseNumber, ticket, ticketId, pdfBuffer, attachments)
 
-  await writeAudit({
-    brandId,
-    ticketId,
-    ticket,
-    comments,
-    attachments,
-    tenantConfig,
-    docEndpoint,
-    ep,
-    caseNumber,
-    pdfBuffer,
-    durationMs: duration,
-    auditStore
-  })
+    const duration = Date.now() - startTime
 
-  return {
-    status: 200,
-    body: {
-      success: true,
-      ticket_id: ticketId,
-      brand_id: brandId,
-      case_number: caseNumber,
-      doc_endpoint: docEndpoint,
-      doc_system: ep.type,
-      duration_ms: duration
+    // GW-01 finalizer — once per request. The webhook path passes
+    // intent:'webhook' so the persisted audit entry stays byte-identical
+    // (recordOutcome → writeAudit with NO enrichment args). The post-back
+    // note + (configured) custom fields are the net-new GW-01 behavior;
+    // a post-back failure is swallowed and does NOT change this response.
+    const { recordOutcome } = await import('./postResultToTicket.js')
+    await recordOutcome(
+      {
+        ok: true,
+        outcome: 'documented',
+        intent: 'webhook',
+        caseNumber,
+        caseNumberSource: caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field',
+        docSystem: ep.type,
+        ticketId,
+        durationMs: duration,
+        pdfFilename: `ticket-${ticketId}.pdf`,
+        pdfSizeBytes: pdfBuffer.length,
+        failedAttachments,
+        timestamp: new Date().toISOString()
+      },
+      { tenantConfig, ep, docEndpoint, ticket, comments, attachments, pdfBuffer, auditStore }
+    )
+
+    return {
+      status: 200,
+      body: {
+        success: true,
+        ticket_id: ticketId,
+        brand_id: brandId,
+        case_number: caseNumber,
+        doc_endpoint: docEndpoint,
+        doc_system: ep.type,
+        duration_ms: duration
+      }
     }
+  } catch (err) {
+    // GW-01 webhook FAILURE post-back. Best-effort: defensively guard
+    // every field that may be undefined if the throw happened early
+    // (before ticket/pdfBuffer exist). recordOutcome/postResultToTicket
+    // never throw, but a throw here must not blow up the catch — so the
+    // whole failure-finalize is itself wrapped. The original error is
+    // RETHROWN so handleWebhook's 500 envelope + src/webhook.ts stay
+    // byte-identical and control flow is unchanged for existing tests.
+    try {
+      const caseNumber = resolvedCaseNumber ?? `ZD-${ticketId}`
+      const { recordOutcome } = await import('./postResultToTicket.js')
+      await recordOutcome(
+        {
+          ok: false,
+          outcome: 'failed',
+          intent: 'webhook',
+          caseNumber,
+          caseNumberSource: resolvedCaseNumber
+            ? (caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field')
+            : 'fallback',
+          docSystem: ep.type,
+          ticketId,
+          durationMs: Date.now() - startTime,
+          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfSizeBytes: pdfBuffer?.length ?? 0,
+          failedAttachments: failedAttachments ?? [],
+          sanitizedReason: 'Sjálfvirk skjalfesting mistókst',
+          timestamp: new Date().toISOString()
+        },
+        {
+          tenantConfig,
+          ep,
+          docEndpoint,
+          // ticket/comments/attachments may be undefined if the throw
+          // happened before fetchTicketInfo resolved — fall back to
+          // minimal stand-ins so writeAudit/postResultToTicket can still
+          // emit the ❌ note + last_status=failed.
+          ticket: ticket ?? ({ id: ticketId, subject: '', status: '', created_at: '' } as import('./types.js').ZendeskTicket),
+          comments: comments ?? [],
+          attachments: attachments ?? [],
+          pdfBuffer: pdfBuffer ?? Buffer.alloc(0),
+          auditStore
+        }
+      )
+    } catch (finalizeErr) {
+      // Never let the failure-finalize itself break the rethrow.
+      logger.warn('Failure-finalize failed (swallowed)', {
+        brand_id: brandId, ticket_id: ticketId, error: (finalizeErr as Error).message
+      })
+    }
+    // Rethrow EXACTLY as before → handleWebhook's outer catch → 500.
+    throw err
   }
 }

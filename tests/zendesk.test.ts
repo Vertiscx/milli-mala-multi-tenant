@@ -301,5 +301,81 @@ describe('ZendeskClient', () => {
       const result = await client.fetchAttachments(mockComments as any)
       expect(result).toEqual([])
     })
+
+    it('stops at maxFiles and records nothing extra (count limit)', async () => {
+      const mkAtt = (i: number) => ({
+        id: i,
+        file_name: `f${i}.bin`,
+        content_url: `https://test-subdomain.zendesk.com/attachments/${i}`,
+        content_type: 'application/octet-stream',
+        size: 1
+      })
+      const mockComments = [{ id: 1, attachments: [mkAtt(1), mkAtt(2), mkAtt(3)] }]
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) })
+
+      const result = await client.fetchAttachments(mockComments as any, { maxFiles: 1 })
+
+      expect(result).toHaveLength(1)
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('stops at maxTotalBytes and records the over-limit file as failed', async () => {
+      const mockComments = [{
+        id: 1,
+        attachments: [{
+          id: 1, file_name: 'big.bin',
+          content_url: 'https://test-subdomain.zendesk.com/attachments/1',
+          content_type: 'application/octet-stream', size: 999
+        }]
+      }]
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(999) })
+
+      const result = await client.fetchAttachments(mockComments as any, { maxTotalBytes: 10 })
+
+      expect(result).toEqual([])
+      expect((result as any).failed).toEqual([
+        { filename: 'big.bin', reason: 'total size limit reached' }
+      ])
+    })
+
+    it('records a thrown download error as failed and continues', async () => {
+      const mockComments = [{
+        id: 1,
+        attachments: [{
+          id: 1, file_name: 'oops.bin',
+          content_url: 'https://test-subdomain.zendesk.com/attachments/1',
+          content_type: 'application/octet-stream', size: 5
+        }]
+      }]
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error('network down'))
+
+      const result = await client.fetchAttachments(mockComments as any)
+
+      expect(result).toEqual([])
+      expect((result as any).failed).toEqual([
+        { filename: 'oops.bin', reason: 'download error' }
+      ])
+    })
+  })
+
+  describe('getUser', () => {
+    it('fetches a single user by ID', async () => {
+      const mockUser = { id: 7, name: 'Agent', email: 'agent@test.com' }
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ user: mockUser })
+      })
+
+      const result = await client.getUser(7)
+
+      expect(result).toEqual(mockUser)
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://test-subdomain.zendesk.com/api/v2/users/7.json',
+        expect.any(Object)
+      )
+    })
   })
 })
