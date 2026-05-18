@@ -11,7 +11,12 @@ import { ZendeskClient } from './zendesk.js'
 import { createLogger } from './logger.js'
 import { resolveEndpoint, validateCaseNumber } from './tenant.js'
 import { createDocClient } from './docClient.js'
-import type { HandlerResult, AttachmentsRequest, TenantConfig, Logger } from './types.js'
+import { postResultToTicket } from './postResultToTicket.js'
+import type {
+  HandlerResult, AttachmentsRequest, TenantConfig, Logger,
+  DocumentationOutcome, EndpointConfig, ZendeskTicket, ZendeskComment,
+  DownloadedAttachment
+} from './types.js'
 
 const logger: Logger = createLogger('attachments')
 
@@ -69,6 +74,42 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
       return { status: 400, body: { error: (err as Error).message } }
     }
 
+    // GW-01 post-back finalizer. Best-effort (postResultToTicket never
+    // throws) — gives the manual sidebar/attachments flow the same
+    // gateway-owned internal note + custom-field stamping that the
+    // /v1/cases and /v1/webhook paths get. Only invoked once we have a
+    // brand-verified ticket (mirrors cases.ts: no post-back on
+    // auth|validation|brand_mismatch).
+    const finalizePostBack = async (
+      epc: EndpointConfig,
+      ticket: ZendeskTicket,
+      comments: ZendeskComment[],
+      atts: DownloadedAttachment[],
+      forwarded: number,
+      total: number,
+      failed: { filename: string; reason: string }[]
+    ): Promise<void> => {
+      const ok = failed.length === 0
+      const totalBytes = atts.reduce((n, a) => n + (a.data?.length ?? 0), 0)
+      const o: DocumentationOutcome = {
+        ok,
+        outcome: ok ? 'documented' : 'failed',
+        intent: 'case_number',
+        caseNumber,
+        caseNumberSource: 'provided',
+        docSystem: epc.type,
+        ticketId,
+        durationMs: Date.now() - startTime,
+        pdfFilename: `${forwarded}/${total} viðhengi`,
+        pdfSizeBytes: totalBytes,
+        failedAttachments: failed,
+        sanitizedReason: ok ? undefined : 'Áframsending viðhengja mistókst',
+        timestamp: new Date().toISOString()
+      }
+      const ctx = { tenantConfig, ep: epc, docEndpoint, ticket, comments, attachments: atts, pdfBuffer: Buffer.alloc(0) }
+      await postResultToTicket(o, ctx)
+    }
+
     // 1. Fetch ticket and verify brand ownership
     const zendesk = new ZendeskClient(
       tenantConfig.zendesk.subdomain,
@@ -97,6 +138,7 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
 
     if (attachments.length === 0) {
       logger.info('No attachments found on ticket', { brand_id: brandId, ticketId })
+      await finalizePostBack(ep, ticket, comments, attachments, 0, 0, [])
       return {
         status: 200,
         body: {
@@ -138,6 +180,11 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
       doc_system: ep.type,
       total: attachments.length, forwarded, failed: errors.length, duration_ms: duration
     })
+
+    await finalizePostBack(
+      ep, ticket, comments, attachments, forwarded, attachments.length,
+      errors.map(e => ({ filename: e.filename, reason: e.error }))
+    )
 
     return {
       status: 200,
