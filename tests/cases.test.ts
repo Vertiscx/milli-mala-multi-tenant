@@ -140,6 +140,20 @@ describe('handleCases', () => {
     expect(result.body.outcome).toBe('validation')
   })
 
+  // (5b) invalid doc_endpoint → resolveEndpoint throws → 400 validation
+  it('rejects unknown doc_endpoint → 400 { ok:false, outcome:validation }', async () => {
+    const result = await handleCases({
+      body: { ticket_id: 123, case_number: 'C-1' },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'doesnotexist'
+    })
+    expect(result.status).toBe(400)
+    expect(result.body.ok).toBe(false)
+    expect(result.body.outcome).toBe('validation')
+    expect(typeof result.body.error).toBe('string')
+  })
+
   // (6) NEW — namespaced create parsing: missing create.onesystems.caseTemplate
   it('rejects missing create.onesystems.caseTemplate → 400 validation', async () => {
     const result = await handleCases({
