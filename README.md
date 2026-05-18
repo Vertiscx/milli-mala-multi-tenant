@@ -145,6 +145,21 @@ Every structured response is the GW-06 envelope — success `{ ok: true, outcome
 
 A failure on the **`case_number` path** (documenting into an existing case) propagates to a generic `HTTP 500 { error, duration_ms }` — this is a retry-safe internal error, not a GW-06 outcome (nothing was minted, so there is no orphan to report).
 
+### Result post-back (GW-01)
+
+After **every** documentation action — `/v1/cases`, `/v1/webhook`, and `/v1/attachments` — the gateway writes the outcome back onto the Zendesk ticket so the agent (and the Málaskrá sidebar) can see it. This is a single atomic, best-effort `PUT`: it **never throws and never changes the HTTP response or the archival result**. It is skipped for `auth`, `validation`, and `brand_mismatch` (no trusted ticket context).
+
+It writes:
+
+- **An internal note** (`public: false`) — `✅` with the case number on success, `❌` with a sanitized reason on failure, plus any failed attachments. Timestamp in UTC `DD.MM.YYYY HH:MM:SS`.
+- **Custom fields** (each written only if its `*FieldId` is configured on the endpoint — see [Tenant schema](DEPLOYMENT.md#tenant-configuration)):
+  - `caseNumberFieldId` — the archive case number (success)
+  - `lastStatusFieldId` — the ratified **`last_status` JSON v1**: `{ v:1, status, outcome, timestamp, caseNumber?, docSystem, template?, reason? }` (absent keys omitted, never null). On failure only this field is written (it itself carries the reason).
+  - `lastExportFieldId` — date-only `YYYY-MM-DD` (Zendesk date field) on success
+  - `templateFieldId` — the case template, OneSystems create path only
+
+> **Operational prerequisite (GW-04):** because the post-back updates the ticket, any Zendesk **trigger** that drives `/v1/webhook` must be one-shot (fire on a marker tag it removes in the same run) or it will loop. See [Zendesk Setup → Loop-safety](DEPLOYMENT.md#zendesk-setup).
+
 ### Audit endpoint
 
 ```bash
