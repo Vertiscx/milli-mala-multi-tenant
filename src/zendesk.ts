@@ -26,6 +26,34 @@ export class ZendeskClient {
     return response.json() as Promise<Record<string, unknown>>
   }
 
+  async requestWrite(
+    endpoint: string,
+    method: 'PUT' | 'POST',
+    body: unknown
+  ): Promise<Record<string, unknown>> {
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      method,
+      headers: { 'Authorization': `Basic ${this.auth}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      throw new Error(`Zendesk API error: ${response.status} ${response.statusText}`)
+    }
+    return response.json() as Promise<Record<string, unknown>>
+  }
+
+  async setTicketCustomField(
+    ticketId: number,
+    fieldId: number,
+    value: string | number | boolean | null
+  ): Promise<void> {
+    await this.requestWrite(
+      `/tickets/${ticketId}.json`,
+      'PUT',
+      { ticket: { custom_fields: [{ id: fieldId, value }] } }
+    )
+  }
+
   async getTicket(ticketId: number): Promise<ZendeskTicket> {
     const data = await this.request(`/tickets/${ticketId}.json`)
     return data.ticket as ZendeskTicket

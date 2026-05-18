@@ -103,6 +103,18 @@ export interface DocClient {
   uploadDocument(params: UploadDocumentParams): Promise<unknown>
 }
 
+export interface CreateCaseParams {
+  caseTemplate: string
+  kennitala: string
+  externalId?: string
+  caseName?: string
+  currentUser?: string
+}
+
+export interface CreateCaseResult {
+  caseNumber: string
+}
+
 // ─── Handler Types ───────────────────────────────────────────────────
 
 export interface HandlerResult {
