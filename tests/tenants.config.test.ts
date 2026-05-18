@@ -3,27 +3,42 @@ import { loadTenants } from '../src/tenants.config.js'
 import { validateTenantConfig } from '../src/tenant.js'
 
 /**
- * Minimum env vars required for `loadTenants` to succeed. Values are
- * intentionally long enough to satisfy any future minimum-length checks
- * (see Syndis SYN-MUT-28-1 — secret strength validation). These are
- * test fixtures only; real values come from DevOps at deployment time.
+ * Deterministic, fixture-only secret generator. Produces a value of exact
+ * `len` with a readable per-field prefix and varied filler so it satisfies
+ * the SYN-MUT-28-1 strength rules (>= minLength AND not a single repeated
+ * character). Distinct seeds keep per-tenant uniqueness. These are test
+ * fixtures only; real values come from DevOps at deployment time.
+ */
+function testSecret(seed: string, len: number): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let out = `${seed}-`
+  for (let i = 0; out.length < len; i++) {
+    out += alphabet[(seed.charCodeAt(i % seed.length) + i) % alphabet.length]
+  }
+  return out.slice(0, len)
+}
+
+/**
+ * Minimum env vars required for `loadTenants` to succeed. Secret values are
+ * strong enough to pass the SYN-MUT-28-1 secret strength validation
+ * (length + not-a-repeated-character).
  */
 const validEnv: Record<string, string> = {
   KERFISSTJORN_ZENDESK_SUBDOMAIN: 'kerfisstjorn-test',
   KERFISSTJORN_ZENDESK_EMAIL: 'admin@kerfisstjorn.test',
-  KERFISSTJORN_ZENDESK_API_TOKEN: 'a'.repeat(40),
-  KERFISSTJORN_ZENDESK_WEBHOOK_SECRET: 'b'.repeat(40),
+  KERFISSTJORN_ZENDESK_API_TOKEN: testSecret('kerf-zd-token', 40),
+  KERFISSTJORN_ZENDESK_WEBHOOK_SECRET: testSecret('kerf-zd-webhook', 40),
   KERFISSTJORN_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
-  KERFISSTJORN_ONESYSTEMS_APP_KEY: 'c'.repeat(40),
-  KERFISSTJORN_MALASKRA_API_KEY: 'd'.repeat(40),
+  KERFISSTJORN_ONESYSTEMS_APP_KEY: testSecret('kerf-os-appkey', 40),
+  KERFISSTJORN_MALASKRA_API_KEY: testSecret('kerf-malaskra-key', 40),
   VINNUEFTIRLIT_ZENDESK_SUBDOMAIN: 'vinnueftirlit-test',
   VINNUEFTIRLIT_ZENDESK_EMAIL: 'admin@vinnueftirlit.test',
-  VINNUEFTIRLIT_ZENDESK_API_TOKEN: 'e'.repeat(40),
-  VINNUEFTIRLIT_ZENDESK_WEBHOOK_SECRET: 'f'.repeat(40),
+  VINNUEFTIRLIT_ZENDESK_API_TOKEN: testSecret('vinn-zd-token', 40),
+  VINNUEFTIRLIT_ZENDESK_WEBHOOK_SECRET: testSecret('vinn-zd-webhook', 40),
   VINNUEFTIRLIT_GOPRO_BASE_URL: 'https://gopro.test.example/',
   VINNUEFTIRLIT_GOPRO_USERNAME: 'verjandi',
-  VINNUEFTIRLIT_GOPRO_PASSWORD: 'g'.repeat(20),
-  VINNUEFTIRLIT_MALASKRA_API_KEY: 'h'.repeat(40),
+  VINNUEFTIRLIT_GOPRO_PASSWORD: testSecret('vinn-gopro-pass', 24),
+  VINNUEFTIRLIT_MALASKRA_API_KEY: testSecret('vinn-malaskra-key', 40),
 }
 
 describe('loadTenants', () => {
