@@ -95,16 +95,55 @@ Both endpoints receive the same three fields:
 }
 ```
 
-The webhook endpoint also requires Zendesk HMAC signature headers. The attachments endpoint requires an `X-Api-Key` header (validated against the tenant's `malaskra.apiKey`).
+The webhook endpoint also requires Zendesk HMAC signature headers. The attachments and cases endpoints require an `X-Api-Key` header (validated against the tenant's `malaskra.apiKey`). The cases endpoint additionally takes either a `create` block or a `case_number` (see [Cases endpoint](#cases-endpoint)).
 
 ## Endpoints
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `POST` | `/v1/webhook` | Zendesk HMAC | Generates PDF from ticket and uploads to archive system |
+| `POST` | `/v1/cases` | `X-Api-Key` header | Synchronous manual documentation: create a case and/or document an existing one (called by Málaskrá) |
 | `POST` | `/v1/attachments` | `X-Api-Key` header | Forwards ticket attachments to archive system (called by Malaskra) |
 | `GET` | `/v1/health` | None | Health check |
 | `GET` | `/v1/audit` | Bearer token | Query audit log entries |
+
+### Cases endpoint
+
+`POST /v1/cases` documents a Zendesk ticket into an archive case **synchronously** — the gateway runs the whole pipeline inline and returns the outcome in the response body. Called by the Málaskrá Zendesk app. The request/response shape is governed by the cross-repo **GW-06** contract.
+
+The request carries the three common fields plus **exactly one** of `create` or `case_number`:
+
+```json
+// Create a new case, then document into it:
+{
+  "ticket_id": "12345",
+  "brand_id": "360001234567",
+  "doc_endpoint": "onesystems",
+  "create": { "onesystems": { "caseTemplate": "...", "kennitala": "...", "caseName": "..." } }
+}
+
+// Document into an existing case:
+{
+  "ticket_id": "12345",
+  "brand_id": "360001234567",
+  "doc_endpoint": "onesystems",
+  "case_number": "2026-00123"
+}
+```
+
+Every structured response is the GW-06 envelope — success `{ ok: true, outcome: "documented", caseNumber }`, failure `{ ok: false, outcome, error }`, orphan `{ ok: false, outcome: "orphan_case", error, caseNumber }`. The `outcome` is one of seven codes:
+
+| Outcome | HTTP | Meaning |
+|---|---|---|
+| `documented` | 200 | Ticket documented into the case |
+| `orphan_case` | 207 | Case was created but a later step failed — response carries the created `caseNumber` so it is never silently lost (create path only) |
+| `create_failed` | 502 | Archive case creation failed |
+| `validation` | 400 | Malformed request (missing/invalid fields, or not exactly one of `create`/`case_number`) |
+| `auth` | 401 | Invalid or missing `X-Api-Key` |
+| `brand_mismatch` | 403 | Ticket does not belong to the caller's brand |
+| `gopro_create_unsupported` | 422 | `create` requested for a GoPro endpoint (case creation is not supported there) |
+
+A failure on the **`case_number` path** (documenting into an existing case) propagates to a generic `HTTP 500 { error, duration_ms }` — this is a retry-safe internal error, not a GW-06 outcome (nothing was minted, so there is no orphan to report).
 
 ### Audit endpoint
 

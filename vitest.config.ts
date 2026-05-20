@@ -11,7 +11,8 @@ export default defineConfig({
         'node_modules/**',
         'tests/**',
         '*.config.*',
-        'src/worker.ts' // Cloudflare-specific, tested separately
+        'src/worker.ts', // Cloudflare Worker entrypoint — tested separately (runtime-parity)
+        'src/index.ts' // Node server entrypoint — tested separately (runtime-parity)
       ]
     }
   }

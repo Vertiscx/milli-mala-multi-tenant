@@ -14,6 +14,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { getConfig } from './config.js'
 import { handleWebhook } from './webhook.js'
 import { handleAttachments } from './attachments.js'
+import { handleCases } from './cases.js'
 import { FileTenantStore, resolveTenantConfig, sanitizeAuditParam } from './tenant.js'
 import { loadTenants } from './tenants.config.js'
 import { FileAuditStore } from './fileAuditStore.js'
@@ -22,6 +23,7 @@ import type { TenantConfig, Logger } from './types.js'
 
 export { handleWebhook, verifyWebhookSignature, isTimestampFresh } from './webhook.js'
 export { handleAttachments } from './attachments.js'
+export { handleCases } from './cases.js'
 
 const logger: Logger = createLogger('main')
 
@@ -131,6 +133,38 @@ async function handleAttachmentsHttp(
   }
 }
 
+async function handleCasesHttp(
+  req: IncomingMessage,
+  res: ServerResponse,
+  tenantStore: FileTenantStore,
+  auditStore: FileAuditStore
+): Promise<void> {
+  try {
+    const rawBody = await getRequestBody(req, MAX_BODY_SIZE)
+    let body: Record<string, unknown>
+    try {
+      body = JSON.parse(rawBody) as Record<string, unknown>
+    } catch {
+      return sendJson(res, 400, { error: 'Invalid JSON body' })
+    }
+    const brandId = body.brand_id != null ? String(body.brand_id) : undefined
+    const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
+
+    if (!brandId) return sendJson(res, 400, { error: 'Missing brand_id' })
+    if (!docEndpoint) return sendJson(res, 400, { error: 'Missing doc_endpoint' })
+
+    const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
+    if (!tenantConfig) return sendJson(res, 400, { error: 'Invalid request' })
+
+    const headers = req.headers as Record<string, string>
+    const result = await handleCases({ body, headers, tenantConfig, docEndpoint, auditStore })
+    sendJson(res, result.status, result.body)
+  } catch (error) {
+    logger.error('Cases handler error', { error: (error as Error).message })
+    sendJson(res, 500, { error: 'Internal server error' })
+  }
+}
+
 async function handleAuditHttp(
   req: IncomingMessage,
   res: ServerResponse,
@@ -183,6 +217,7 @@ function startServer(): void {
     if (url.pathname === '/v1/health' && req.method === 'GET') return handleHealth(req, res)
     if (url.pathname === '/v1/webhook' && req.method === 'POST') return handleWebhookHttp(req, res, tenantStore, auditStore)
     if (url.pathname === '/v1/attachments' && req.method === 'POST') return handleAttachmentsHttp(req, res, tenantStore)
+    if (url.pathname === '/v1/cases' && req.method === 'POST') return handleCasesHttp(req, res, tenantStore, auditStore)
     if (url.pathname === '/v1/audit' && req.method === 'GET') return handleAuditHttp(req, res, url, auditStore, config.auditSecret)
 
     sendJson(res, 404, { error: 'Not found' })

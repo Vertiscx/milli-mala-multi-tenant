@@ -185,6 +185,15 @@ export async function writeAudit(args: {
   pdfBuffer: Buffer
   durationMs: number
   auditStore?: AuditStore
+  // Optional enrichment — default to reproduce TODAY'S EXACT entry.
+  // When omitted (webhook path) the persisted entry is byte-identical:
+  // same keys, same order, NO new keys present.
+  event?: string
+  outcome?: string
+  caseNumberSource?: string
+  lastStatus?: string
+  lastExport?: string
+  intent?: string
 }): Promise<void> {
   const {
     brandId, ticketId, ticket, comments, attachments,
@@ -196,7 +205,7 @@ export async function writeAudit(args: {
 
   // Audit log — operational data only, no PII stored in KV
   const auditEntry = {
-    event: 'ticket_archived',
+    event: args.event ?? 'ticket_archived',
     timestamp: new Date().toISOString(),
     duration_ms: durationMs,
     brand_id: brandId,
@@ -213,10 +222,17 @@ export async function writeAudit(args: {
       doc_endpoint: docEndpoint,
       doc_system: ep.type,
       case_number: caseNumber,
-      case_number_source: caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field',
+      case_number_source: args.caseNumberSource ?? (caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field'),
       pdf_filename: uploadFilename,
       pdf_size_bytes: pdfBuffer.length
-    }
+    },
+    // Enrichment keys appended AFTER existing keys — present ONLY when the
+    // caller passes them, so the no-arg (webhook) entry gains NO new keys
+    // and stays byte-identical to the current persisted shape.
+    ...(args.outcome !== undefined ? { outcome: args.outcome } : {}),
+    ...(args.intent !== undefined ? { intent: args.intent } : {}),
+    ...(args.lastStatus !== undefined ? { last_status: args.lastStatus } : {}),
+    ...(args.lastExport !== undefined ? { last_export: args.lastExport } : {})
   }
   logger.info('AUDIT', auditEntry)
 

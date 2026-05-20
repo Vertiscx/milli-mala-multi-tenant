@@ -12,6 +12,7 @@
 import { timingSafeEqual, createHash } from 'node:crypto'
 import { handleWebhook } from './webhook.js'
 import { handleAttachments } from './attachments.js'
+import { handleCases } from './cases.js'
 import { KvTenantStore, resolveTenantConfig, sanitizeAuditParam } from './tenant.js'
 import type { AuditStore } from './types.js'
 
@@ -140,6 +141,50 @@ export default {
         return Response.json(result.body, { status: result.status })
       } catch (error) {
         console.error('Attachments error', (error as Error).message)
+        return Response.json({ error: 'Internal server error' }, { status: 500 })
+      }
+    }
+
+    // Cases endpoint
+    if (url.pathname === '/v1/cases' && request.method === 'POST') {
+      try {
+        const contentLength = parseInt(request.headers.get('content-length') || '0', 10)
+        if (contentLength > MAX_BODY_SIZE) {
+          return Response.json({ error: 'Request body too large' }, { status: 413 })
+        }
+        const rawBody = await request.text()
+        if (rawBody.length > MAX_BODY_SIZE) {
+          return Response.json({ error: 'Request body too large' }, { status: 413 })
+        }
+
+        const parsed = parseRequestBody(rawBody)
+        if (!parsed) {
+          return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
+        }
+        const { body, brandId, docEndpoint } = parsed
+        if (!brandId) {
+          return Response.json({ error: 'Missing brand_id' }, { status: 400 })
+        }
+        if (!docEndpoint) {
+          return Response.json({ error: 'Missing doc_endpoint' }, { status: 400 })
+        }
+
+        // Resolve tenant from KV
+        if (!env.TENANT_KV) {
+          return Response.json({ error: 'Tenant store not configured' }, { status: 500 })
+        }
+        const tenantStore = new KvTenantStore(env.TENANT_KV)
+        const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
+        if (!tenantConfig) {
+          return Response.json({ error: 'Invalid request' }, { status: 400 })
+        }
+
+        const headers = Object.fromEntries(request.headers)
+        const result = await handleCases({ body, headers, tenantConfig, docEndpoint, auditStore: env.AUDIT_LOG })
+
+        return Response.json(result.body, { status: result.status })
+      } catch (error) {
+        console.error('Cases error', (error as Error).message)
         return Response.json({ error: 'Internal server error' }, { status: 500 })
       }
     }
