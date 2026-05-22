@@ -63,6 +63,9 @@ const K_APPKEY = 'kerfis-onesystems-app-key-0123456789ab'
 const V_TOKEN = 'vinnu-zendesk-api-token-0123456789abcd'
 const V_WEBHOOK = 'vinnu-zendesk-webhook-secret-0123456789'
 const V_PASSWORD = 'vinnu-gopro-password-0123456789'
+const S_TOKEN = 'samg-zendesk-api-token-0123456789abcd'
+const S_WEBHOOK = 'samg-zendesk-webhook-secret-0123456789'
+const S_APPKEY = 'samg-onesystems-app-key-0123456789abcd'
 
 const TENANT_ENV: Record<string, string> = {
   KERFISSTJORN_ZENDESK_SUBDOMAIN: 'kerfis',
@@ -79,7 +82,14 @@ const TENANT_ENV: Record<string, string> = {
   VINNUEFTIRLIT_GOPRO_BASE_URL: GOPRO_BASE,
   VINNUEFTIRLIT_GOPRO_USERNAME: 'vuser',
   VINNUEFTIRLIT_GOPRO_PASSWORD: V_PASSWORD,
-  VINNUEFTIRLIT_MALASKRA_API_KEY: MALASKRA_KEY
+  VINNUEFTIRLIT_MALASKRA_API_KEY: MALASKRA_KEY,
+  SAMGONGUSTOFA_ZENDESK_SUBDOMAIN: 'samgongu',
+  SAMGONGUSTOFA_ZENDESK_EMAIL: 's@example.com',
+  SAMGONGUSTOFA_ZENDESK_API_TOKEN: S_TOKEN,
+  SAMGONGUSTOFA_ZENDESK_WEBHOOK_SECRET: S_WEBHOOK,
+  SAMGONGUSTOFA_ONESYSTEMS_BASE_URL: ONESYS_BASE,
+  SAMGONGUSTOFA_ONESYSTEMS_APP_KEY: S_APPKEY,
+  SAMGONGUSTOFA_MALASKRA_API_KEY: MALASKRA_KEY
 }
 
 const savedEnv: Record<string, string | undefined> = {}
