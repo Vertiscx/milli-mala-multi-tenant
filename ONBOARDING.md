@@ -180,7 +180,7 @@ For Workpoint, the only thing you need to know is:
 - If Workpoint does NOT support case creation, do not implement `createCase`. The duck-type gate produces `gopro_create_unsupported` automatically (yes, the enum value is misnamed — see §6).
 - **Do not** add a `case 'workpoint':` branch anywhere outside `src/docClient.ts`. No handler should know that Workpoint exists by name.
 
-For the full story, read [`.planning/codebase/CONCERNS.md`](.planning/codebase/CONCERNS.md) "The Locked Failure Order" section — it's the most important section in that doc.
+For the full story, read [`docs/architecture/CONCERNS.md`](docs/architecture/CONCERNS.md) "The Locked Failure Order" section — it's the most important section in that doc.
 
 ---
 
@@ -203,8 +203,8 @@ Read these in this order. Stop and explore the code each time something is uncle
 ### 7.1 First pass — get oriented (~30 minutes)
 
 1. **[README.md](README.md)** — high-level system + endpoint table + data flow.
-2. **[.planning/codebase/ARCHITECTURE.md](.planning/codebase/ARCHITECTURE.md)** — the system diagram and end-to-end data flow for `POST /v1/cases`. **This is the single most important doc.** §"Data Flow" walks the critical path step by step.
-3. **[.planning/codebase/STRUCTURE.md](.planning/codebase/STRUCTURE.md)** — the directory map. Skim to know where things live.
+2. **[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)** — the system diagram and end-to-end data flow for `POST /v1/cases`. **This is the single most important doc.** §"Data Flow" walks the critical path step by step.
+3. **[docs/architecture/STRUCTURE.md](docs/architecture/STRUCTURE.md)** — the directory map. Skim to know where things live.
 
 ### 7.2 Second pass — read the code (~2 hours)
 
@@ -220,14 +220,14 @@ In this exact order:
 
 ### 7.3 Third pass — landmines (~30 minutes)
 
-8. **[.planning/codebase/CONCERNS.md](.planning/codebase/CONCERNS.md)** — read end-to-end. This is your landmine map. The OneSystems-specific quirks section will save you days of debugging on Workpoint.
-9. **[.planning/codebase/CONVENTIONS.md](.planning/codebase/CONVENTIONS.md)** — house style.
-10. **[.planning/codebase/TESTING.md](.planning/codebase/TESTING.md)** — how to write tests that match the existing patterns.
+8. **[docs/architecture/CONCERNS.md](docs/architecture/CONCERNS.md)** — read end-to-end. This is your landmine map. The OneSystems-specific quirks section will save you days of debugging on Workpoint.
+9. **[docs/architecture/CONVENTIONS.md](docs/architecture/CONVENTIONS.md)** — house style.
+10. **[docs/architecture/TESTING.md](docs/architecture/TESTING.md)** — how to write tests that match the existing patterns.
 
 ### 7.4 Reference (consult as needed)
 
-- **[.planning/codebase/STACK.md](.planning/codebase/STACK.md)** — versions, deps.
-- **[.planning/codebase/INTEGRATIONS.md](.planning/codebase/INTEGRATIONS.md)** — every external system, its protocol and auth.
+- **[docs/architecture/STACK.md](docs/architecture/STACK.md)** — versions, deps.
+- **[docs/architecture/INTEGRATIONS.md](docs/architecture/INTEGRATIONS.md)** — every external system, its protocol and auth.
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — how to deploy and how to seed KV.
 - **`tests/onesystems.test.ts`, `tests/gopro.test.ts`** — the template you'll copy for `tests/workpoint.test.ts`.
 
@@ -271,7 +271,7 @@ npm run test:coverage
 
 TypeScript strict. No `any` (use `unknown` + narrowing). Errors thrown across boundaries carry HTTP-status-text in the message; **never** bearer tokens or passwords. All secret comparisons go through SHA-256 + `timingSafeEqual` from `node:crypto`. Logs are structured JSON, always include `brand_id` (a public ID, not a secret). Validation lives in `src/tenant.ts`; handlers call validators, never reimplement them. Adapters never read module-level mutable state. Tests mirror `src/` file-by-file. Commit messages follow conventional-commit style (`feat(workpoint): …`, `fix(workpoint): …`). **Do not add `Co-Authored-By: Claude` trailers** — author commits as yourself.
 
-For the full version, read [.planning/codebase/CONVENTIONS.md](.planning/codebase/CONVENTIONS.md).
+For the full version, read [docs/architecture/CONVENTIONS.md](docs/architecture/CONVENTIONS.md).
 
 ---
 
