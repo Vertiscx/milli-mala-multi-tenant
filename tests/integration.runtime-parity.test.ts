@@ -52,23 +52,33 @@ const ONESYS_BASE = 'https://api.onesystems.test'
 const GOPRO_BASE = 'https://api.gopro.test'
 const ONESYS_BRAND = '33979373713298' // Kerfisstjórn — onesystems
 const GOPRO_BRAND = '33979400825874' // Vinnueftirlitið — gopro
-const MALASKRA_KEY = 'test-malaskra-key'
+// Tenant secrets — must satisfy the SYN-MUT-28-1 strength rules that
+// validateTenantConfig enforces (≥32 chars for tokens/keys, ≥16 for the
+// GoPro password; not a single repeated character). Weak values here make
+// resolveTenantConfig reject every tenant and 400 every scenario.
+const MALASKRA_KEY = 'test-malaskra-key-shared-0123456789ab'
+const K_TOKEN = 'kerfis-zendesk-api-token-0123456789ab'
+const K_WEBHOOK = 'kerfis-zendesk-webhook-secret-0123456789'
+const K_APPKEY = 'kerfis-onesystems-app-key-0123456789ab'
+const V_TOKEN = 'vinnu-zendesk-api-token-0123456789abcd'
+const V_WEBHOOK = 'vinnu-zendesk-webhook-secret-0123456789'
+const V_PASSWORD = 'vinnu-gopro-password-0123456789'
 
 const TENANT_ENV: Record<string, string> = {
   KERFISSTJORN_ZENDESK_SUBDOMAIN: 'kerfis',
   KERFISSTJORN_ZENDESK_EMAIL: 'k@example.com',
-  KERFISSTJORN_ZENDESK_API_TOKEN: 'k-token',
-  KERFISSTJORN_ZENDESK_WEBHOOK_SECRET: 'k-secret',
+  KERFISSTJORN_ZENDESK_API_TOKEN: K_TOKEN,
+  KERFISSTJORN_ZENDESK_WEBHOOK_SECRET: K_WEBHOOK,
   KERFISSTJORN_ONESYSTEMS_BASE_URL: ONESYS_BASE,
-  KERFISSTJORN_ONESYSTEMS_APP_KEY: 'k-appkey',
+  KERFISSTJORN_ONESYSTEMS_APP_KEY: K_APPKEY,
   KERFISSTJORN_MALASKRA_API_KEY: MALASKRA_KEY,
   VINNUEFTIRLIT_ZENDESK_SUBDOMAIN: 'vinnu',
   VINNUEFTIRLIT_ZENDESK_EMAIL: 'v@example.com',
-  VINNUEFTIRLIT_ZENDESK_API_TOKEN: 'v-token',
-  VINNUEFTIRLIT_ZENDESK_WEBHOOK_SECRET: 'v-secret',
+  VINNUEFTIRLIT_ZENDESK_API_TOKEN: V_TOKEN,
+  VINNUEFTIRLIT_ZENDESK_WEBHOOK_SECRET: V_WEBHOOK,
   VINNUEFTIRLIT_GOPRO_BASE_URL: GOPRO_BASE,
   VINNUEFTIRLIT_GOPRO_USERNAME: 'vuser',
-  VINNUEFTIRLIT_GOPRO_PASSWORD: 'vpass',
+  VINNUEFTIRLIT_GOPRO_PASSWORD: V_PASSWORD,
   VINNUEFTIRLIT_MALASKRA_API_KEY: MALASKRA_KEY
 }
 
@@ -148,16 +158,16 @@ function makeWorkerEnv() {
     [`tenant:${ONESYS_BRAND}`]: JSON.stringify({
       brand_id: ONESYS_BRAND,
       name: 'Kerfisstjórn',
-      zendesk: { subdomain: 'kerfis', email: 'k@example.com', apiToken: 'k-token', webhookSecret: 'k-secret' },
-      endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: 'k-appkey' } },
+      zendesk: { subdomain: 'kerfis', email: 'k@example.com', apiToken: K_TOKEN, webhookSecret: K_WEBHOOK },
+      endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: K_APPKEY } },
       malaskra: { apiKey: MALASKRA_KEY },
       pdf: { companyName: 'Kerfisstjórn', locale: 'is-IS', includeInternalNotes: false }
     }),
     [`tenant:${GOPRO_BRAND}`]: JSON.stringify({
       brand_id: GOPRO_BRAND,
       name: 'Vinnueftirlitið',
-      zendesk: { subdomain: 'vinnu', email: 'v@example.com', apiToken: 'v-token', webhookSecret: 'v-secret' },
-      endpoints: { gopro: { type: 'gopro', baseUrl: GOPRO_BASE, username: 'vuser', password: 'vpass' } },
+      zendesk: { subdomain: 'vinnu', email: 'v@example.com', apiToken: V_TOKEN, webhookSecret: V_WEBHOOK },
+      endpoints: { gopro: { type: 'gopro', baseUrl: GOPRO_BASE, username: 'vuser', password: V_PASSWORD } },
       malaskra: { apiKey: MALASKRA_KEY },
       pdf: { companyName: 'Vinnueftirlitið', locale: 'is-IS', includeInternalNotes: false }
     })
