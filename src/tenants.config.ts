@@ -57,7 +57,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
       },
     },
     {
-      brand_id: '33979400825874',
+      brand_id: '28710908212242',
       name: 'Vinnueftirlitið',
       zendesk: {
         subdomain: requireEnv('VINNUEFTIRLIT_ZENDESK_SUBDOMAIN', env),
