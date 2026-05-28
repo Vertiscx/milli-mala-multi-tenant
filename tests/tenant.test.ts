@@ -425,6 +425,16 @@ describe('validateTenantConfig — secret strength', () => {
     expect(() => validateTenantConfig(tenant)).toThrow('must not be a repeated character')
   })
 
+  it('should accept gopro password that is a single repeated character (length-only)', () => {
+    // GoPro passwords are user-set on the upstream system and may legitimately
+    // use a narrow character set; only the length floor applies.
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'user', password: 'a'.repeat(16) }
+      }
+    }))).not.toThrow()
+  })
+
   it('should accept a valid 32+ character random secret', () => {
     expect(() => validateTenantConfig(makeValidTenant())).not.toThrow()
   })
