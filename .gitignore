@@ -35,9 +35,6 @@ dist/
 # Audit data (file-based audit store for Docker/Node.js)
 audit-data/
 
-# AI assistant config
-CLAUDE.md
-
 # Internal documents
 MEETING-BRIEF-*
 EFTIRFYLGNI-*
