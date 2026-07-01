@@ -157,6 +157,7 @@ export class OneSystemsClient implements DocClient {
 
     logger.info('Upload successful', { caseNumber })
     const pdfResult = await response.json().catch(() => ({ success: true }))
+    logger.info('OneSystems PDF response', { caseNumber, response: pdfResult })
 
     // Upload each attachment as a separate call (API accepts one document per request)
     for (const att of attachments) {
@@ -212,7 +213,9 @@ export class OneSystemsClient implements DocClient {
         throw new Error(`OneSystems attachment upload failed (${att.filename}): ${attResponse.status} - ${errorText}`)
       }
 
+      const attResult = await attResponse.json().catch(() => ({ success: true }))
       logger.info('Attachment upload successful', { caseNumber, filename: att.filename })
+      logger.info('OneSystems attachment response', { caseNumber, filename: att.filename, response: attResult })
     }
 
     return pdfResult
@@ -264,6 +267,7 @@ export class OneSystemsClient implements DocClient {
     }
 
     logger.info('Case created', { caseNumber })
+    logger.info('OneSystems createCase response', { response: res })
     return { caseNumber, caseTemplate }
   }
 }
