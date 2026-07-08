@@ -34,7 +34,7 @@ import { requireEnv } from './env.js'
 export function loadTenants(env: Record<string, string | undefined> = process.env): TenantConfig[] {
   return [
     {
-      brand_id: '33979373713298',
+      brand_id: '30220057411090',
       name: 'Kerfisstjórn',
       zendesk: {
         subdomain: requireEnv('KERFISSTJORN_ZENDESK_SUBDOMAIN', env),

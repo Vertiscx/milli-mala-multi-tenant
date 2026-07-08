@@ -50,7 +50,7 @@ vi.mock('node:http', async (importOriginal) => {
 //     succeed and the FileTenantStore is built from the real config path) ────
 const ONESYS_BASE = 'https://api.onesystems.test'
 const GOPRO_BASE = 'https://api.gopro.test'
-const ONESYS_BRAND = '33979373713298' // Kerfisstjórn — onesystems
+const ONESYS_BRAND = '30220057411090' // Kerfisstjórn — onesystems
 const GOPRO_BRAND = '28710908212242' // Vinnueftirlitið — gopro (prod)
 // Tenant secrets — must satisfy the SYN-MUT-28-1 strength rules that
 // validateTenantConfig enforces (≥32 chars for tokens/keys, ≥16 for the
