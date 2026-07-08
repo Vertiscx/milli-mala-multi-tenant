@@ -221,6 +221,7 @@ export async function recordOutcome(
       durationMs: o.durationMs,
       auditStore: ctx.auditStore
     }
+    auditArgs.attachmentsForwarded = o.ok ? ctx.attachments.length : 0
     // Webhook path → no enrichment (byte-identical persisted entry).
     if (o.intent !== 'webhook') {
       auditArgs.event = o.outcome === 'documented' ? 'ticket_archived'

@@ -192,16 +192,24 @@ export function validateTenantConfig(config: TenantConfig): void {
 
 /**
  * Validate that a secret meets minimum strength requirements (SYN-MUT-28-1).
- * Rejects secrets that are too short or use only one repeated character.
+ * Rejects secrets that are too short or (by default) use only one repeated
+ * character. Pass `allowRepeatedChars: true` for secrets the operator does
+ * not control (e.g. user-set passwords on upstream systems).
  */
-function validateSecretStrength(value: string, fieldName: string, tenantLabel: string, minLength: number): void {
+function validateSecretStrength(
+  value: string,
+  fieldName: string,
+  tenantLabel: string,
+  minLength: number,
+  opts: { allowRepeatedChars?: boolean } = {}
+): void {
   if (value.length < minLength) {
     throw new Error(
       `Invalid tenant config for "${tenantLabel}": ${fieldName} must be at least ${minLength} characters`
     )
   }
 
-  if (new Set(value).size === 1) {
+  if (!opts.allowRepeatedChars && new Set(value).size === 1) {
     throw new Error(
       `Invalid tenant config for "${tenantLabel}": ${fieldName} must not be a repeated character`
     )
@@ -251,7 +259,10 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
     validateSecretStrength(ep.appKey, `endpoints.${name}.appKey`, tenantLabel, MIN_SECRET_LENGTH)
   }
   if (ep.type === 'gopro' && ep.password) {
-    validateSecretStrength(ep.password, `endpoints.${name}.password`, tenantLabel, MIN_PASSWORD_LENGTH)
+    // GoPro passwords are user-set by the institution and may legitimately
+    // use a narrow character set; enforce length but skip the repeated-char
+    // rule. SYN-MUT-28-1 length check still catches accidental placeholders.
+    validateSecretStrength(ep.password, `endpoints.${name}.password`, tenantLabel, MIN_PASSWORD_LENGTH, { allowRepeatedChars: true })
   }
 }
 

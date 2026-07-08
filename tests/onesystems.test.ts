@@ -220,6 +220,41 @@ describe('OneSystemsClient', () => {
       })).rejects.toThrow('OneSystems upload failed: 500 - Server error')
     })
 
+    it('should upload attachments as separate AddDocument2 calls after the PDF', async () => {
+      const attData = Buffer.from('image content')
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) }) // PDF
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) }) // attachment
+
+      await client.uploadDocument({
+        caseNumber: 'CASE-123',
+        filename: 'ticket-456.pdf',
+        pdfBuffer: Buffer.from('pdf'),
+        attachments: [{ filename: 'image.png', contentType: 'image/png', size: attData.length, data: attData }]
+      })
+
+      expect(global.fetch).toHaveBeenCalledTimes(2)
+      const attBody = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[1][1].body
+      expect(attBody).toContain('name="FileName"')
+      expect(attBody).toContain('image.png')
+      expect(attBody).toContain('name="CaseNumber"')
+      expect(attBody).toContain('CASE-123')
+      expect(attBody).toContain(attData.toString('base64'))
+    })
+
+    it('should throw when an attachment upload fails', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) }) // PDF succeeds
+        .mockResolvedValueOnce({ ok: false, status: 422, text: async () => 'Unsupported' }) // attachment fails
+
+      await expect(client.uploadDocument({
+        caseNumber: 'CASE-1',
+        filename: 'ticket.pdf',
+        pdfBuffer: Buffer.from('pdf'),
+        attachments: [{ filename: 'bad.xyz', contentType: 'application/octet-stream', size: 3, data: Buffer.from('xyz') }]
+      })).rejects.toThrow('OneSystems attachment upload failed (bad.xyz): 422 - Unsupported')
+    })
+
     it('should include XML metadata when provided', async () => {
       ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,

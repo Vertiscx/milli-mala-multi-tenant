@@ -187,6 +187,7 @@ export async function writeAudit(args: {
   pdfBuffer: Buffer
   durationMs: number
   auditStore?: AuditStore
+  attachmentsForwarded?: number
   // Optional enrichment — default to reproduce TODAY'S EXACT entry.
   // When omitted (webhook path) the persisted entry is byte-identical:
   // same keys, same order, NO new keys present.
@@ -226,7 +227,8 @@ export async function writeAudit(args: {
       case_number: caseNumber,
       case_number_source: args.caseNumberSource ?? (caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field'),
       pdf_filename: uploadFilename,
-      pdf_size_bytes: pdfBuffer.length
+      pdf_size_bytes: pdfBuffer.length,
+      attachments_forwarded: args.attachmentsForwarded ?? attachments.length
     },
     // Enrichment keys appended AFTER existing keys — present ONLY when the
     // caller passes them, so the no-arg (webhook) entry gains NO new keys

@@ -85,7 +85,7 @@ export class OneSystemsClient implements DocClient {
     }
   }
 
-  async uploadDocument({ caseNumber, filename, pdfBuffer, metadata = {} }: UploadDocumentParams): Promise<unknown> {
+  async uploadDocument({ caseNumber, filename, pdfBuffer, attachments = [], metadata = {} }: UploadDocumentParams): Promise<unknown> {
     await this.ensureAuthenticated()
 
     const boundary = `----formdata-${Date.now()}-${Math.random().toString(36).substring(2)}`
@@ -156,7 +156,69 @@ export class OneSystemsClient implements DocClient {
     }
 
     logger.info('Upload successful', { caseNumber })
-    return response.json().catch(() => ({ success: true }))
+    const pdfResult = await response.json().catch(() => ({ success: true }))
+    logger.info('OneSystems PDF response', { caseNumber, response: pdfResult })
+
+    // Upload each attachment as a separate call (API accepts one document per request)
+    for (const att of attachments) {
+      const attBoundary = `----formdata-${Date.now()}-${Math.random().toString(36).substring(2)}`
+      const attParts: string[] = []
+
+      attParts.push(`--${attBoundary}`)
+      attParts.push(`Content-Disposition: form-data; name="CaseNumber"`)
+      attParts.push('')
+      attParts.push(sanitize(caseNumber))
+
+      attParts.push(`--${attBoundary}`)
+      attParts.push(`Content-Disposition: form-data; name="User"`)
+      attParts.push('')
+      attParts.push(sanitize(this.user || 'Zendesk'))
+
+      attParts.push(`--${attBoundary}`)
+      attParts.push(`Content-Disposition: form-data; name="FileName"`)
+      attParts.push('')
+      attParts.push(sanitize(att.filename))
+
+      attParts.push(`--${attBoundary}`)
+      attParts.push(`Content-Disposition: form-data; name="FileArray"`)
+      attParts.push('')
+      attParts.push(att.data.toString('base64'))
+
+      attParts.push(`--${attBoundary}`)
+      attParts.push(`Content-Disposition: form-data; name="Date"`)
+      attParts.push('')
+      attParts.push(new Date().toISOString())
+
+      attParts.push(`--${attBoundary}`)
+      attParts.push(`Content-Disposition: form-data; name="XML"`)
+      attParts.push('')
+      attParts.push('')
+
+      attParts.push(`--${attBoundary}--`)
+
+      logger.info('Uploading attachment to OneSystems', { caseNumber, filename: att.filename })
+
+      const attResponse = await fetch(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': `multipart/form-data; boundary=${attBoundary}`,
+          'Accept': '*/*'
+        },
+        body: attParts.join('\r\n')
+      })
+
+      if (!attResponse.ok) {
+        const errorText = await attResponse.text()
+        throw new Error(`OneSystems attachment upload failed (${att.filename}): ${attResponse.status} - ${errorText}`)
+      }
+
+      const attResult = await attResponse.json().catch(() => ({ success: true }))
+      logger.info('Attachment upload successful', { caseNumber, filename: att.filename })
+      logger.info('OneSystems attachment response', { caseNumber, filename: att.filename, response: attResult })
+    }
+
+    return pdfResult
   }
 
   /**
@@ -205,6 +267,7 @@ export class OneSystemsClient implements DocClient {
     }
 
     logger.info('Case created', { caseNumber })
+    logger.info('OneSystems createCase response', { response: res })
     return { caseNumber, caseTemplate }
   }
 }

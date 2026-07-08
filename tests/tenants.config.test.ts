@@ -39,14 +39,22 @@ const validEnv: Record<string, string> = {
   VINNUEFTIRLIT_GOPRO_USERNAME: 'verjandi',
   VINNUEFTIRLIT_GOPRO_PASSWORD: testSecret('vinn-gopro-pass', 24),
   VINNUEFTIRLIT_MALASKRA_API_KEY: testSecret('vinn-malaskra-key', 40),
+  SAMGONGUSTOFA_ZENDESK_SUBDOMAIN: 'samgongustofa-test',
+  SAMGONGUSTOFA_ZENDESK_EMAIL: 'admin@samgongustofa.test',
+  SAMGONGUSTOFA_ZENDESK_API_TOKEN: testSecret('samg-zd-token', 40),
+  SAMGONGUSTOFA_ZENDESK_WEBHOOK_SECRET: testSecret('samg-zd-webhook', 40),
+  SAMGONGUSTOFA_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
+  SAMGONGUSTOFA_ONESYSTEMS_APP_KEY: testSecret('samg-os-appkey', 40),
+  SAMGONGUSTOFA_MALASKRA_API_KEY: testSecret('samg-malaskra-key', 40),
 }
 
 describe('loadTenants', () => {
-  it('returns both tenants when all env vars are set', () => {
+  it('returns all tenants when all env vars are set', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants).toHaveLength(2)
+    expect(tenants).toHaveLength(3)
     expect(tenants[0].name).toBe('Kerfisstjórn')
     expect(tenants[1].name).toBe('Vinnueftirlitið')
+    expect(tenants[2].name).toBe('Samgöngustofa')
   })
 
   it('produces tenants that pass validateTenantConfig', () => {
@@ -60,6 +68,7 @@ describe('loadTenants', () => {
     const tenants = loadTenants(validEnv)
     expect(tenants[0].pdf.companyName).toBe('Kerfisstjórn')
     expect(tenants[1].pdf.companyName).toBe('Vinnueftirlitið')
+    expect(tenants[2].pdf.companyName).toBe('Samgöngustofa')
   })
 
   it('uses per-tenant Zendesk credentials (no shared secrets across tenants)', () => {
@@ -91,6 +100,11 @@ describe('loadTenants', () => {
   it('configures Vinnueftirlitið with a GoPro endpoint', () => {
     const [, vinnueftirlit] = loadTenants(validEnv)
     expect(vinnueftirlit.endpoints.gopro?.type).toBe('gopro')
+  })
+
+  it('configures Samgöngustofa with a OneSystems endpoint', () => {
+    const [, , samgongustofa] = loadTenants(validEnv)
+    expect(samgongustofa.endpoints.onesystems?.type).toBe('onesystems')
   })
 
   it('throws with a clear error when KERFISSTJORN_ZENDESK_API_TOKEN is missing', () => {

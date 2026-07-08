@@ -34,7 +34,7 @@ import { requireEnv } from './env.js'
 export function loadTenants(env: Record<string, string | undefined> = process.env): TenantConfig[] {
   return [
     {
-      brand_id: '33979373713298',
+      brand_id: '30220057411090',
       name: 'Kerfisstjórn',
       zendesk: {
         subdomain: requireEnv('KERFISSTJORN_ZENDESK_SUBDOMAIN', env),
@@ -57,7 +57,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
       },
     },
     {
-      brand_id: '33979400825874',
+      brand_id: '28710908212242',
       name: 'Vinnueftirlitið',
       zendesk: {
         subdomain: requireEnv('VINNUEFTIRLIT_ZENDESK_SUBDOMAIN', env),
@@ -76,6 +76,29 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
       malaskra: { apiKey: requireEnv('VINNUEFTIRLIT_MALASKRA_API_KEY', env) },
       pdf: {
         companyName: 'Vinnueftirlitið',
+        locale: 'is-IS',
+        includeInternalNotes: false,
+      },
+    },
+    {
+      brand_id: '11037960588818',
+      name: 'Samgöngustofa',
+      zendesk: {
+        subdomain: requireEnv('SAMGONGUSTOFA_ZENDESK_SUBDOMAIN', env),
+        email: requireEnv('SAMGONGUSTOFA_ZENDESK_EMAIL', env),
+        apiToken: requireEnv('SAMGONGUSTOFA_ZENDESK_API_TOKEN', env),
+        webhookSecret: requireEnv('SAMGONGUSTOFA_ZENDESK_WEBHOOK_SECRET', env),
+      },
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_BASE_URL', env),
+          appKey: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_APP_KEY', env),
+        },
+      },
+      malaskra: { apiKey: requireEnv('SAMGONGUSTOFA_MALASKRA_API_KEY', env) },
+      pdf: {
+        companyName: 'Samgöngustofa',
         locale: 'is-IS',
         includeInternalNotes: false,
       },
