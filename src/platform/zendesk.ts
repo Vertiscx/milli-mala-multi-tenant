@@ -96,58 +96,67 @@ export class ZendeskClient {
       })
       return attachments as AttachmentsResult
     }
-    for (const comment of comments) {
-      if (!comment.attachments) continue
-      for (const att of comment.attachments) {
-        if (attachments.length >= maxFiles) {
-          logger.warn('Attachment count limit reached', { maxFiles })
+    // Flatten so limit early-exits can record every remaining file in
+    // `failed` — a skipped attachment must be visible to callers (note +
+    // audit), never silently dropped.
+    const all = comments.flatMap(c => c.attachments ?? [])
+    for (let i = 0; i < all.length; i++) {
+      const att = all[i]
+      if (attachments.length >= maxFiles) {
+        logger.warn('Attachment count limit reached', { maxFiles, skipped: all.length - i })
+        for (const rest of all.slice(i)) {
+          failed.push({ filename: rest.file_name, reason: 'file count limit reached' })
+        }
+        return finalize()
+      }
+      try {
+        // SSRF protection: only allow genuine Zendesk URLs
+        const attUrl = new URL(att.content_url)
+        if (attUrl.protocol !== 'https:') {
+          logger.warn('Skipping non-HTTPS attachment URL', { url: att.content_url })
+          failed.push({ filename: att.file_name, reason: 'non-HTTPS URL' })
+          continue
+        }
+        // Proper domain check: extract the last two labels and compare exactly.
+        // This prevents bypasses like "evil-zendesk.com" matching ".zendesk.com".
+        const hostParts = attUrl.hostname.split('.')
+        const domain = hostParts.slice(-2).join('.')
+        if (domain !== 'zendesk.com' && domain !== 'zdassets.com') {
+          logger.warn('Skipping non-Zendesk attachment URL', { url: att.content_url })
+          failed.push({ filename: att.file_name, reason: 'non-Zendesk URL' })
+          continue
+        }
+        const response = await fetch(att.content_url, {
+          headers: { 'Authorization': `Basic ${this.auth}` }
+        })
+        if (!response.ok) {
+          logger.warn('Attachment download returned non-OK status', {
+            filename: att.file_name, status: response.status
+          })
+          failed.push({ filename: att.file_name, reason: `download status ${response.status}` })
+          continue
+        }
+        const buffer = Buffer.from(await response.arrayBuffer())
+        if (totalBytes + buffer.length > maxTotalBytes) {
+          logger.warn('Attachment total size limit reached', {
+            maxTotalBytes, currentBytes: totalBytes, skipped: all.length - i
+          })
+          for (const rest of all.slice(i)) {
+            failed.push({ filename: rest.file_name, reason: 'total size limit reached' })
+          }
           return finalize()
         }
-        try {
-          // SSRF protection: only allow genuine Zendesk URLs
-          const attUrl = new URL(att.content_url)
-          if (attUrl.protocol !== 'https:') {
-            logger.warn('Skipping non-HTTPS attachment URL', { url: att.content_url })
-            failed.push({ filename: att.file_name, reason: 'non-HTTPS URL' })
-            continue
-          }
-          // Proper domain check: extract the last two labels and compare exactly.
-          // This prevents bypasses like "evil-zendesk.com" matching ".zendesk.com".
-          const hostParts = attUrl.hostname.split('.')
-          const domain = hostParts.slice(-2).join('.')
-          if (domain !== 'zendesk.com' && domain !== 'zdassets.com') {
-            logger.warn('Skipping non-Zendesk attachment URL', { url: att.content_url })
-            failed.push({ filename: att.file_name, reason: 'non-Zendesk URL' })
-            continue
-          }
-          const response = await fetch(att.content_url, {
-            headers: { 'Authorization': `Basic ${this.auth}` }
-          })
-          if (!response.ok) {
-            logger.warn('Attachment download returned non-OK status', {
-              filename: att.file_name, status: response.status
-            })
-            failed.push({ filename: att.file_name, reason: `download status ${response.status}` })
-            continue
-          }
-          const buffer = Buffer.from(await response.arrayBuffer())
-          if (totalBytes + buffer.length > maxTotalBytes) {
-            logger.warn('Attachment total size limit reached', { maxTotalBytes, currentBytes: totalBytes })
-            failed.push({ filename: att.file_name, reason: 'total size limit reached' })
-            return finalize()
-          }
-          totalBytes += buffer.length
-          attachments.push({
-            filename: att.file_name,
-            contentType: att.content_type,
-            size: att.size,
-            data: buffer
-          })
-          logger.debug('Downloaded attachment', { filename: att.file_name, size: att.size })
-        } catch (error) {
-          logger.warn('Failed to download attachment', { filename: att.file_name, error: (error as Error).message })
-          failed.push({ filename: att.file_name, reason: 'download error' })
-        }
+        totalBytes += buffer.length
+        attachments.push({
+          filename: att.file_name,
+          contentType: att.content_type,
+          size: att.size,
+          data: buffer
+        })
+        logger.debug('Downloaded attachment', { filename: att.file_name, size: att.size })
+      } catch (error) {
+        logger.warn('Failed to download attachment', { filename: att.file_name, error: (error as Error).message })
+        failed.push({ filename: att.file_name, reason: 'download error' })
       }
     }
     return finalize()

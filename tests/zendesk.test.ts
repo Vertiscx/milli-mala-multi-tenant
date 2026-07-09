@@ -302,7 +302,7 @@ describe('ZendeskClient', () => {
       expect(result).toEqual([])
     })
 
-    it('stops at maxFiles and records nothing extra (count limit)', async () => {
+    it('stops at maxFiles and records every skipped file as failed (count limit)', async () => {
       const mkAtt = (i: number) => ({
         id: i,
         file_name: `f${i}.bin`,
@@ -318,6 +318,32 @@ describe('ZendeskClient', () => {
 
       expect(result).toHaveLength(1)
       expect(global.fetch).toHaveBeenCalledTimes(1)
+      // The two skipped files must be visible to callers, not silently dropped
+      expect((result as any).failed).toEqual([
+        { filename: 'f2.bin', reason: 'file count limit reached' },
+        { filename: 'f3.bin', reason: 'file count limit reached' }
+      ])
+    })
+
+    it('records skipped files across multiple comments when maxFiles hits', async () => {
+      const mkAtt = (i: number) => ({
+        id: i,
+        file_name: `f${i}.bin`,
+        content_url: `https://test-subdomain.zendesk.com/attachments/${i}`,
+        content_type: 'application/octet-stream',
+        size: 1
+      })
+      const mockComments = [
+        { id: 1, attachments: [mkAtt(1)] },
+        { id: 2, attachments: [mkAtt(2), mkAtt(3)] }
+      ]
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) })
+
+      const result = await client.fetchAttachments(mockComments as any, { maxFiles: 1 })
+
+      expect(result).toHaveLength(1)
+      expect((result as any).failed.map((f: { filename: string }) => f.filename)).toEqual(['f2.bin', 'f3.bin'])
     })
 
     it('stops at maxTotalBytes and records the over-limit file as failed', async () => {
@@ -337,6 +363,25 @@ describe('ZendeskClient', () => {
       expect(result).toEqual([])
       expect((result as any).failed).toEqual([
         { filename: 'big.bin', reason: 'total size limit reached' }
+      ])
+    })
+
+    it('records files after the size-limit trip as failed too', async () => {
+      const mkAtt = (i: number, name: string) => ({
+        id: i, file_name: name,
+        content_url: `https://test-subdomain.zendesk.com/attachments/${i}`,
+        content_type: 'application/octet-stream', size: 999
+      })
+      const mockComments = [{ id: 1, attachments: [mkAtt(1, 'big.bin'), mkAtt(2, 'after.bin')] }]
+      ;(global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(999) })
+
+      const result = await client.fetchAttachments(mockComments as any, { maxTotalBytes: 10 })
+
+      expect(result).toEqual([])
+      expect((result as any).failed).toEqual([
+        { filename: 'big.bin', reason: 'total size limit reached' },
+        { filename: 'after.bin', reason: 'total size limit reached' }
       ])
     })
 
