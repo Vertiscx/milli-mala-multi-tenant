@@ -4,6 +4,7 @@
 
 import { createLogger } from '../../platform/logger.js'
 import type { Logger } from '../../platform/types.js'
+import { fetchWithTimeout } from '../../platform/http.js'
 import type { UploadDocumentParams, DocClient, CreateCaseParams, CreateCaseResult } from './types.js'
 
 const logger: Logger = createLogger('onesystems')
@@ -62,7 +63,7 @@ export class OneSystemsClient implements DocClient {
 
   async authenticate(): Promise<void> {
     logger.debug('Authenticating with OneSystems')
-    const response = await fetch(`${this.baseUrl}/api/Authenticate/login`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/Authenticate/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appKey: this.appKey })
@@ -141,7 +142,7 @@ export class OneSystemsClient implements DocClient {
 
     logger.info('Uploading to OneSystems', { caseNumber })
 
-    const response = await fetch(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.token}`,
@@ -199,7 +200,7 @@ export class OneSystemsClient implements DocClient {
 
       logger.info('Uploading attachment to OneSystems', { caseNumber, filename: att.filename })
 
-      const attResponse = await fetch(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
+      const attResponse = await fetchWithTimeout(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.token}`,
@@ -246,7 +247,7 @@ export class OneSystemsClient implements DocClient {
 
     logger.info('Creating OneSystems case', { caseTemplate })
 
-    const response = await fetch(`${this.baseUrl}/api/OneRecord/CreateCaseUid`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/OneRecord/CreateCaseUid`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.token}`,
