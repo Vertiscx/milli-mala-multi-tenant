@@ -2,7 +2,7 @@
  * GoPro (gopro.net) API Client - handles authentication and document upload
  */
 
-import { createLogger } from '../../platform/logger.js'
+import { createLogger, capBody } from '../../platform/logger.js'
 import type { Logger } from '../../platform/types.js'
 import type { UploadDocumentParams, DocClient } from './types.js'
 
@@ -82,7 +82,7 @@ export class GoProClient implements DocClient {
 
       if (!response.ok) {
         const errorText = await response.text()
-        throw new Error(`GoPro upload failed: ${response.status} - ${errorText}`)
+        throw new Error(`GoPro upload failed: ${response.status} - ${capBody(errorText)}`)
       }
 
       const result = await response.json() as Record<string, unknown>

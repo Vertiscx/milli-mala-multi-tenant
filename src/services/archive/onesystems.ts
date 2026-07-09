@@ -2,7 +2,7 @@
  * OneSystems API Client - handles authentication and document upload
  */
 
-import { createLogger } from '../../platform/logger.js'
+import { createLogger, capBody } from '../../platform/logger.js'
 import type { Logger } from '../../platform/types.js'
 import type { UploadDocumentParams, DocClient, CreateCaseParams, CreateCaseResult } from './types.js'
 
@@ -153,12 +153,12 @@ export class OneSystemsClient implements DocClient {
 
     if (!response.ok) {
       const errorText = await response.text()
-      throw new Error(`OneSystems upload failed: ${response.status} - ${errorText}`)
+      throw new Error(`OneSystems upload failed: ${response.status} - ${capBody(errorText)}`)
     }
 
     logger.info('Upload successful', { caseNumber })
     const pdfResult = await response.json().catch(() => ({ success: true }))
-    logger.info('OneSystems PDF response', { caseNumber, response: pdfResult })
+    logger.info('OneSystems PDF response', { caseNumber, response: capBody(pdfResult) })
 
     // Upload each attachment as a separate call (API accepts one document per request)
     for (const att of attachments) {
@@ -211,12 +211,12 @@ export class OneSystemsClient implements DocClient {
 
       if (!attResponse.ok) {
         const errorText = await attResponse.text()
-        throw new Error(`OneSystems attachment upload failed (${att.filename}): ${attResponse.status} - ${errorText}`)
+        throw new Error(`OneSystems attachment upload failed (${att.filename}): ${attResponse.status} - ${capBody(errorText)}`)
       }
 
       const attResult = await attResponse.json().catch(() => ({ success: true }))
       logger.info('Attachment upload successful', { caseNumber, filename: att.filename })
-      logger.info('OneSystems attachment response', { caseNumber, filename: att.filename, response: attResult })
+      logger.info('OneSystems attachment response', { caseNumber, filename: att.filename, response: capBody(attResult) })
     }
 
     return pdfResult
@@ -268,7 +268,7 @@ export class OneSystemsClient implements DocClient {
     }
 
     logger.info('Case created', { caseNumber })
-    logger.info('OneSystems createCase response', { response: res })
+    logger.info('OneSystems createCase response', { response: capBody(res) })
     return { caseNumber, caseTemplate }
   }
 }
