@@ -288,7 +288,10 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
           body: {
             ok: false,
             outcome: 'orphan_case',
-            error: (err as Error).message,
+            // Generic message only — the raw downstream error (which can
+            // carry internal URLs/response bodies) stays in the log line
+            // above, consistent with the sanitization everywhere else.
+            error: 'Case created but document upload failed',
             caseNumber: createdCaseNumber
           }
         }
