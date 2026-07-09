@@ -103,5 +103,51 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         includeInternalNotes: false,
       },
     },
+    {
+      brand_id: '11204917066386',
+      name: 'Tryggingastofnun',
+      zendesk: {
+        subdomain: requireEnv('TRYGGINGASTOFNUN_ZENDESK_SUBDOMAIN', env),
+        email: requireEnv('TRYGGINGASTOFNUN_ZENDESK_EMAIL', env),
+        apiToken: requireEnv('TRYGGINGASTOFNUN_ZENDESK_API_TOKEN', env),
+        webhookSecret: requireEnv('TRYGGINGASTOFNUN_ZENDESK_WEBHOOK_SECRET', env),
+      },
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_BASE_URL', env),
+          appKey: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_APP_KEY', env),
+        },
+      },
+      malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_MALASKRA_API_KEY', env) },
+      pdf: {
+        companyName: 'Tryggingastofnun',
+        locale: 'is-IS',
+        includeInternalNotes: false,
+      },
+    },
+    {
+      brand_id: '36102499292434',
+      name: 'Tryggingastofnun-internal',
+      zendesk: {
+        subdomain: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ZENDESK_SUBDOMAIN', env),
+        email: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ZENDESK_EMAIL', env),
+        apiToken: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ZENDESK_API_TOKEN', env),
+        webhookSecret: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ZENDESK_WEBHOOK_SECRET', env),
+      },
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_BASE_URL', env),
+          appKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_APP_KEY', env),
+        },
+      },
+      malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_MALASKRA_API_KEY', env) },
+      pdf: {
+        companyName: 'Tryggingastofnun',
+        locale: 'is-IS',
+        includeInternalNotes: false,
+      },
+    },
   ]
 }

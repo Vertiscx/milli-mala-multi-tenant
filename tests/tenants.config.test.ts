@@ -46,15 +46,31 @@ const validEnv: Record<string, string> = {
   SAMGONGUSTOFA_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
   SAMGONGUSTOFA_ONESYSTEMS_APP_KEY: testSecret('samg-os-appkey', 40),
   SAMGONGUSTOFA_MALASKRA_API_KEY: testSecret('samg-malaskra-key', 40),
+  TRYGGINGASTOFNUN_ZENDESK_SUBDOMAIN: 'tryggingastofnun-test',
+  TRYGGINGASTOFNUN_ZENDESK_EMAIL: 'admin@tryggingastofnun.test',
+  TRYGGINGASTOFNUN_ZENDESK_API_TOKEN: testSecret('trygg-zd-token', 40),
+  TRYGGINGASTOFNUN_ZENDESK_WEBHOOK_SECRET: testSecret('trygg-zd-webhook', 40),
+  TRYGGINGASTOFNUN_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
+  TRYGGINGASTOFNUN_ONESYSTEMS_APP_KEY: testSecret('trygg-os-appkey', 40),
+  TRYGGINGASTOFNUN_MALASKRA_API_KEY: testSecret('trygg-malaskra-key', 40),
+  TRYGGINGASTOFNUN_INTERNAL_ZENDESK_SUBDOMAIN: 'tryggingastofnun-test',
+  TRYGGINGASTOFNUN_INTERNAL_ZENDESK_EMAIL: 'admin@tryggingastofnun.test',
+  TRYGGINGASTOFNUN_INTERNAL_ZENDESK_API_TOKEN: testSecret('tryggint-zd-token', 40),
+  TRYGGINGASTOFNUN_INTERNAL_ZENDESK_WEBHOOK_SECRET: testSecret('tryggint-zd-webhook', 40),
+  TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
+  TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_APP_KEY: testSecret('tryggint-os-appkey', 40),
+  TRYGGINGASTOFNUN_INTERNAL_MALASKRA_API_KEY: testSecret('tryggint-malaskra-key', 40),
 }
 
 describe('loadTenants', () => {
   it('returns all tenants when all env vars are set', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants).toHaveLength(3)
+    expect(tenants).toHaveLength(5)
     expect(tenants[0].name).toBe('Kerfisstjórn')
     expect(tenants[1].name).toBe('Vinnueftirlitið')
     expect(tenants[2].name).toBe('Samgöngustofa')
+    expect(tenants[3].name).toBe('Tryggingastofnun')
+    expect(tenants[4].name).toBe('Tryggingastofnun-internal')
   })
 
   it('produces tenants that pass validateTenantConfig', () => {
@@ -69,6 +85,8 @@ describe('loadTenants', () => {
     expect(tenants[0].pdf.companyName).toBe('Kerfisstjórn')
     expect(tenants[1].pdf.companyName).toBe('Vinnueftirlitið')
     expect(tenants[2].pdf.companyName).toBe('Samgöngustofa')
+    expect(tenants[3].pdf.companyName).toBe('Tryggingastofnun')
+    expect(tenants[4].pdf.companyName).toBe('Tryggingastofnun')
   })
 
   it('uses per-tenant Zendesk credentials (no shared secrets across tenants)', () => {
@@ -105,6 +123,14 @@ describe('loadTenants', () => {
   it('configures Samgöngustofa with a OneSystems endpoint', () => {
     const [, , samgongustofa] = loadTenants(validEnv)
     expect(samgongustofa.endpoints.onesystems?.type).toBe('onesystems')
+  })
+
+  it('configures both Tryggingastofnun brands with OneSystems endpoints and distinct brand_ids', () => {
+    const [, , , tryggingastofnun, tryggingastofnunInternal] = loadTenants(validEnv)
+    expect(tryggingastofnun.endpoints.onesystems?.type).toBe('onesystems')
+    expect(tryggingastofnun.brand_id).toBe('11204917066386')
+    expect(tryggingastofnunInternal.endpoints.onesystems?.type).toBe('onesystems')
+    expect(tryggingastofnunInternal.brand_id).toBe('36102499292434')
   })
 
   it('throws with a clear error when KERFISSTJORN_ZENDESK_API_TOKEN is missing', () => {
