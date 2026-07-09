@@ -16,12 +16,25 @@ export class ZendeskClient {
     this.auth = Buffer.from(`${email}/token:${apiToken}`).toString('base64')
   }
 
+  /**
+   * Build the thrown error for a non-ok response. statusText is empty
+   * over HTTP/2, so the (truncated) response body is the only place
+   * Zendesk's actual error detail (e.g. which field was invalid) lives.
+   */
+  private async apiError(response: Response): Promise<Error> {
+    let detail = ''
+    try {
+      detail = (await response.text()).slice(0, 500)
+    } catch { /* body unreadable — status-only message */ }
+    return new Error(`Zendesk API error: ${response.status}${detail ? ` - ${detail}` : ''}`)
+  }
+
   async request(endpoint: string): Promise<Record<string, unknown>> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       headers: { 'Authorization': `Basic ${this.auth}`, 'Content-Type': 'application/json' }
     })
     if (!response.ok) {
-      throw new Error(`Zendesk API error: ${response.status} ${response.statusText}`)
+      throw await this.apiError(response)
     }
     return response.json() as Promise<Record<string, unknown>>
   }
@@ -37,7 +50,7 @@ export class ZendeskClient {
       body: JSON.stringify(body)
     })
     if (!response.ok) {
-      throw new Error(`Zendesk API error: ${response.status} ${response.statusText}`)
+      throw await this.apiError(response)
     }
     return response.json() as Promise<Record<string, unknown>>
   }
