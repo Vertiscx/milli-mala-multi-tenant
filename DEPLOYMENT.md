@@ -357,11 +357,14 @@ Each tenant object has this structure:
 | `endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID the gateway writes the archive case number to (GW-01 post-back) |
 | `endpoints.{name}.lastStatusFieldId` | number | No | Zendesk custom field ID for the GW-01 `last_status` value (ratified JSON v1 — see [Result post-back](README.md#result-post-back-gw-01)) |
 | `endpoints.{name}.lastExportFieldId` | number | No | Zendesk **date** custom field ID for the last successful export (`YYYY-MM-DD`) |
-| `endpoints.{name}.templateFieldId` | number | No | Zendesk custom field ID for the case template (written on the OneSystems create path only) |
+| `endpoints.{name}.templateFieldId` | number | No | Zendesk custom field ID for the case template. Written on the OneSystems create path, and also **read** as the case-template source on the webhook create path (the trigger-stamped `malaskra_snidmat` field — app setting `malaskra_snidmat`) |
+| `endpoints.{name}.kennitalaFieldId` | number | No | OneSystems only — Zendesk custom field ID the gateway reads the kennitala from on the webhook create path (app setting `kennitala_custom_field`) |
 | `endpoints.{name}.tokenTtlMs` | number | No | Auth token TTL in ms (default: 1500000) |
 | `malaskra.apiKey` | string | Yes | API key for `/v1/cases` and `/v1/attachments` authentication (`X-Api-Key`) |
 
 > **Post-back field IDs are optional and graceful.** Any `*FieldId` left unset is skipped — the gateway still posts the internal note. Custom fields are **account-level** in Zendesk: the same numeric IDs apply across every brand on one Zendesk account, so they are configured per Zendesk account, not per brand. They are written back to the ticket by every documentation path (`/v1/cases`, `/v1/webhook`, `/v1/attachments`).
+>
+> **Webhook create inputs (templateFieldId / kennitalaFieldId).** When present, field IDs must be positive integers — a malformed value rejects the whole tenant config. On the Node runtime, set them per tenant via the optional env vars `<TENANT>_TEMPLATE_FIELD_ID` and `<TENANT>_KENNITALA_FIELD_ID` (positive integers; see [`.env.example`](.env.example)). On the Cloudflare Workers runtime, set the same `templateFieldId` / `kennitalaFieldId` keys directly in the tenant JSON in KV. Unset means the webhook create inputs are unavailable for that tenant.
 | `pdf.companyName` | string | No | Company name in PDF header |
 | `pdf.locale` | string | No | Date formatting locale (default: `is-IS`) |
 | `pdf.includeInternalNotes` | boolean | No | Include internal notes in PDF (default: `false`) |
@@ -431,6 +434,8 @@ Each institution needs a webhook and trigger configured in their Zendesk account
 ```
 
 The `doc_endpoint` value should match one of the keys in the tenant's `endpoints` map. It is hardcoded per trigger — each brand knows which archive system to target.
+
+> **Trigger staging for webhook create (OneSystems).** If the tenant uses the webhook create path, the gateway reads the case template from the `malaskra_snidmat` custom field and the kennitala from the `kennitala_custom_field` field on the fetched ticket. Admins must configure the Zendesk trigger(s) so the `malaskra_snidmat` template field is stamped **BEFORE** the close/webhook trigger fires — an unstamped field means no template is available at create time. Map the app settings `malaskra_snidmat` (template) and `kennitala_custom_field` (kennitala) to the same numeric field IDs configured as `templateFieldId` / `kennitalaFieldId` in the tenant config (see [Tenant Configuration](#tenant-configuration)).
 
 > ### ⚠️ Loop-safety — required (GW-04)
 >

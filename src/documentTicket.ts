@@ -145,6 +145,35 @@ export function resolveCaseNumber(
 }
 
 /**
+ * Webhook-create input extractor (CONF-01/CONF-02) — consumed by Phase 6.
+ * Reads the case template from the trigger-stamped `malaskra_snidmat`
+ * custom field (ep.templateFieldId) and the kennitala from
+ * ep.kennitalaFieldId. Pure: never throws, never invents values. Values
+ * are trimmed; whitespace-only or missing fields yield an absent property.
+ * Both values pass through raw — the OneSystems client normalizes the
+ * kennitala downstream.
+ */
+export function resolveCreateInputs(
+  ep: EndpointConfig,
+  ticket: ZendeskTicket
+): { template?: string; kennitala?: string } {
+  const lookup = (fieldId: number | null | undefined): string | undefined => {
+    if (!fieldId) return undefined
+    const field = ticket.custom_fields?.find(f => f.id === fieldId)
+    if (field?.value === undefined || field?.value === null) return undefined
+    const trimmed = String(field.value).trim()
+    return trimmed === '' ? undefined : trimmed
+  }
+
+  const template = lookup(ep.templateFieldId)
+  const kennitala = lookup(ep.kennitalaFieldId)
+  return {
+    ...(template !== undefined ? { template } : {}),
+    ...(kennitala !== undefined ? { kennitala } : {})
+  }
+}
+
+/**
  * Upload the document using an already-constructed doc client.
  * The client is built earlier (in documentTicket) so createDocClient's
  * misconfigured-endpoint throw keeps its original precedence relative
