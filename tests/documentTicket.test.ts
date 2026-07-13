@@ -449,3 +449,356 @@ describe('resolveCreateInputs', () => {
     })
   })
 })
+
+// ─── Phase 6: webhook create path (WHCC-01..04, 06, 07) ──────────────────
+//
+// A webhook ticket with an EMPTY case-number field on an OneSystems tenant
+// must mint a real case via createCase (CreateCaseUid), stamp the minted
+// number onto the ticket BEFORE upload, document into it, and persist the
+// audit with case_number_source 'created'. Minted-but-failed → 207 (never
+// 5xx — Zendesk would retry and mint a SECOND case). Populated-field,
+// GoPro, and fall-through paths must stay byte-equivalent to today.
+//
+// All scenarios drive the REAL handleWebhook with a URL-routing fetch mock
+// (order-independent), asserting the wire calls — same discipline as the
+// runtime-parity suite.
+
+describe('documentTicket webhook create path', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  /** Tenant whose onesystems endpoint carries all three field IDs. */
+  function makeCreateTenant(epOverrides: Record<string, unknown> = {}): TenantConfig {
+    return makeTenantConfig({
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: 'https://api.onesystems.test',
+          appKey: 'test-key',
+          caseNumberFieldId: 7777,
+          templateFieldId: 100,
+          kennitalaFieldId: 200,
+          ...epOverrides
+        }
+      }
+    })
+  }
+
+  /** Ticket with an EMPTY case-number field + template + kennitala stamped. */
+  function makeCreateTicket(
+    customFields: { id: number; value: string | number | boolean | null }[] = [
+      { id: 7777, value: null },
+      { id: 100, value: 'Almennt erindi' },
+      { id: 200, value: '010190-2989' }
+    ]
+  ) {
+    return { ...baseTicket, custom_fields: customFields }
+  }
+
+  type RoutedCall = { label: string; url: string; method: string; body?: string }
+
+  /**
+   * URL-routing fetch mock (order-independent). Distinguishes the STAMP
+   * PUT (custom_fields only, no comment) from the GW-01 post-back PUT
+   * (carries a comment) so stamp-before-upload ordering is assertable.
+   */
+  function installCreateRouter(opts: {
+    ticket?: object
+    createCaseFails?: boolean
+    uploadFails?: boolean
+    stampFails?: boolean
+  } = {}): RoutedCall[] {
+    const calls: RoutedCall[] = []
+    const f = global.fetch as ReturnType<typeof vi.fn>
+    f.mockImplementation(async (input: unknown, init?: { method?: string; body?: string }) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      const record = (label: string) =>
+        calls.push({ label, url, method, ...(init?.body !== undefined ? { body: String(init.body) } : {}) })
+
+      if (url.includes('/comments.json')) {
+        record('comments')
+        return { ok: true, json: async () => ({ comments: [{ id: 1, body: 'Hello', public: true, author_id: 100 }] }) }
+      }
+      if (url.includes('/users/show_many.json')) {
+        record('users')
+        return { ok: true, json: async () => ({ users: [{ id: 100, name: 'Test Agent', email: 'agent@test.com' }] }) }
+      }
+      if (/\/tickets\/123\.json$/.test(url) && method === 'GET') {
+        record('getTicket')
+        return { ok: true, json: async () => ({ ticket: opts.ticket ?? makeCreateTicket() }) }
+      }
+      if (/\/tickets\/123\.json$/.test(url) && method === 'PUT') {
+        const parsed = JSON.parse(String(init?.body ?? '{}')) as { ticket?: { comment?: unknown } }
+        const isStamp = parsed.ticket?.comment === undefined
+        record(isStamp ? 'stampPut' : 'postBackPut')
+        if (isStamp && opts.stampFails) {
+          return { ok: false, status: 500, text: async () => 'stamp boom' }
+        }
+        return { ok: true, json: async () => ({ ticket: {} }) }
+      }
+      if (url.includes('/api/Authenticate/login')) {
+        record('osAuth')
+        return { ok: true, text: async () => JSON.stringify({ token: 'os-token' }) }
+      }
+      if (url.includes('/api/OneRecord/CreateCaseUid')) {
+        record('createCase')
+        if (opts.createCaseFails) return { ok: false, status: 500, text: async () => 'create boom' }
+        return { ok: true, json: async () => ({ caseNumber: '2607033' }) }
+      }
+      if (url.includes('/api/OneRecord/AddDocument2')) {
+        record('upload')
+        if (opts.uploadFails) return { ok: false, status: 500, text: async () => 'upload boom' }
+        return { ok: true, json: async () => ({ success: true }) }
+      }
+      // GoPro routes (WHCC-07 scenario)
+      if (url.includes('/v2/Authenticate')) {
+        record('goproAuth')
+        return { ok: true, text: async () => '"gopro-token"' }
+      }
+      if (url.includes('/v2/Documents/Create')) {
+        record('goproUpload')
+        return { ok: true, json: async () => ({ succeeded: true, identifier: 'doc-1' }) }
+      }
+      throw new Error(`unexpected fetch: ${method} ${url}`)
+    })
+    return calls
+  }
+
+  function makeCapturingAuditStore(captured: string[]): AuditStore {
+    return {
+      put: vi.fn(async (_key: string, value: string) => { captured.push(value) }),
+      get: vi.fn(),
+      list: vi.fn()
+    }
+  }
+
+  it('WHCC-01/03: empty field + template + kennitala → mints via CreateCaseUid with the exact create params and returns 200 with the minted number', async () => {
+    const calls = installCreateRouter()
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeCreateTenant() })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(result.body.success).toBe(true)
+    expect(result.body.case_number).toBe('2607033')
+
+    // createCase called exactly once, with the composed params on the wire.
+    // The raw kennitala '010190-2989' flows through the client, which
+    // normalizes digits-only into idNumber (client-owned behavior).
+    const creates = calls.filter(c => c.label === 'createCase')
+    expect(creates).toHaveLength(1)
+    const payload = JSON.parse(creates[0].body!) as Record<string, unknown>
+    expect(payload).toMatchObject({
+      idNumber: '0101902989',
+      caseTemplate: 'Almennt erindi',
+      caseName: 'Test ticket',
+      externalId: 'ticket_123',
+      currentUser: 'agent@test.com'
+    })
+  })
+
+  it('WHCC-02: minted number is stamped onto the case-number field BEFORE the upload', async () => {
+    const calls = installCreateRouter()
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeCreateTenant() })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    const stampIdx = calls.findIndex(c => c.label === 'stampPut')
+    const uploadIdx = calls.findIndex(c => c.label === 'upload')
+    expect(stampIdx).toBeGreaterThanOrEqual(0)
+    expect(uploadIdx).toBeGreaterThanOrEqual(0)
+    expect(stampIdx).toBeLessThan(uploadIdx)
+
+    // The stamp PUT writes the minted number into the configured field.
+    const stampBody = JSON.parse(calls[stampIdx].body!) as {
+      ticket: { custom_fields: { id: number; value: unknown }[] }
+    }
+    expect(stampBody.ticket.custom_fields).toEqual([{ id: 7777, value: '2607033' }])
+  })
+
+  it('audit source: persisted entry carries the minted number + case_number_source created, with NO new top-level keys', async () => {
+    installCreateRouter()
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBe('2607033')
+    expect(persisted.destination.case_number_source).toBe('created')
+    // Byte-shape guard: exactly today's webhook top-level keys, nothing new.
+    expect(Object.keys(persisted)).toEqual([
+      'event', 'timestamp', 'duration_ms', 'brand_id', 'source', 'destination'
+    ])
+  })
+
+  it('minted-but-failed (upload): returns 207 with the minted number and a sanitized error; audit keeps source created', async () => {
+    installCreateRouter({ uploadFails: true })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    // 207, NOT a 5xx — a 5xx would make Zendesk retry and mint a second case.
+    expect(result.status).toBe(207)
+    expect(result.body.case_number).toBe('2607033')
+    // Sanitized: the raw upstream error must never leak into the body.
+    expect(typeof result.body.error).toBe('string')
+    expect(String(result.body.error)).not.toContain('upload boom')
+
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBe('2607033')
+    expect(persisted.destination.case_number_source).toBe('created')
+  })
+
+  it('minted-but-failed (stamp): setTicketCustomField rejecting → same 207 semantics with the minted number', async () => {
+    installCreateRouter({ stampFails: true })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(207)
+    expect(result.body.case_number).toBe('2607033')
+
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBe('2607033')
+    expect(persisted.destination.case_number_source).toBe('created')
+  })
+
+  it('createCase fails pre-mint: error propagates to the existing 500 (retry-safe), no stamp, no upload', async () => {
+    const calls = installCreateRouter({ createCaseFails: true })
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeCreateTenant() })
+    const result = await handleWebhook(req)
+
+    // Nothing was minted → the throw reaches handleWebhook's 500 so
+    // Zendesk retries (retry is safe pre-mint).
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+    expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'upload')).toHaveLength(0)
+  })
+
+  it('WHCC-06 regression: populated case-number field → createCase NEVER called, documents into the field value as today', async () => {
+    const populated = makeCreateTicket([
+      { id: 7777, value: 'CASE-42' },
+      { id: 100, value: 'Almennt erindi' },
+      { id: 200, value: '010190-2989' }
+    ])
+    const calls = installCreateRouter({ ticket: populated })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(result.body.case_number).toBe('CASE-42')
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
+
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number_source).toBe('custom_field')
+  })
+
+  it('fall-through (missing template): empty field + kennitala only → ZD- fallback as today, createCase never called', async () => {
+    const noTemplate = makeCreateTicket([
+      { id: 7777, value: null },
+      { id: 200, value: '010190-2989' }
+    ])
+    const calls = installCreateRouter({ ticket: noTemplate })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(result.body.case_number).toBe('ZD-123')
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
+
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number_source).toBe('fallback')
+  })
+
+  it('fall-through (missing kennitala): empty field + template only → ZD- fallback as today, createCase never called', async () => {
+    const noKennitala = makeCreateTicket([
+      { id: 7777, value: null },
+      { id: 100, value: 'Almennt erindi' }
+    ])
+    const calls = installCreateRouter({ ticket: noKennitala })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(result.body.case_number).toBe('ZD-123')
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
+
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number_source).toBe('fallback')
+  })
+
+  it('WHCC-07 GoPro: empty field + template + kennitala but no createCase on the client → create never engages, ZD- fallback as today', async () => {
+    const goproTenant = makeTenantConfig({
+      endpoints: {
+        gopro: {
+          type: 'gopro',
+          baseUrl: 'https://api.gopro.test',
+          username: 'guser',
+          password: 'gpass',
+          caseNumberFieldId: 7777,
+          templateFieldId: 100,
+          kennitalaFieldId: 200
+        }
+      }
+    })
+    const calls = installCreateRouter()
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: goproTenant, docEndpoint: 'gopro' }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(result.body.case_number).toBe('ZD-123')
+    // Duck-typed guard: no OneSystems create call, GoPro documents as today.
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'goproUpload').length).toBeGreaterThan(0)
+    expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+  })
+
+  it('no caseNumberFieldId configured: create engages, stamp is skipped (not an error), upload proceeds into the minted case', async () => {
+    // Field-ID-less endpoint: the case-number field cannot be read (empty
+    // by definition) nor stamped — mirror cases.ts step-4 else-branch.
+    const tenantConfig = makeCreateTenant({ caseNumberFieldId: undefined })
+    const ticket = makeCreateTicket([
+      { id: 100, value: 'Almennt erindi' },
+      { id: 200, value: '010190-2989' }
+    ])
+    const calls = installCreateRouter({ ticket })
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(result.body.case_number).toBe('2607033')
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(1)
+    expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'upload')).toHaveLength(1)
+  })
+})
