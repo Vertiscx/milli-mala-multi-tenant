@@ -358,16 +358,16 @@ Each tenant object has this structure:
 | `endpoints.{name}.lastStatusFieldId` | number | No | Zendesk custom field ID for the GW-01 `last_status` value (ratified JSON v1 — see [Result post-back](README.md#result-post-back-gw-01)) |
 | `endpoints.{name}.lastExportFieldId` | number | No | Zendesk **date** custom field ID for the last successful export (`YYYY-MM-DD`) |
 | `endpoints.{name}.templateFieldId` | number | No | Zendesk custom field ID for the case template. Written on the OneSystems create path, and also **read** as the case-template source on the webhook create path (the trigger-stamped `malaskra_snidmat` field — app setting `malaskra_snidmat`) |
-| `endpoints.{name}.kennitalaFieldId` | number | No | OneSystems only — Zendesk custom field ID the gateway reads the kennitala from on the webhook create path (app setting `kennitala_custom_field`) |
+| `endpoints.{name}.kennitalaFieldId` | number | No | Zendesk custom field ID the gateway reads the kennitala from on the OneSystems webhook create path (app setting `kennitala_custom_field`). Ignored (harmless) on GoPro endpoints |
 | `endpoints.{name}.tokenTtlMs` | number | No | Auth token TTL in ms (default: 1500000) |
 | `malaskra.apiKey` | string | Yes | API key for `/v1/cases` and `/v1/attachments` authentication (`X-Api-Key`) |
+| `pdf.companyName` | string | No | Company name in PDF header |
+| `pdf.locale` | string | No | Date formatting locale (default: `is-IS`) |
+| `pdf.includeInternalNotes` | boolean | No | Include internal notes in PDF (default: `false`) |
 
 > **Post-back field IDs are optional and graceful.** Any `*FieldId` left unset is skipped — the gateway still posts the internal note. Custom fields are **account-level** in Zendesk: the same numeric IDs apply across every brand on one Zendesk account, so they are configured per Zendesk account, not per brand. They are written back to the ticket by every documentation path (`/v1/cases`, `/v1/webhook`, `/v1/attachments`).
 >
 > **Webhook create inputs (templateFieldId / kennitalaFieldId).** When present, field IDs must be positive integers — a malformed value rejects the whole tenant config. On the Node runtime, set them per tenant via the optional env vars `<TENANT>_TEMPLATE_FIELD_ID` and `<TENANT>_KENNITALA_FIELD_ID` (positive integers; see [`.env.example`](.env.example)). On the Cloudflare Workers runtime, set the same `templateFieldId` / `kennitalaFieldId` keys directly in the tenant JSON in KV. Unset means the webhook create inputs are unavailable for that tenant.
-| `pdf.companyName` | string | No | Company name in PDF header |
-| `pdf.locale` | string | No | Date formatting locale (default: `is-IS`) |
-| `pdf.includeInternalNotes` | boolean | No | Include internal notes in PDF (default: `false`) |
 
 ### Adding a new tenant
 
