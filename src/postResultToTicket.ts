@@ -234,6 +234,14 @@ export async function recordOutcome(
         : o.outcome === 'orphan_case' ? 'ORPHAN'
         : 'FAILED'
       if (o.outcome === 'documented') auditArgs.lastExport = o.timestamp
+    } else if (o.caseNumberSource === 'created') {
+      // Phase 6 webhook create path: without this, writeAudit would derive
+      // 'custom_field' for a One-minted number (!startsWith('ZD-')). ONLY
+      // the source VALUE changes — no event/outcome/intent/lastStatus
+      // enrichment, so the populated-field and fallback webhook entries
+      // stay byte-identical (their o.caseNumberSource never equals
+      // 'created', so this branch cannot fire for them).
+      auditArgs.caseNumberSource = 'created'
     }
     await writeAudit(auditArgs)
   } catch (err) {

@@ -16,6 +16,7 @@ import { generateTicketPdf } from './pdf.js'
 import { createLogger } from './logger.js'
 import { resolveEndpoint, validateCaseNumber } from './tenant.js'
 import { createDocClient } from './docClient.js'
+import type { OneSystemsClient } from './onesystems.js'
 import type {
   HandlerResult,
   WebhookRequest,
@@ -171,6 +172,24 @@ export function resolveCreateInputs(
     ...(template !== undefined ? { template } : {}),
     ...(kennitala !== undefined ? { kennitala } : {})
   }
+}
+
+/**
+ * Read the RAW case-number custom-field value — the same 4-line lookup
+ * resolveCaseNumber performs, WITHOUT the ZD- fallback. Used by the
+ * webhook create-engage gate (Phase 6) to detect an EMPTY field.
+ * resolveCaseNumber itself is deliberately left NOT using this helper
+ * (regression constraint: its behavior stays byte-identical).
+ */
+function readCaseNumberField(
+  ep: EndpointConfig,
+  ticket: ZendeskTicket
+): string | undefined {
+  if (ep.caseNumberFieldId && ticket.custom_fields) {
+    const field = ticket.custom_fields.find(f => f.id === ep.caseNumberFieldId)
+    if (field?.value) return String(field.value)
+  }
+  return undefined
 }
 
 /**
@@ -333,7 +352,7 @@ export async function documentTicket(
     const fetched = await fetchTicketInfo(tenantConfig, ticketId)
     if (!fetched.ok) return fetched.result
     ;({ ticket, comments, attachments, failedAttachments } = fetched.info)
-    const { userMap, solvingAgentEmail } = fetched.info
+    const { userMap, solvingAgentEmail, zendesk } = fetched.info
 
     // 3. Generate PDF
     pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
@@ -343,6 +362,142 @@ export async function documentTicket(
     // misconfigured-endpoint throw keeps its precedence BEFORE the
     // validateCaseNumber 400 — preserving byte-identical error ordering.
     const docClient = createDocClient(ep, solvingAgentEmail)
+
+    // ─── Webhook create branch (Phase 6, WHCC-01..04) ──────────────────
+    // Engage ONLY when the case-number field is EMPTY, the doc client can
+    // create (duck-typed — NEVER ep.type), and the trigger stamped BOTH a
+    // template and a kennitala. Everything else falls through to today's
+    // resolveCaseNumber → postToCase flow UNTOUCHED (ZD- fallback stays
+    // this phase; loud missing-input failure is Phase 7).
+    const rawCaseNumberField = readCaseNumberField(ep, ticket)
+    const createInputs = resolveCreateInputs(ep, ticket)
+    const canCreate =
+      typeof (docClient as Partial<OneSystemsClient>).createCase === 'function'
+    if (
+      rawCaseNumberField === undefined &&
+      canCreate &&
+      createInputs.template !== undefined &&
+      createInputs.kennitala !== undefined
+    ) {
+      // Mirrors cases.ts LOCKED steps 3→6 by COMPOSING the same stage
+      // functions (createCase → stamp → postToCase → recordOutcome).
+      // A createCase throw propagates to the OUTER catch: nothing was
+      // minted, so handleWebhook's 500 makes Zendesk retry — retry is
+      // safe pre-mint. Kennitala passes through raw (the client
+      // normalizes digits-only downstream).
+      const created = await (docClient as OneSystemsClient).createCase({
+        caseTemplate: createInputs.template,
+        kennitala: createInputs.kennitala,
+        caseName: ticket.subject,
+        externalId: `ticket_${ticketId}`,
+        currentUser: solvingAgentEmail
+      })
+      // LATCH the minted number the instant createCase resolves — the
+      // outer failure-finalize catch reports it via resolvedCaseNumber.
+      const mintedNumber = created.caseNumber
+      resolvedCaseNumber = mintedNumber
+
+      // INNER try wrapping stamp + upload (mirror cases.ts steps 4-5).
+      try {
+        // Stamp BEFORE upload (WHCC-02): a Zendesk retry after the stamp
+        // lands on the populated-field add path, never a second mint.
+        if (ep.caseNumberFieldId != null) {
+          await zendesk.setTicketCustomField(ticketId, ep.caseNumberFieldId, mintedNumber)
+          logger.info('Stamped case number on ticket', {
+            brand_id: brandId, ticket_id: ticketId, caseNumber: mintedNumber
+          })
+        } else {
+          logger.info('No caseNumberFieldId configured — skipping stamp (not an error)', {
+            brand_id: brandId, ticket_id: ticketId, caseNumber: mintedNumber
+          })
+        }
+
+        await postToCase(docClient, mintedNumber, ticket, ticketId, pdfBuffer, attachments)
+      } catch (err) {
+        // MINTED-BUT-FAILED → 207, never 5xx: a 5xx would make Zendesk
+        // retry the webhook and mint a SECOND case. The minted number is
+        // never silently lost — it rides in the body + audit
+        // (case_number_source 'created'). Best-effort finalize, wrapped
+        // defensively like the outer failure-finalize.
+        logger.error('Post-create step failed — orphan case', {
+          brand_id: brandId, ticket_id: ticketId, caseNumber: mintedNumber,
+          error: (err as Error).message
+        })
+        try {
+          const { recordOutcome } = await import('./postResultToTicket.js')
+          await recordOutcome(
+            {
+              ok: false,
+              outcome: 'orphan_case',
+              intent: 'webhook',
+              caseNumber: mintedNumber,
+              caseNumberSource: 'created',
+              docSystem: ep.type,
+              ticketId,
+              durationMs: Date.now() - startTime,
+              pdfFilename: `ticket-${ticketId}.pdf`,
+              pdfSizeBytes: pdfBuffer.length,
+              failedAttachments,
+              sanitizedReason: 'Skjalfesting eftir stofnun máls mistókst',
+              timestamp: new Date().toISOString()
+            },
+            { tenantConfig, ep, docEndpoint, ticket, comments, attachments, pdfBuffer, auditStore }
+          )
+        } catch (finalizeErr) {
+          logger.warn('Orphan-case finalize failed (swallowed)', {
+            brand_id: brandId, ticket_id: ticketId, error: (finalizeErr as Error).message
+          })
+        }
+        // Sanitized fixed string — never the raw err.message (the webhook
+        // response must not leak upstream internals).
+        return {
+          status: 207,
+          body: {
+            error: 'Documentation after case creation failed',
+            ticket_id: ticketId,
+            brand_id: brandId,
+            case_number: mintedNumber,
+            doc_endpoint: docEndpoint
+          }
+        }
+      }
+
+      // Success — same post-upload duration point as the existing path.
+      const duration = Date.now() - startTime
+      const { recordOutcome } = await import('./postResultToTicket.js')
+      await recordOutcome(
+        {
+          ok: true,
+          outcome: 'documented',
+          intent: 'webhook',
+          caseNumber: mintedNumber,
+          caseNumberSource: 'created',
+          docSystem: ep.type,
+          template: created.caseTemplate,
+          ticketId,
+          durationMs: duration,
+          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfSizeBytes: pdfBuffer.length,
+          failedAttachments,
+          timestamp: new Date().toISOString()
+        },
+        { tenantConfig, ep, docEndpoint, ticket, comments, attachments, pdfBuffer, auditStore }
+      )
+
+      // EXISTING webhook 200 body shape, case_number = the minted number.
+      return {
+        status: 200,
+        body: {
+          success: true,
+          ticket_id: ticketId,
+          brand_id: brandId,
+          case_number: mintedNumber,
+          doc_endpoint: docEndpoint,
+          doc_system: ep.type,
+          duration_ms: duration
+        }
+      }
+    }
 
     const resolved = resolveCaseNumber(ep, ticket, ticketId)
     if (!resolved.ok) return resolved.result
