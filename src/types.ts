@@ -30,6 +30,7 @@ export interface EndpointConfig {
   lastStatusFieldId?: number | null   // GW-01/GW-02 — status custom field
   lastExportFieldId?: number | null   // GW-01/GW-02 — last-export timestamp
   templateFieldId?: number | null     // NET-NEW — OneSystems caseTemplate
+  kennitalaFieldId?: number | null    // NET-NEW — webhook create kennitala source
   tokenTtlMs?: number
 }
 
