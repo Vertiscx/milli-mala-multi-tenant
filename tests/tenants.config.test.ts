@@ -167,4 +167,45 @@ describe('loadTenants', () => {
     const env = { ...validEnv, KERFISSTJORN_ZENDESK_API_TOKEN: '' }
     expect(() => loadTenants(env)).toThrow('KERFISSTJORN_ZENDESK_API_TOKEN')
   })
+
+  // ─── Optional field-ID env vars (CONF-03) ─────────────────────────────
+
+  it('wires TEMPLATE_FIELD_ID and KENNITALA_FIELD_ID env vars into the OneSystems endpoint', () => {
+    const env = {
+      ...validEnv,
+      TRYGGINGASTOFNUN_TEMPLATE_FIELD_ID: '11111',
+      TRYGGINGASTOFNUN_KENNITALA_FIELD_ID: '22222',
+    }
+    const tenants = loadTenants(env)
+    const tryggingastofnun = tenants.find(t => t.name === 'Tryggingastofnun')!
+    expect(tryggingastofnun.endpoints.onesystems?.templateFieldId).toBe(11111)
+    expect(tryggingastofnun.endpoints.onesystems?.kennitalaFieldId).toBe(22222)
+  })
+
+  it('succeeds with the field-ID vars unset — both fields undefined (graceful absence)', () => {
+    const tenants = loadTenants(validEnv)
+    for (const tenant of tenants) {
+      for (const ep of Object.values(tenant.endpoints)) {
+        expect(ep.templateFieldId).toBeUndefined()
+        expect(ep.kennitalaFieldId).toBeUndefined()
+      }
+    }
+  })
+
+  it('throws at startup for a malformed field-ID value (fail fast)', () => {
+    const env = { ...validEnv, KERFISSTJORN_TEMPLATE_FIELD_ID: 'abc' }
+    expect(() => loadTenants(env)).toThrow('KERFISSTJORN_TEMPLATE_FIELD_ID')
+  })
+
+  it('does not wire template/kennitala field IDs for the GoPro tenant (Vinnueftirlitið)', () => {
+    const env = {
+      ...validEnv,
+      VINNUEFTIRLIT_TEMPLATE_FIELD_ID: '33333',
+      VINNUEFTIRLIT_KENNITALA_FIELD_ID: '44444',
+    }
+    const tenants = loadTenants(env)
+    const vinnueftirlit = tenants.find(t => t.name === 'Vinnueftirlitið')!
+    expect(vinnueftirlit.endpoints.gopro?.templateFieldId).toBeUndefined()
+    expect(vinnueftirlit.endpoints.gopro?.kennitalaFieldId).toBeUndefined()
+  })
 })
