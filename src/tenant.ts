@@ -276,7 +276,7 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
   for (const key of fieldIdKeys) {
     const v = ep[key]
     if (v === undefined || v === null) continue
-    if (!Number.isInteger(v) || (v as number) <= 0) {
+    if (!Number.isSafeInteger(v) || (v as number) <= 0) {
       throw new Error(`Endpoint "${name}": ${key} must be a positive integer (got ${JSON.stringify(v)})`)
     }
   }

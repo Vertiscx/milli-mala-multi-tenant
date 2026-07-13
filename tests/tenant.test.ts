@@ -489,6 +489,18 @@ describe('validateTenantConfig — field-ID validation', () => {
       .toThrow('kennitalaFieldId must be a positive integer (got "123")')
   })
 
+  it('should throw for an unsafe-integer kennitalaFieldId arriving via KV JSON', () => {
+    // Number.isInteger(1e20) is true, but 1e20 is not exactly representable —
+    // isSafeInteger rejects it so a corrupted field ID fails validation loudly.
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: 1e20 })))
+      .toThrow('kennitalaFieldId must be a positive integer')
+  })
+
+  it('should throw for a templateFieldId above Number.MAX_SAFE_INTEGER', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ templateFieldId: 2 ** 53 })))
+      .toThrow('templateFieldId must be a positive integer')
+  })
+
   it('should throw for a malformed templateFieldId', () => {
     expect(() => validateTenantConfig(makeTenantWithFieldIds({ templateFieldId: -1 })))
       .toThrow('templateFieldId must be a positive integer')

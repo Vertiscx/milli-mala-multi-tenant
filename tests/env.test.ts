@@ -58,6 +58,21 @@ describe('optionalNumberEnv', () => {
     expect(() => optionalNumberEnv('FOO', { FOO: '12.5' })).toThrow('positive integer')
   })
 
+  it('throws for a digit string above Number.MAX_SAFE_INTEGER (silent precision loss)', () => {
+    // 2^53 + 1 — Number() rounds this to 9007199254740992, a DIFFERENT field ID
+    expect(() => optionalNumberEnv('FOO', { FOO: '9007199254740993' }))
+      .toThrow('positive integer')
+  })
+
+  it('throws for a digit string that overflows to Infinity (fail-fast, not silent)', () => {
+    expect(() => optionalNumberEnv('FOO', { FOO: '9'.repeat(400) }))
+      .toThrow('positive integer')
+  })
+
+  it('accepts Number.MAX_SAFE_INTEGER itself', () => {
+    expect(optionalNumberEnv('FOO', { FOO: '9007199254740991' })).toBe(9007199254740991)
+  })
+
   it('accepts an injected env record (does not read process.env when one is passed)', () => {
     process.env.__TEST_OPTIONAL_NUMBER_ENV__ = '999'
     try {

@@ -36,10 +36,11 @@ export function optionalNumberEnv(
 ): number | undefined {
   const value = env[name]
   if (value === undefined || value === '') return undefined
-  if (!/^\d+$/.test(value) || Number(value) <= 0) {
+  const parsed = Number(value)
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error(
       `Invalid numeric environment variable: ${name} (must be a positive integer, got "${value}")`
     )
   }
-  return Number(value)
+  return parsed
 }
