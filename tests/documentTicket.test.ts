@@ -19,7 +19,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHmac } from 'crypto'
 import { handleWebhook } from '../src/webhook.js'
-import type { TenantConfig, AuditStore } from '../src/types.js'
+import { resolveCreateInputs } from '../src/documentTicket.js'
+import type { TenantConfig, AuditStore, EndpointConfig, ZendeskTicket } from '../src/types.js'
 
 // Mock fetch globally (mirrors tests/webhook.test.ts)
 global.fetch = vi.fn() as unknown as typeof fetch
@@ -356,5 +357,95 @@ describe('documentTicket extraction — risk hardening', () => {
 
     expect(result.status).toBe(500)
     expect(result.body.error).toBe('Internal server error')
+  })
+})
+
+// ─── resolveCreateInputs — webhook create input extraction (CONF-01/02) ──
+
+describe('resolveCreateInputs', () => {
+  function makeEp(overrides: Partial<EndpointConfig> = {}): EndpointConfig {
+    return {
+      type: 'onesystems',
+      baseUrl: 'https://api.onesystems.test',
+      appKey: 'test-key',
+      ...overrides
+    }
+  }
+
+  function makeTicket(customFields?: { id: number; value: string | number | boolean | null }[]): ZendeskTicket {
+    return {
+      id: 123,
+      subject: 'Test ticket',
+      status: 'closed',
+      created_at: '2025-01-01T00:00:00Z',
+      ...(customFields !== undefined ? { custom_fields: customFields } : {})
+    }
+  }
+
+  it('returns the raw template string from the configured templateFieldId field', () => {
+    const ep = makeEp({ templateFieldId: 100 })
+    const ticket = makeTicket([{ id: 100, value: 'Almennt erindi' }])
+    expect(resolveCreateInputs(ep, ticket)).toEqual({ template: 'Almennt erindi' })
+  })
+
+  it('returns the raw kennitala with hyphen intact (no normalization)', () => {
+    const ep = makeEp({ kennitalaFieldId: 200 })
+    const ticket = makeTicket([{ id: 200, value: '010190-2989' }])
+    expect(resolveCreateInputs(ep, ticket)).toEqual({ kennitala: '010190-2989' })
+  })
+
+  it('trims surrounding whitespace, preserving Icelandic characters', () => {
+    const ep = makeEp({ templateFieldId: 100 })
+    const ticket = makeTicket([{ id: 100, value: '  TR-mál  ' }])
+    expect(resolveCreateInputs(ep, ticket)).toEqual({ template: 'TR-mál' })
+  })
+
+  it('treats a whitespace-only field value as absent', () => {
+    const ep = makeEp({ templateFieldId: 100 })
+    const ticket = makeTicket([{ id: 100, value: '   ' }])
+    const result = resolveCreateInputs(ep, ticket)
+    expect('template' in result).toBe(false)
+    expect(result).toEqual({})
+  })
+
+  it('treats a null field value as absent', () => {
+    const ep = makeEp({ kennitalaFieldId: 200 })
+    const ticket = makeTicket([{ id: 200, value: null }])
+    expect(resolveCreateInputs(ep, ticket)).toEqual({})
+  })
+
+  it('treats a configured field ID with no matching custom_fields entry as absent', () => {
+    const ep = makeEp({ templateFieldId: 100, kennitalaFieldId: 200 })
+    const ticket = makeTicket([{ id: 999, value: 'unrelated' }])
+    expect(resolveCreateInputs(ep, ticket)).toEqual({})
+  })
+
+  it('treats unset/null field IDs on the endpoint as absent', () => {
+    const ticket = makeTicket([{ id: 100, value: 'Almennt erindi' }])
+    expect(resolveCreateInputs(makeEp(), ticket)).toEqual({})
+    expect(resolveCreateInputs(makeEp({ templateFieldId: null, kennitalaFieldId: null }), ticket)).toEqual({})
+  })
+
+  it('returns {} without throwing when ticket.custom_fields is undefined', () => {
+    const ep = makeEp({ templateFieldId: 100, kennitalaFieldId: 200 })
+    expect(resolveCreateInputs(ep, makeTicket())).toEqual({})
+  })
+
+  it('stringifies a numeric field value', () => {
+    const ep = makeEp({ kennitalaFieldId: 200 })
+    const ticket = makeTicket([{ id: 200, value: 1201503369 }])
+    expect(resolveCreateInputs(ep, ticket)).toEqual({ kennitala: '1201503369' })
+  })
+
+  it('returns both inputs in one call when both fields are configured and present', () => {
+    const ep = makeEp({ templateFieldId: 100, kennitalaFieldId: 200 })
+    const ticket = makeTicket([
+      { id: 100, value: 'Almennt erindi' },
+      { id: 200, value: '010190-2989' }
+    ])
+    expect(resolveCreateInputs(ep, ticket)).toEqual({
+      template: 'Almennt erindi',
+      kennitala: '010190-2989'
+    })
   })
 })
