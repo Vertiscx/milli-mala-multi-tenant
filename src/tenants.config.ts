@@ -21,10 +21,14 @@
  *
  * Rotating any value: no code change. DevOps updates the env var on the
  * deployment and restarts the container.
+ *
+ * Optional numeric custom-field IDs (the template/kennitala field-ID
+ * variables) use `optionalNumberEnv` and may be unset — unset means the
+ * webhook create inputs are unavailable for that tenant.
  */
 
 import type { TenantConfig } from './types.js'
-import { requireEnv } from './env.js'
+import { requireEnv, optionalNumberEnv } from './env.js'
 
 /**
  * Build the tenant array from environment variables. Called once at startup.
@@ -47,6 +51,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           type: 'onesystems',
           baseUrl: requireEnv('KERFISSTJORN_ONESYSTEMS_BASE_URL', env),
           appKey: requireEnv('KERFISSTJORN_ONESYSTEMS_APP_KEY', env),
+          templateFieldId: optionalNumberEnv('KERFISSTJORN_TEMPLATE_FIELD_ID', env),
+          kennitalaFieldId: optionalNumberEnv('KERFISSTJORN_KENNITALA_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('KERFISSTJORN_MALASKRA_API_KEY', env) },
@@ -94,6 +100,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           type: 'onesystems',
           baseUrl: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_BASE_URL', env),
           appKey: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_APP_KEY', env),
+          templateFieldId: optionalNumberEnv('SAMGONGUSTOFA_TEMPLATE_FIELD_ID', env),
+          kennitalaFieldId: optionalNumberEnv('SAMGONGUSTOFA_KENNITALA_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('SAMGONGUSTOFA_MALASKRA_API_KEY', env) },
@@ -117,6 +125,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           type: 'onesystems',
           baseUrl: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_BASE_URL', env),
           appKey: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_APP_KEY', env),
+          templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_TEMPLATE_FIELD_ID', env),
+          kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_KENNITALA_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_MALASKRA_API_KEY', env) },
@@ -140,6 +150,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           type: 'onesystems',
           baseUrl: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_BASE_URL', env),
           appKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_APP_KEY', env),
+          templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_TEMPLATE_FIELD_ID', env),
+          kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_KENNITALA_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_MALASKRA_API_KEY', env) },
