@@ -488,4 +488,72 @@ describe('Node vs Worker /v1/cases runtime parity', () => {
       expect(entry.destination.case_number_source).toBe('created')
     }
   })
+
+  it('(9) webhook loud-fail: empty case-number field + NO template stamped → 422 missing_template in BOTH runtimes, webhook_create_rejected audit', async () => {
+    // Phase 7 (WHCC-05/AUDIT-01): a trigger that never stamped the template
+    // is a loud, non-retryable misconfiguration — 422, distinct audit event,
+    // nothing minted, nothing archived, no ZD- anywhere. Mirrors scenario
+    // (8)'s drive helpers (HMAC signing, worker audit capture, node
+    // AUDIT_DIR read).
+    mode.ticketCustomFields = [
+      { id: 200, value: '1234567890' } // kennitala only — template ABSENT
+    ]
+    const body = { ticket_id: 123, brand_id: ONESYS_BRAND, doc_endpoint: 'onesystems' }
+    const rawBody = JSON.stringify(body)
+    const timestamp = new Date().toISOString()
+    const signature = createHmac('sha256', K_WEBHOOK).update(timestamp + rawBody).digest('base64')
+    const headers = {
+      'x-zendesk-webhook-signature': signature,
+      'x-zendesk-webhook-signature-timestamp': timestamp
+    }
+
+    // LO-02: only inspect audit files THIS scenario wrote.
+    const auditDir = process.env.AUDIT_DIR as string
+    const preexisting = new Set(await readdir(auditDir).catch(() => [] as string[]))
+
+    const node = await driveNode(headers, body, '/v1/webhook')
+    const worker = await driveWorker(headers, body, '/v1/webhook')
+    expect(node.status, 'webhook-loud-fail: node reached 422').toBe(422)
+    expect(worker.status, 'webhook-loud-fail: worker reached 422').toBe(422)
+
+    // The 422 body carries the mode and no case reference — full parity
+    // (no duration_ms in the reject body, so deep-equal directly).
+    const nb = node.body as Record<string, unknown>
+    const wb = worker.body as Record<string, unknown>
+    expect(nb.outcome).toBe('missing_template')
+    expect(wb.outcome).toBe('missing_template')
+    expect(nb.case_number).toBeUndefined()
+    expect(wb.case_number).toBeUndefined()
+    expect(nb).toStrictEqual(wb)
+
+    type RejectAudit = {
+      event: string
+      outcome: string
+      destination: { case_number: string | null; case_number_source: string }
+    }
+
+    // Worker audit: distinct event/outcome, case_number null / source none.
+    const workerAudits = workerAuditEntries.map(v => JSON.parse(v) as RejectAudit)
+    expect(workerAudits.length).toBeGreaterThan(0)
+    for (const entry of workerAudits) {
+      expect(entry.event).toBe('webhook_create_rejected')
+      expect(entry.outcome).toBe('missing_template')
+      expect(entry.destination.case_number).toBeNull()
+      expect(entry.destination.case_number_source).toBe('none')
+    }
+
+    // Node audit: FileAuditStore wrote the same reject entry under AUDIT_DIR.
+    const files = (await readdir(auditDir)).filter(f => !preexisting.has(f))
+    expect(files.length).toBeGreaterThan(0)
+    const nodeAudits = await Promise.all(files.map(async f => {
+      const stored = JSON.parse(await readFile(`${auditDir}/${f}`, 'utf8')) as { value: string }
+      return JSON.parse(stored.value) as RejectAudit
+    }))
+    for (const entry of nodeAudits) {
+      expect(entry.event).toBe('webhook_create_rejected')
+      expect(entry.outcome).toBe('missing_template')
+      expect(entry.destination.case_number).toBeNull()
+      expect(entry.destination.case_number_source).toBe('none')
+    }
+  })
 })

@@ -523,6 +523,7 @@ describe('documentTicket webhook create path', () => {
     createCaseFails?: boolean
     uploadFails?: boolean
     stampFails?: boolean
+    goproUploadFails?: boolean
     mintedCaseNumber?: string
   } = {}): RoutedCall[] {
     const calls: RoutedCall[] = []
@@ -575,6 +576,7 @@ describe('documentTicket webhook create path', () => {
       }
       if (url.includes('/v2/Documents/Create')) {
         record('goproUpload')
+        if (opts.goproUploadFails) return { ok: false, status: 500, text: async () => 'gopro boom' }
         return { ok: true, json: async () => ({ succeeded: true, identifier: 'doc-1' }) }
       }
       throw new Error(`unexpected fetch: ${method} ${url}`)
@@ -933,5 +935,134 @@ describe('documentTicket webhook create path', () => {
     expect(outcomes).toEqual([
       'missing_template', 'missing_kennitala', 'missing_case_number_field_config'
     ])
+  })
+
+  // ─── Phase 7 Task 2: failure-finalize never fabricates ZD- (WHCC-05) ───
+  //
+  // The outer-catch failure audit for a createCase-capable tenant must
+  // carry case_number null / source 'none' — never a fabricated ZD- value.
+  // GoPro failure-finalize stays byte-identical (ZD- + 'fallback' kept).
+
+  it('outer-catch (post-client throw): createCase fails → 500 unchanged, failure audit carries case_number null / source none — never ZD-', async () => {
+    // Pipeline throws AFTER docClient exists but BEFORE any number resolves.
+    installCreateRouter({ createCaseFails: true })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    // Rethrow unchanged → handleWebhook's 500 envelope.
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBeNull()
+    expect(persisted.destination.case_number_source).toBe('none')
+    for (const entry of captured) {
+      expect(entry).not.toContain('ZD-')
+    }
+  })
+
+  it('outer-catch (pre-client throw): getTicketComments rejects → 500, failure audit still case_number null / source none (guarded duck-check)', async () => {
+    // Throw happens BEFORE createDocClient runs — the catch re-derives the
+    // create capability from the endpoint config and still never fabricates.
+    const f = global.fetch as ReturnType<typeof vi.fn>
+    f
+      // getTicket
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: makeCreateTicket() }) })
+      // getTicketComments → REJECTS pre-client
+      .mockRejectedValueOnce(new Error('comments boom'))
+      // GW-01 failure post-back PUT
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBeNull()
+    expect(persisted.destination.case_number_source).toBe('none')
+    for (const entry of captured) {
+      expect(entry).not.toContain('ZD-')
+    }
+  })
+
+  it('outer-catch GoPro byte-identical: upload throw → failure audit keeps ZD-123 + source fallback exactly', async () => {
+    const goproTenant = makeTenantConfig({
+      endpoints: {
+        gopro: {
+          type: 'gopro',
+          baseUrl: 'https://api.gopro.test',
+          username: 'guser',
+          password: 'gpass'
+        }
+      }
+    })
+    installCreateRouter({ goproUploadFails: true })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: goproTenant, docEndpoint: 'gopro', auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+
+    // GoPro keeps today's fallback in the failure audit — byte-identical.
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBe('ZD-123')
+    expect(persisted.destination.case_number_source).toBe('fallback')
+  })
+
+  it('recordOutcome never fabricates: caseNumber undefined → no ZD- string in the persisted audit entry', async () => {
+    const f = global.fetch as ReturnType<typeof vi.fn>
+    f.mockResolvedValue({ ok: true, json: async () => ({ ticket: {} }) })
+    const captured: string[] = []
+    const tenantConfig = makeCreateTenant()
+    const { recordOutcome } = await import('../src/postResultToTicket.js')
+    await recordOutcome(
+      {
+        ok: false,
+        outcome: 'failed',
+        intent: 'webhook',
+        caseNumberSource: 'none',
+        docSystem: 'onesystems',
+        ticketId: 123,
+        durationMs: 5,
+        pdfFilename: 'ticket-123.pdf',
+        pdfSizeBytes: 10,
+        failedAttachments: [],
+        sanitizedReason: 'Sjálfvirk skjalfesting mistókst',
+        timestamp: new Date().toISOString()
+      },
+      {
+        tenantConfig,
+        ep: tenantConfig.endpoints.onesystems,
+        docEndpoint: 'onesystems',
+        ticket: baseTicket as ZendeskTicket,
+        comments: [],
+        attachments: [],
+        pdfBuffer: Buffer.alloc(10),
+        auditStore: makeCapturingAuditStore(captured)
+      }
+    )
+
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBeNull()
+    for (const entry of captured) {
+      expect(entry).not.toContain('ZD-')
+    }
   })
 })
