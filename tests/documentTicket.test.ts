@@ -722,7 +722,55 @@ describe('documentTicket webhook create path', () => {
     expect(persisted.destination.case_number_source).toBe('custom_field')
   })
 
-  it('fall-through (missing template): empty field + kennitala only → ZD- fallback as today, createCase never called', async () => {
+  // ─── Phase 7: loud-fail 422 rejects (WHCC-05, AUDIT-01/02) ─────────────
+  //
+  // The three Phase 6 fall-through-to-ZD- modes now fail LOUDLY: 422
+  // (non-retryable, 07-CONTEXT locked), one shared audit event
+  // 'webhook_create_rejected' with a per-mode outcome, nothing minted,
+  // nothing stamped, nothing archived, and NO ZD- reference anywhere.
+  // These rewrite the Phase 6 fall-through tests — the phase goal, not a
+  // regression.
+
+  /** Shared wire-silence + audit assertions for one loud-fail mode. */
+  function assertLoudReject(
+    result: { status: number; body: Record<string, unknown> },
+    calls: RoutedCall[],
+    captured: string[],
+    mode: string
+  ) {
+    // 422 non-retryable, sanitized fixed English error, mode in the body.
+    expect(result.status).toBe(422)
+    expect(result.body.outcome).toBe(mode)
+    expect(typeof result.body.error).toBe('string')
+    expect(result.body.ticket_id).toBe(123)
+    expect(result.body.brand_id).toBe('360001234567')
+    expect(result.body.doc_endpoint).toBe('onesystems')
+    // No case reference — the gateway never invents one (WHCC-05).
+    expect(result.body.case_number).toBeUndefined()
+
+    // Wire silence: nothing minted, nothing stamped, nothing uploaded.
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'upload')).toHaveLength(0)
+
+    // GW-01: the best-effort ❌ post-back still fires on a loud failure.
+    expect(calls.filter(c => c.label === 'postBackPut').length).toBeGreaterThan(0)
+
+    // Audit: distinct greppable event/outcome, case_number null / source
+    // 'none', and NO ZD- substring anywhere in the persisted JSON.
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.event).toBe('webhook_create_rejected')
+    expect(persisted.outcome).toBe(mode)
+    expect(persisted.destination.case_number).toBeNull()
+    expect(persisted.destination.case_number_source).toBe('none')
+    for (const entry of captured) {
+      expect(entry).not.toContain('ZD-')
+    }
+    return persisted
+  }
+
+  it('Mode 1 (AUDIT-01): empty field + kennitala only (no template) → 422 missing_template, nothing archived, distinct audit event', async () => {
     const noTemplate = makeCreateTicket([
       { id: 7777, value: null },
       { id: 200, value: '010190-2989' }
@@ -735,15 +783,10 @@ describe('documentTicket webhook create path', () => {
     )
     const result = await handleWebhook(req)
 
-    expect(result.status).toBe(200)
-    expect(result.body.case_number).toBe('ZD-123')
-    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
-
-    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
-    expect(persisted.destination.case_number_source).toBe('fallback')
+    assertLoudReject(result, calls, captured, 'missing_template')
   })
 
-  it('fall-through (missing kennitala): empty field + template only → ZD- fallback as today, createCase never called', async () => {
+  it('Mode 2 (AUDIT-02): empty field + template only (no kennitala) → 422 missing_kennitala, nothing archived, distinct audit event', async () => {
     const noKennitala = makeCreateTicket([
       { id: 7777, value: null },
       { id: 100, value: 'Almennt erindi' }
@@ -756,12 +799,7 @@ describe('documentTicket webhook create path', () => {
     )
     const result = await handleWebhook(req)
 
-    expect(result.status).toBe(200)
-    expect(result.body.case_number).toBe('ZD-123')
-    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
-
-    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
-    expect(persisted.destination.case_number_source).toBe('fallback')
+    assertLoudReject(result, calls, captured, 'missing_kennitala')
   })
 
   it('WHCC-07 GoPro: empty field + template + kennitala but no createCase on the client → create never engages, ZD- fallback as today', async () => {
@@ -814,11 +852,11 @@ describe('documentTicket webhook create path', () => {
     expect(persisted.destination.case_number_source).toBe('created')
   })
 
-  it('no caseNumberFieldId configured: create does NOT engage (no idempotency stamp possible) — falls through to the ZD- fallback (MD-02)', async () => {
+  it('Mode 3: no caseNumberFieldId configured (template + kennitala present) → 422 missing_case_number_field_config, createCase NEVER called (MD-02)', async () => {
     // Field-ID-less endpoint: the stamp is the ONLY duplicate-mint guard,
     // and without a field to stamp every at-least-once webhook redelivery
-    // would mint a FRESH case. The gate therefore refuses to mint: warn +
-    // today's fallback behavior instead.
+    // would mint a FRESH case. With the ZD- fallback gone (WHCC-05) this
+    // MUST fail loudly instead of silently keeping ZD-.
     const tenantConfig = makeCreateTenant({ caseNumberFieldId: undefined })
     const ticket = makeCreateTicket([
       { id: 100, value: 'Almennt erindi' },
@@ -832,12 +870,53 @@ describe('documentTicket webhook create path', () => {
     )
     const result = await handleWebhook(req)
 
-    expect(result.status).toBe(200)
-    expect(result.body.case_number).toBe('ZD-123')
-    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
-    expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+    assertLoudReject(result, calls, captured, 'missing_case_number_field_config')
+  })
 
-    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
-    expect(persisted.destination.case_number_source).toBe('fallback')
+  it('distinctness: the three loud-fail entries are identifiable by event/outcome alone, distinct from each other and from ticket_archived', async () => {
+    const scenarios: { tenant: TenantConfig; fields: { id: number; value: string | null }[]; mode: string }[] = [
+      {
+        tenant: makeCreateTenant(),
+        fields: [{ id: 7777, value: null }, { id: 200, value: '010190-2989' }],
+        mode: 'missing_template'
+      },
+      {
+        tenant: makeCreateTenant(),
+        fields: [{ id: 7777, value: null }, { id: 100, value: 'Almennt erindi' }],
+        mode: 'missing_kennitala'
+      },
+      {
+        tenant: makeCreateTenant({ caseNumberFieldId: undefined }),
+        fields: [{ id: 100, value: 'Almennt erindi' }, { id: 200, value: '010190-2989' }],
+        mode: 'missing_case_number_field_config'
+      }
+    ]
+
+    const entries: Record<string, unknown>[] = []
+    for (const s of scenarios) {
+      installCreateRouter({ ticket: makeCreateTicket(s.fields) })
+      const captured: string[] = []
+      const req = makeRequest(
+        { ticket_id: 123 },
+        { tenantConfig: s.tenant, auditStore: makeCapturingAuditStore(captured) }
+      )
+      const result = await handleWebhook(req)
+      expect(result.status).toBe(422)
+      expect(result.body.outcome).toBe(s.mode)
+      entries.push(JSON.parse(captured[0]) as Record<string, unknown>)
+    }
+
+    // All three share the greppable event, distinct from existing events.
+    for (const e of entries) {
+      expect(e.event).toBe('webhook_create_rejected')
+      expect(e.event).not.toBe('ticket_archived')
+      expect(e.event).not.toBe('orphan_case')
+    }
+    // Pairwise-distinct outcomes distinguish the modes from each other.
+    const outcomes = entries.map(e => e.outcome)
+    expect(new Set(outcomes).size).toBe(3)
+    expect(outcomes).toEqual([
+      'missing_template', 'missing_kennitala', 'missing_case_number_field_config'
+    ])
   })
 })
