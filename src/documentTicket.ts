@@ -185,7 +185,10 @@ function readCaseNumberField(
   ep: EndpointConfig,
   ticket: ZendeskTicket
 ): string | undefined {
-  if (ep.caseNumberFieldId && ticket.custom_fields) {
+  // `!= null` (not truthiness) so the configured-check matches the stamp
+  // guard in the create branch — a single predicate for "configured"
+  // (LO-05; a theoretical fieldId of 0 counts as configured in BOTH).
+  if (ep.caseNumberFieldId != null && ticket.custom_fields) {
     const field = ticket.custom_fields.find(f => f.id === ep.caseNumberFieldId)
     if (field?.value) return String(field.value)
   }
