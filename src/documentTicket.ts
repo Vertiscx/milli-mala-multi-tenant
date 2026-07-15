@@ -190,7 +190,18 @@ function readCaseNumberField(
   // (LO-05; a theoretical fieldId of 0 counts as configured in BOTH).
   if (ep.caseNumberFieldId != null && ticket.custom_fields) {
     const field = ticket.custom_fields.find(f => f.id === ep.caseNumberFieldId)
-    if (field?.value) return String(field.value)
+    // WR-02: TRIM before returning (mirrors resolveCreateInputs) — a
+    // whitespace-only field is ABSENT, so it engages the loud-fail gate /
+    // create path instead of silently archiving the documentation under a
+    // whitespace "case reference". The outer truthiness check is kept so
+    // falsy values (0/false/'') stay "absent" exactly as before — widening
+    // it would let resolveCaseNumber's truthiness re-open a ZD- hole.
+    // GoPro is unaffected: the gate only consumes this value when the
+    // client is createCase-capable.
+    if (field?.value) {
+      const trimmed = String(field.value).trim()
+      if (trimmed !== '') return trimmed
+    }
   }
   return undefined
 }

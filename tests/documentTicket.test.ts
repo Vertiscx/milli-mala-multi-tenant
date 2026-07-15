@@ -890,6 +890,76 @@ describe('documentTicket webhook create path', () => {
     assertLoudReject(result, calls, captured, 'missing_case_number_field_config')
   })
 
+  // WR-02: a whitespace-only case-number field is ABSENT — it must engage
+  // the gate (422 / create), never silently archive under a whitespace
+  // "case reference" with source custom_field.
+  it('WR-02: whitespace-only case-number field + no template → gate engages, 422 missing_template (never archived under whitespace)', async () => {
+    const whitespaceField = makeCreateTicket([
+      { id: 7777, value: '   ' },
+      { id: 200, value: '010190-2989' }
+    ])
+    const calls = installCreateRouter({ ticket: whitespaceField })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    assertLoudReject(result, calls, captured, 'missing_template')
+  })
+
+  it('WR-02: whitespace-only case-number field + template + kennitala → create path mints (gate engages, not the upload path)', async () => {
+    const whitespaceField = makeCreateTicket([
+      { id: 7777, value: ' \t ' },
+      { id: 100, value: 'Almennt erindi' },
+      { id: 200, value: '010190-2989' }
+    ])
+    const calls = installCreateRouter({ ticket: whitespaceField })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(result.body.case_number).toBe('2607033')
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(1)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBe('2607033')
+    expect(persisted.destination.case_number_source).toBe('created')
+  })
+
+  it('WR-02 GoPro regression: whitespace-only field on a non-create client → gate never engages, ZD- fallback exactly as today', async () => {
+    const goproTenant = makeTenantConfig({
+      endpoints: {
+        gopro: {
+          type: 'gopro',
+          baseUrl: 'https://api.gopro.test',
+          username: 'guser',
+          password: 'gpass',
+          caseNumberFieldId: 7777
+        }
+      }
+    })
+    const calls = installCreateRouter({
+      ticket: makeCreateTicket([{ id: 7777, value: '   ' }])
+    })
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: goproTenant, docEndpoint: 'gopro' }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    // resolveCaseNumber is untouched: GoPro keeps today's behavior for a
+    // whitespace field byte-identically (whitespace value, not ZD-).
+    expect(result.body.case_number).toBe('   ')
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'goproUpload').length).toBeGreaterThan(0)
+  })
+
   it('distinctness: the three loud-fail entries are identifiable by event/outcome alone, distinct from each other and from ticket_archived', async () => {
     const scenarios: { tenant: TenantConfig; fields: { id: number; value: string | null }[]; mode: string }[] = [
       {
