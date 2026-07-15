@@ -424,6 +424,14 @@ export async function documentTicket(
 
       // INNER try wrapping stamp + upload (mirror cases.ts steps 4-5).
       try {
+        // LO-04 (SYN-MUT-28-3 parity): run the same sanitizer the
+        // field-sourced path applies before the minted number flows into
+        // the stamp, upload, audit, and response. An invalid minted number
+        // is a POST-mint failure → the inner catch's 207 orphan path
+        // (never a retryable 5xx, which would mint a second case).
+        const mintedNumberError = validateCaseNumber(mintedNumber)
+        if (mintedNumberError) throw new Error(mintedNumberError)
+
         // Stamp BEFORE upload (WHCC-02): a Zendesk retry after the stamp
         // lands on the populated-field add path, never a second mint. The
         // engage gate guarantees caseNumberFieldId is configured (MD-02).

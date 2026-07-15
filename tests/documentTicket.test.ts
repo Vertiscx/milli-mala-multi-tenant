@@ -508,6 +508,7 @@ describe('documentTicket webhook create path', () => {
     createCaseFails?: boolean
     uploadFails?: boolean
     stampFails?: boolean
+    mintedCaseNumber?: string
   } = {}): RoutedCall[] {
     const calls: RoutedCall[] = []
     const f = global.fetch as ReturnType<typeof vi.fn>
@@ -545,7 +546,7 @@ describe('documentTicket webhook create path', () => {
       if (url.includes('/api/OneRecord/CreateCaseUid')) {
         record('createCase')
         if (opts.createCaseFails) return { ok: false, status: 500, text: async () => 'create boom' }
-        return { ok: true, json: async () => ({ caseNumber: '2607033' }) }
+        return { ok: true, json: async () => ({ caseNumber: opts.mintedCaseNumber ?? '2607033' }) }
       }
       if (url.includes('/api/OneRecord/AddDocument2')) {
         record('upload')
@@ -790,6 +791,27 @@ describe('documentTicket webhook create path', () => {
     expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
     expect(calls.filter(c => c.label === 'goproUpload').length).toBeGreaterThan(0)
     expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+  })
+
+  it('invalid minted case number: fails validateCaseNumber → post-mint 207 orphan, no stamp, no upload (LO-04)', async () => {
+    // A minted number that flunks the sanitizer (SYN-MUT-28-3) must be
+    // treated as a POST-mint failure: 207 orphan (never a retryable 5xx),
+    // and the invalid value never reaches the stamp or the upload.
+    const calls = installCreateRouter({ mintedCaseNumber: 'OS..9' })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeCreateTenant(), auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(207)
+    expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'upload')).toHaveLength(0)
+
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.outcome).toBe('orphan_case')
+    expect(persisted.destination.case_number_source).toBe('created')
   })
 
   it('no caseNumberFieldId configured: create does NOT engage (no idempotency stamp possible) — falls through to the ZD- fallback (MD-02)', async () => {
