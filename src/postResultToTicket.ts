@@ -216,7 +216,9 @@ export async function recordOutcome(
       tenantConfig: ctx.tenantConfig,
       docEndpoint: ctx.docEndpoint,
       ep: ctx.ep,
-      caseNumber: o.caseNumber ?? `ZD-${o.ticketId}`,
+      // Phase 7 (WHCC-05): NO fabrication, ever — an absent caseNumber is
+      // persisted as null/'none' by writeAudit, never an invented ZD- value.
+      caseNumber: o.caseNumber,
       pdfBuffer: ctx.pdfBuffer,
       durationMs: o.durationMs,
       auditStore: ctx.auditStore
@@ -248,6 +250,19 @@ export async function recordOutcome(
       if (o.outcome === 'orphan_case') {
         auditArgs.outcome = o.outcome
       }
+    } else if (
+      o.outcome === 'missing_template' ||
+      o.outcome === 'missing_kennitala' ||
+      o.outcome === 'missing_case_number_field_config'
+    ) {
+      // Phase 7 loud-fail webhook rejects (WHCC-05, AUDIT-01/02): one
+      // shared greppable event, distinguished by the per-mode outcome.
+      // NET-NEW entries — enriching them breaks no pre-existing shape;
+      // existing webhook entries (documented/orphan_case/failed) gain NO
+      // new keys.
+      auditArgs.event = 'webhook_create_rejected'
+      auditArgs.outcome = o.outcome
+      auditArgs.caseNumberSource = 'none'
     }
     await writeAudit(auditArgs)
   } catch (err) {

@@ -96,6 +96,30 @@ const baseTicket = {
   brand_id: 360001234567
 }
 
+// Phase 7 (WHCC-05): an OneSystems tenant no longer gets a ZD- fallback on
+// an EMPTY case-number field — it 422s loudly instead. The pipeline-behavior
+// tests below (best-effort audit, author fallback, duration parity, failure
+// post-back) therefore document into a POPULATED field ('C-100') so they
+// keep exercising the exact same code paths they always pinned.
+const fieldedTicket = {
+  ...baseTicket,
+  custom_fields: [{ id: 7777, value: 'C-100' }]
+}
+
+function makeFieldedTenant(epExtra: Record<string, unknown> = {}): TenantConfig {
+  return makeTenantConfig({
+    endpoints: {
+      onesystems: {
+        type: 'onesystems',
+        baseUrl: 'https://api.onesystems.test',
+        appKey: 'test-key',
+        caseNumberFieldId: 7777,
+        ...epExtra
+      }
+    }
+  })
+}
+
 /** Mirror the fetch mock sequence from webhook.test.ts end-to-end test. */
 function mockHappyFetchSequence(opts: { ticket?: object; usersReject?: boolean } = {}) {
   const ticket = opts.ticket ?? baseTicket
@@ -131,13 +155,13 @@ describe('documentTicket extraction — risk hardening', () => {
   })
 
   it('audit persistence failure still returns 200 (best-effort, not a 500)', async () => {
-    mockHappyFetchSequence()
+    mockHappyFetchSequence({ ticket: fieldedTicket })
     const auditStore: AuditStore = {
       put: vi.fn().mockRejectedValue(new Error('KV unavailable')),
       get: vi.fn(),
       list: vi.fn()
     }
-    const req = makeRequest({ ticket_id: 123 }, { auditStore })
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeFieldedTenant(), auditStore })
     const result = await handleWebhook(req)
 
     // Precondition: gate passed, reached the expected non-gate status
@@ -151,8 +175,8 @@ describe('documentTicket extraction — risk hardening', () => {
   })
 
   it('author resolution failure still proceeds with 200 and Zendesk fallback', async () => {
-    mockHappyFetchSequence({ usersReject: true })
-    const req = makeRequest({ ticket_id: 123 })
+    mockHappyFetchSequence({ ticket: fieldedTicket, usersReject: true })
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeFieldedTenant() })
     const result = await handleWebhook(req)
 
     // Precondition: gate passed, reached the expected non-gate status
@@ -246,7 +270,7 @@ describe('documentTicket extraction — risk hardening', () => {
   })
 
   it('duration_ms parity: success body equals persisted auditEntry duration_ms', async () => {
-    mockHappyFetchSequence()
+    mockHappyFetchSequence({ ticket: fieldedTicket })
     const captured: string[] = []
     const auditStore: AuditStore = {
       put: vi.fn(async (_key: string, value: string) => {
@@ -255,7 +279,7 @@ describe('documentTicket extraction — risk hardening', () => {
       get: vi.fn(),
       list: vi.fn()
     }
-    const req = makeRequest({ ticket_id: 123 }, { auditStore })
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeFieldedTenant(), auditStore })
     const result = await handleWebhook(req)
 
     // Precondition: gate passed, reached the expected non-gate status
@@ -278,20 +302,11 @@ describe('documentTicket extraction — risk hardening', () => {
   // ─── G4 gap: webhook FAILURE-path GW-01 post-back ────────────────────
   it('webhook failure path: upload throws → unchanged 500 AND GW-01 ❌ post-back fired', async () => {
     // Endpoint with field IDs so the failure post-back writes last_status.
-    const tenantConfig = makeTenantConfig({
-      endpoints: {
-        onesystems: {
-          type: 'onesystems',
-          baseUrl: 'https://api.onesystems.test',
-          appKey: 'test-key',
-          lastStatusFieldId: 33
-        }
-      }
-    })
+    const tenantConfig = makeFieldedTenant({ lastStatusFieldId: 33 })
     const f = global.fetch as ReturnType<typeof vi.fn>
     f
       // getTicket
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: baseTicket }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: fieldedTicket }) })
       // getTicketComments
       .mockResolvedValueOnce({
         ok: true,
@@ -338,7 +353,7 @@ describe('documentTicket extraction — risk hardening', () => {
   it('webhook failure path: post-back write itself rejecting does NOT change the 500', async () => {
     const f = global.fetch as ReturnType<typeof vi.fn>
     f
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: baseTicket }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: fieldedTicket }) })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ comments: [{ id: 1, body: 'Hi', public: true, author_id: 100 }] })
@@ -352,7 +367,7 @@ describe('documentTicket extraction — risk hardening', () => {
       // GW-01 failure post-back PUT itself rejects → must be swallowed
       .mockRejectedValueOnce(new Error('Zendesk down'))
 
-    const req = makeRequest({ ticket_id: 123 })
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeFieldedTenant() })
     const result = await handleWebhook(req)
 
     expect(result.status).toBe(500)

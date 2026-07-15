@@ -139,6 +139,9 @@ export interface CreateCaseResult {
 export interface DocumentationOutcome {
   ok: boolean
   outcome: 'documented' | 'orphan_case' | 'create_failed' | 'failed'
+    // Phase 7 loud-fail webhook rejects (WHCC-05, AUDIT-01/02): the three
+    // former fall-through-to-ZD- modes, each a distinct 422 audit outcome.
+    | 'missing_template' | 'missing_kennitala' | 'missing_case_number_field_config'
   intent: 'create' | 'case_number' | 'webhook'
   caseNumber?: string
   caseNumberSource: string

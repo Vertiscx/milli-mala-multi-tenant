@@ -195,6 +195,103 @@ function readCaseNumberField(
   return undefined
 }
 
+// ─── Phase 7: loud-fail webhook create rejects (WHCC-05, AUDIT-01/02) ──
+
+type WebhookCreateRejectMode =
+  | 'missing_template'
+  | 'missing_kennitala'
+  | 'missing_case_number_field_config'
+
+// Icelandic sanitized reasons for the GW-01 ❌ note (þ/ð/æ/ö preserved).
+const REJECT_SANITIZED_REASONS: Record<WebhookCreateRejectMode, string> = {
+  missing_template: 'Sniðmát vantar á miðann — kveikja (trigger) er rangt stillt',
+  missing_kennitala: 'Kennitölu vantar á miðann — skjalfesting hafnað',
+  missing_case_number_field_config: 'Málsnúmerssvæði er ekki stillt fyrir þennan tenant'
+}
+
+// Fixed sanitized English strings for the HTTP body — never raw internals
+// (matches the existing 207/500 discipline).
+const REJECT_ERROR_STRINGS: Record<WebhookCreateRejectMode, string> = {
+  missing_template: 'Case template missing on ticket — trigger misconfigured',
+  missing_kennitala: 'Kennitala missing on ticket — documentation rejected',
+  missing_case_number_field_config: 'Case number field not configured for this tenant'
+}
+
+/**
+ * Loud 422 reject for an empty-field webhook on a createCase-capable
+ * tenant (WHCC-05): the gateway never invents a case reference, so a
+ * missing template (AUDIT-01), missing kennitala (AUDIT-02) or unset
+ * caseNumberFieldId fails loudly — nothing minted, nothing stamped,
+ * nothing archived. 422 is non-retryable by design (07-CONTEXT locked):
+ * a 5xx would make Zendesk retry a request that can never succeed until
+ * the trigger/config is fixed. The GW-01 ❌ post-back + audit entry
+ * (event 'webhook_create_rejected', per-mode outcome) fire best-effort.
+ */
+async function rejectWebhookCreate(args: {
+  mode: WebhookCreateRejectMode
+  tenantConfig: TenantConfig
+  ep: EndpointConfig
+  docEndpoint: string
+  ticket: ZendeskTicket
+  comments: ZendeskComment[]
+  attachments: DownloadedAttachment[]
+  failedAttachments: { filename: string; reason: string }[]
+  pdfBuffer: Buffer
+  auditStore?: AuditStore
+  ticketId: number
+  startTime: number
+}): Promise<HandlerResult> {
+  const {
+    mode, tenantConfig, ep, docEndpoint, ticket, comments, attachments,
+    failedAttachments, pdfBuffer, auditStore, ticketId, startTime
+  } = args
+  const brandId = tenantConfig.brand_id
+
+  logger.error('Webhook create rejected — loud failure, nothing archived', {
+    brand_id: brandId, ticket_id: ticketId, doc_endpoint: docEndpoint, mode
+  })
+
+  // Best-effort finalize, wrapped like the orphan path (07-CONTEXT: loud
+  // failures still fire the GW-01 ❌ post-back so agents see it on the
+  // ticket). caseNumber is deliberately OMITTED — source 'none', never a
+  // fabricated ZD- value.
+  try {
+    const { recordOutcome } = await import('./postResultToTicket.js')
+    await recordOutcome(
+      {
+        ok: false,
+        outcome: mode,
+        intent: 'webhook',
+        caseNumberSource: 'none',
+        docSystem: ep.type,
+        ticketId,
+        durationMs: Date.now() - startTime,
+        pdfFilename: `ticket-${ticketId}.pdf`,
+        pdfSizeBytes: pdfBuffer.length,
+        failedAttachments,
+        sanitizedReason: REJECT_SANITIZED_REASONS[mode],
+        timestamp: new Date().toISOString()
+      },
+      { tenantConfig, ep, docEndpoint, ticket, comments, attachments, pdfBuffer, auditStore }
+    )
+  } catch (finalizeErr) {
+    logger.warn('Reject finalize failed (swallowed)', {
+      brand_id: brandId, ticket_id: ticketId, error: (finalizeErr as Error).message
+    })
+  }
+
+  return {
+    status: 422,
+    body: {
+      error: REJECT_ERROR_STRINGS[mode],
+      outcome: mode,
+      ticket_id: ticketId,
+      brand_id: brandId,
+      doc_endpoint: docEndpoint
+    }
+  }
+}
+
 /**
  * Upload the document using an already-constructed doc client.
  * The client is built earlier (in documentTicket) so createDocClient's
@@ -234,7 +331,10 @@ export async function writeAudit(args: {
   tenantConfig: TenantConfig
   docEndpoint: string
   ep: EndpointConfig
-  caseNumber: string
+  // Phase 7 (WHCC-05): absent when the entry has NO case reference (loud
+  // webhook rejects, createCase-capable failure finalize) — persisted as
+  // JSON null with source 'none', never a fabricated ZD- value.
+  caseNumber: string | undefined
   pdfBuffer: Buffer
   durationMs: number
   auditStore?: AuditStore
@@ -275,8 +375,11 @@ export async function writeAudit(args: {
     destination: {
       doc_endpoint: docEndpoint,
       doc_system: ep.type,
-      case_number: caseNumber,
-      case_number_source: args.caseNumberSource ?? (caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field'),
+      case_number: caseNumber ?? null,
+      case_number_source: args.caseNumberSource ?? (
+        caseNumber === undefined ? 'none'
+          : caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field'
+      ),
       pdf_filename: uploadFilename,
       pdf_size_bytes: pdfBuffer.length,
       attachments_forwarded: args.attachmentsForwarded ?? attachments.length
@@ -370,42 +473,38 @@ export async function documentTicket(
     // validateCaseNumber 400 — preserving byte-identical error ordering.
     const docClient = createDocClient(ep, solvingAgentEmail)
 
-    // ─── Webhook create branch (Phase 6, WHCC-01..04) ──────────────────
-    // Engage ONLY when the case-number field is EMPTY, the doc client can
-    // create (duck-typed — NEVER ep.type), and the trigger stamped BOTH a
-    // template and a kennitala. Everything else falls through to today's
-    // resolveCaseNumber → postToCase flow UNTOUCHED (ZD- fallback stays
-    // this phase; loud missing-input failure is Phase 7).
+    // ─── Webhook create branch (Phase 6 WHCC-01..04, Phase 7 WHCC-05) ──
+    // When the case-number field is EMPTY and the doc client can create
+    // (duck-typed — NEVER ep.type), the ONLY exits are the Phase 6 create
+    // path (all three prerequisites present) or one of the three loud 422
+    // rejects: an OneSystems-empty ticket NEVER reaches resolveCaseNumber's
+    // ZD- fallback anymore (WHCC-05). GoPro (no createCase) and
+    // populated-field tickets fall through to today's resolveCaseNumber →
+    // postToCase flow untouched.
     const rawCaseNumberField = readCaseNumberField(ep, ticket)
     const createInputs = resolveCreateInputs(ep, ticket)
     const canCreate =
       typeof (docClient as Partial<OneSystemsClient>).createCase === 'function'
-    const createInputsPresent =
-      createInputs.template !== undefined && createInputs.kennitala !== undefined
-    // MD-02: the stamp on ep.caseNumberFieldId is the ONLY re-mint guard in
-    // the design (a webhook redelivery re-reads the field and lands on the
-    // add path). Without a configured field there is NO idempotency guard —
-    // every at-least-once redelivery would mint a FRESH case. So the create
-    // path additionally requires caseNumberFieldId; otherwise warn and fall
-    // through to today's ZD- fallback behavior.
-    if (
-      rawCaseNumberField === undefined &&
-      canCreate &&
-      createInputsPresent &&
-      ep.caseNumberFieldId == null
-    ) {
-      logger.warn(
-        'Create inputs present but no caseNumberFieldId configured — skipping mint (stamp is the only duplicate-mint guard); falling back',
-        { brand_id: brandId, ticket_id: ticketId, doc_endpoint: docEndpoint }
-      )
-    }
-    if (
-      rawCaseNumberField === undefined &&
-      canCreate &&
-      createInputs.template !== undefined &&
-      createInputs.kennitala !== undefined &&
-      ep.caseNumberFieldId != null
-    ) {
+    if (rawCaseNumberField === undefined && canCreate) {
+      const rejectCtx = {
+        tenantConfig, ep, docEndpoint, ticket, comments, attachments,
+        failedAttachments, pdfBuffer, auditStore, ticketId, startTime
+      }
+      // Check precedence template → kennitala → config (locked in 07-01):
+      // template presence is what defines "create intent staged" (AUDIT-01),
+      // then the never-invent-a-kennitala guard (AUDIT-02), then MD-02 —
+      // the stamp on ep.caseNumberFieldId is the ONLY re-mint guard, so a
+      // mint without a stampable field must fail loudly, never keep ZD-.
+      if (createInputs.template === undefined) {
+        return rejectWebhookCreate({ mode: 'missing_template', ...rejectCtx })
+      }
+      if (createInputs.kennitala === undefined) {
+        return rejectWebhookCreate({ mode: 'missing_kennitala', ...rejectCtx })
+      }
+      const stampFieldId = ep.caseNumberFieldId
+      if (stampFieldId == null) {
+        return rejectWebhookCreate({ mode: 'missing_case_number_field_config', ...rejectCtx })
+      }
       // Mirrors cases.ts LOCKED steps 3→6 by COMPOSING the same stage
       // functions (createCase → stamp → postToCase → recordOutcome).
       // A createCase throw propagates to the OUTER catch: nothing was
@@ -438,7 +537,7 @@ export async function documentTicket(
         // Stamp BEFORE upload (WHCC-02): a Zendesk retry after the stamp
         // lands on the populated-field add path, never a second mint. The
         // engage gate guarantees caseNumberFieldId is configured (MD-02).
-        await zendesk.setTicketCustomField(ticketId, ep.caseNumberFieldId, mintedNumber)
+        await zendesk.setTicketCustomField(ticketId, stampFieldId, mintedNumber)
         logger.info('Stamped case number on ticket', {
           brand_id: brandId, ticket_id: ticketId, caseNumber: mintedNumber
         })
