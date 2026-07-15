@@ -702,15 +702,34 @@ export async function documentTicket(
       // WHCC-05: never fabricate ZD- for a createCase-capable client. If
       // the throw happened BEFORE the doc client was constructed, re-derive
       // the capability with a guarded, IO-free construction (onesystems.ts
-      // and gopro.ts constructors are verified IO-free); default TRUE on a
-      // construction throw so an unknown client is never fabricated for.
+      // and gopro.ts constructors are verified IO-free).
       // GoPro failure-finalize keeps today's ZD- + 'fallback' byte-identical.
       if (clientCanCreate === undefined) {
         try {
           clientCanCreate =
             typeof (createDocClient(ep, '') as Partial<OneSystemsClient>).createCase === 'function'
         } catch {
-          clientCanCreate = true
+          // Construction threw (missing credentials — WR-03). Re-derive by
+          // padding dummy credentials into a CLONE so the factory still
+          // picks the class and the check stays duck-typed (never ep.type):
+          // a credential-less GoPro endpoint keeps today's ZD- + 'fallback'
+          // failure audit byte-identical, and a credential-less OneSystems
+          // endpoint is never fabricated for. Only if even the padded
+          // construction throws (truly unknown client) does the
+          // never-fabricate invariant win with TRUE.
+          try {
+            clientCanCreate = typeof (createDocClient(
+              {
+                ...ep,
+                username: ep.username || 'unused',
+                password: ep.password || 'unused',
+                appKey: ep.appKey || 'unused'
+              },
+              ''
+            ) as Partial<OneSystemsClient>).createCase === 'function'
+          } catch {
+            clientCanCreate = true
+          }
         }
       }
       const caseNumber = resolvedCaseNumber ?? (clientCanCreate ? undefined : `ZD-${ticketId}`)

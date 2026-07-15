@@ -1095,6 +1095,66 @@ describe('documentTicket webhook create path', () => {
     expect(persisted.destination.case_number_source).toBe('fallback')
   })
 
+  // WR-03: a CONSTRUCTION throw (missing credentials) must not flip the
+  // catch-side capability re-derivation — GoPro keeps ZD- + 'fallback'
+  // byte-identical, OneSystems keeps null + 'none'.
+  it('WR-03 outer-catch GoPro construction-throw: missing username/password → failure audit keeps ZD-123 + source fallback (byte-identical)', async () => {
+    const goproTenant = makeTenantConfig({
+      endpoints: {
+        gopro: {
+          type: 'gopro',
+          baseUrl: 'https://api.gopro.test'
+          // username/password MISSING → createDocClient throws at construction
+        } as unknown as EndpointConfig
+      }
+    })
+    installCreateRouter()
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: goproTenant, docEndpoint: 'gopro', auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBe('ZD-123')
+    expect(persisted.destination.case_number_source).toBe('fallback')
+  })
+
+  it('WR-03 outer-catch OneSystems construction-throw: missing appKey → failure audit carries case_number null / source none — never ZD-', async () => {
+    const osTenant = makeTenantConfig({
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: 'https://api.onesystems.test'
+          // appKey MISSING → createDocClient throws at construction
+        } as unknown as EndpointConfig
+      }
+    })
+    installCreateRouter()
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: osTenant, auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+
+    expect(captured.length).toBeGreaterThan(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBeNull()
+    expect(persisted.destination.case_number_source).toBe('none')
+    for (const entry of captured) {
+      expect(entry).not.toContain('ZD-')
+    }
+  })
+
   it('recordOutcome never fabricates: caseNumber undefined → no ZD- string in the persisted audit entry', async () => {
     const f = global.fetch as ReturnType<typeof vi.fn>
     f.mockResolvedValue({ ok: true, json: async () => ({ ticket: {} }) })
