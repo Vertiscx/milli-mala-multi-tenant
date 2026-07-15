@@ -230,7 +230,15 @@ export async function recordOutcome(
         : o.outcome === 'orphan_case' ? 'orphan_case'
         : o.outcome
       auditArgs.outcome = o.outcome
-      auditArgs.caseNumberSource = o.caseNumberSource
+      // WR-01: never persist a source claim for an ABSENT case number.
+      // cases.ts passes caseNumberSource 'created' on create_failed (the
+      // create INTENT), but nothing was minted — persisting
+      // case_number: null + case_number_source: 'created' is semantically
+      // false. Normalize to 'none' whenever o.caseNumber is undefined so
+      // the persisted pair stays coherent (matches writeAudit's own
+      // absent-caseNumber derivation).
+      auditArgs.caseNumberSource =
+        o.caseNumber === undefined ? 'none' : o.caseNumberSource
       auditArgs.intent = o.intent
       auditArgs.lastStatus = o.outcome === 'documented' ? 'OK'
         : o.outcome === 'orphan_case' ? 'ORPHAN'
