@@ -354,7 +354,7 @@ Each tenant object has this structure:
 | `endpoints.{name}.appKey` | string | If OneSystems | OneSystems app key |
 | `endpoints.{name}.username` | string | If GoPro | GoPro login username |
 | `endpoints.{name}.password` | string | If GoPro | GoPro login password |
-| `endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID the gateway writes the archive case number to (GW-01 post-back) |
+| `endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID the gateway writes the archive case number to (GW-01 post-back). **Required for webhook case creation** — the create path refuses to mint without a field to stamp (the stamp is the retry/duplicate-mint guard). Node runtime: set via `<TENANT>_CASE_NUMBER_FIELD_ID` |
 | `endpoints.{name}.lastStatusFieldId` | number | No | Zendesk custom field ID for the GW-01 `last_status` value (ratified JSON v1 — see [Result post-back](README.md#result-post-back-gw-01)) |
 | `endpoints.{name}.lastExportFieldId` | number | No | Zendesk **date** custom field ID for the last successful export (`YYYY-MM-DD`) |
 | `endpoints.{name}.templateFieldId` | number | No | Zendesk custom field ID for the case template. Written on the OneSystems create path, and also **read** as the case-template source on the webhook create path (the trigger-stamped `malaskra_snidmat` field — app setting `malaskra_snidmat`) |
