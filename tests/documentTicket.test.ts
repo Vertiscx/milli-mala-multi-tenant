@@ -657,6 +657,13 @@ describe('documentTicket webhook create path', () => {
     const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
     expect(persisted.destination.case_number).toBe('2607033')
     expect(persisted.destination.case_number_source).toBe('created')
+    // MD-01: the orphan entry is NET-NEW this phase and must be
+    // distinguishable from a success entry — it carries outcome
+    // 'orphan_case' (the ONLY key added vs today's webhook shape).
+    expect(persisted.outcome).toBe('orphan_case')
+    expect(Object.keys(persisted)).toEqual([
+      'event', 'timestamp', 'duration_ms', 'brand_id', 'source', 'destination', 'outcome'
+    ])
   })
 
   it('minted-but-failed (stamp): setTicketCustomField rejecting → same 207 semantics with the minted number', async () => {
@@ -675,6 +682,8 @@ describe('documentTicket webhook create path', () => {
     const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
     expect(persisted.destination.case_number).toBe('2607033')
     expect(persisted.destination.case_number_source).toBe('created')
+    // MD-01: orphan entry is distinguishable via the outcome key.
+    expect(persisted.outcome).toBe('orphan_case')
   })
 
   it('createCase fails pre-mint: error propagates to the existing 500 (retry-safe), no stamp, no upload', async () => {
