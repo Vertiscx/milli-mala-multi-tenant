@@ -457,6 +457,11 @@ export async function documentTicket(
   // must report caseNumberSource 'created' for a latched minted number,
   // never derive 'custom_field' from its shape.
   let mintedByCreate = false
+  // Duck-typed create capability (WHCC-05) — set the instant the doc
+  // client is constructed, reused by the engage gate AND the outer
+  // failure-finalize catch: a createCase-capable client must NEVER get a
+  // fabricated ZD- reference, not even in a failure audit.
+  let clientCanCreate: boolean | undefined
 
   try {
     const fetched = await fetchTicketInfo(tenantConfig, ticketId)
@@ -483,9 +488,9 @@ export async function documentTicket(
     // postToCase flow untouched.
     const rawCaseNumberField = readCaseNumberField(ep, ticket)
     const createInputs = resolveCreateInputs(ep, ticket)
-    const canCreate =
+    clientCanCreate =
       typeof (docClient as Partial<OneSystemsClient>).createCase === 'function'
-    if (rawCaseNumberField === undefined && canCreate) {
+    if (rawCaseNumberField === undefined && clientCanCreate) {
       const rejectCtx = {
         tenantConfig, ep, docEndpoint, ticket, comments, attachments,
         failedAttachments, pdfBuffer, auditStore, ticketId, startTime
@@ -683,7 +688,21 @@ export async function documentTicket(
     // RETHROWN so handleWebhook's 500 envelope + src/webhook.ts stay
     // byte-identical and control flow is unchanged for existing tests.
     try {
-      const caseNumber = resolvedCaseNumber ?? `ZD-${ticketId}`
+      // WHCC-05: never fabricate ZD- for a createCase-capable client. If
+      // the throw happened BEFORE the doc client was constructed, re-derive
+      // the capability with a guarded, IO-free construction (onesystems.ts
+      // and gopro.ts constructors are verified IO-free); default TRUE on a
+      // construction throw so an unknown client is never fabricated for.
+      // GoPro failure-finalize keeps today's ZD- + 'fallback' byte-identical.
+      if (clientCanCreate === undefined) {
+        try {
+          clientCanCreate =
+            typeof (createDocClient(ep, '') as Partial<OneSystemsClient>).createCase === 'function'
+        } catch {
+          clientCanCreate = true
+        }
+      }
+      const caseNumber = resolvedCaseNumber ?? (clientCanCreate ? undefined : `ZD-${ticketId}`)
       const { recordOutcome } = await import('./postResultToTicket.js')
       await recordOutcome(
         {
@@ -694,8 +713,8 @@ export async function documentTicket(
           caseNumberSource: mintedByCreate
             ? 'created'
             : resolvedCaseNumber
-              ? (caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field')
-              : 'fallback',
+              ? (resolvedCaseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field')
+              : (clientCanCreate ? 'none' : 'fallback'),
           docSystem: ep.type,
           ticketId,
           durationMs: Date.now() - startTime,
