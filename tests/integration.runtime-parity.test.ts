@@ -24,6 +24,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { request as httpRequest, type Server } from 'node:http'
 import { AddressInfo } from 'node:net'
+import { createHmac } from 'node:crypto'
+import { readdir, readFile } from 'node:fs/promises'
 import type { AuditStore } from '../src/types.js'
 
 // Capture the http.Server that src/index.ts creates on import. node:http is
@@ -75,6 +77,9 @@ const TENANT_ENV: Record<string, string> = {
   KERFISSTJORN_ONESYSTEMS_BASE_URL: ONESYS_BASE,
   KERFISSTJORN_ONESYSTEMS_APP_KEY: K_APPKEY,
   KERFISSTJORN_MALASKRA_API_KEY: MALASKRA_KEY,
+  // Phase 6 — webhook create inputs (template + kennitala custom fields)
+  KERFISSTJORN_TEMPLATE_FIELD_ID: '100',
+  KERFISSTJORN_KENNITALA_FIELD_ID: '200',
   VINNUEFTIRLIT_ZENDESK_SUBDOMAIN: 'vinnu',
   VINNUEFTIRLIT_ZENDESK_EMAIL: 'v@example.com',
   VINNUEFTIRLIT_ZENDESK_API_TOKEN: V_TOKEN,
@@ -125,6 +130,9 @@ const fetchMock = () => global.fetch as ReturnType<typeof vi.fn>
 type Mode = {
   ticketBrand: number
   uploadFails: boolean
+  // Phase 6 webhook create scenario: custom fields on the fetched ticket
+  // (template + kennitala stamped, case-number field empty/absent).
+  ticketCustomFields?: { id: number; value: string | number | boolean | null }[]
 }
 let mode: Mode
 
@@ -154,8 +162,14 @@ function installFetchRouter() {
       return jsonRes({ users: [{ id: 7, name: 'Agent', email: 'agent@example.com' }] })
     }
     if (/\/tickets\/123\.json$/.test(url)) {
-      // getTicket (GET) — PUT is never issued (no caseNumberFieldId configured)
-      return jsonRes({ ticket: { id: 123, subject: 'Test', brand_id: mode.ticketBrand } })
+      // getTicket (GET) + GW-01 post-back PUT share this route; the stamp
+      // PUT is never issued (no caseNumberFieldId configured).
+      return jsonRes({
+        ticket: {
+          id: 123, subject: 'Test', brand_id: mode.ticketBrand,
+          ...(mode.ticketCustomFields !== undefined ? { custom_fields: mode.ticketCustomFields } : {})
+        }
+      })
     }
     if (url.includes('/api/Authenticate/login')) {
       return textRes(JSON.stringify({ token: 'os-token' }))
@@ -173,6 +187,9 @@ function installFetchRouter() {
 // ─── Adapter drivers ────────────────────────────────────────────────────────
 type Resp = { status: number; body: unknown }
 
+// Worker-side audit capture (memAudit put target; cleared in beforeEach).
+const workerAuditEntries: string[] = []
+
 let nodeServer: Server // index.ts's own server, captured via createServer spy
 let nodePort: number
 
@@ -183,7 +200,7 @@ function makeWorkerEnv() {
       brand_id: ONESYS_BRAND,
       name: 'Kerfisstjórn',
       zendesk: { subdomain: 'kerfis', email: 'k@example.com', apiToken: K_TOKEN, webhookSecret: K_WEBHOOK },
-      endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: K_APPKEY } },
+      endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: K_APPKEY, templateFieldId: 100, kennitalaFieldId: 200 } },
       malaskra: { apiKey: MALASKRA_KEY },
       pdf: { companyName: 'Kerfisstjórn', locale: 'is-IS', includeInternalNotes: false }
     }),
@@ -197,7 +214,9 @@ function makeWorkerEnv() {
     })
   }
   const memAudit: AuditStore = {
-    async put() {},
+    // Captured so scenarios can assert on the persisted audit entry
+    // (cleared per test in beforeEach).
+    async put(_key: string, value: string) { workerAuditEntries.push(value) },
     async get() { return null },
     async list() { return { keys: [] } }
   }
@@ -210,8 +229,8 @@ function makeWorkerEnv() {
 
 let workerMod: { default: { fetch(r: Request, e: unknown, c: unknown): Promise<Response> } }
 
-async function driveWorker(headers: Record<string, string>, body: unknown): Promise<Resp> {
-  const req = new Request('https://x/v1/cases', {
+async function driveWorker(headers: Record<string, string>, body: unknown, path = '/v1/cases'): Promise<Resp> {
+  const req = new Request(`https://x${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body)
@@ -220,14 +239,14 @@ async function driveWorker(headers: Record<string, string>, body: unknown): Prom
   return { status: res.status, body: await res.json() }
 }
 
-function driveNode(headers: Record<string, string>, body: unknown): Promise<Resp> {
+function driveNode(headers: Record<string, string>, body: unknown, path = '/v1/cases'): Promise<Resp> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body)
     const req = httpRequest(
       {
         host: '127.0.0.1',
         port: nodePort,
-        path: '/v1/cases',
+        path,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...headers }
       },
@@ -274,6 +293,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  workerAuditEntries.length = 0
   mode = { ticketBrand: Number(ONESYS_BRAND), uploadFails: false }
   installFetchRouter()
 })
@@ -398,5 +418,64 @@ describe('Node vs Worker /v1/cases runtime parity', () => {
     const { duration_ms: _n, ...nRest } = nb
     const { duration_ms: _w, ...wRest } = wb
     expect(nRest).toStrictEqual(wRest)
+  })
+
+  it('(8) webhook create path: empty case-number field + template/kennitala stamped → 200 with One-minted number, audit case_number_source created', async () => {
+    // Ticket carries the trigger-stamped create inputs but NO case-number
+    // field — the Phase 6 create branch must engage in both runtimes.
+    mode.ticketCustomFields = [
+      { id: 100, value: 'T-mál' }, // templateFieldId
+      { id: 200, value: '1234567890' } // kennitalaFieldId
+    ]
+    const body = { ticket_id: 123, brand_id: ONESYS_BRAND, doc_endpoint: 'onesystems' }
+    // Sign exactly the JSON string the drive helpers send (timestamp + rawBody).
+    const rawBody = JSON.stringify(body)
+    const timestamp = new Date().toISOString()
+    const signature = createHmac('sha256', K_WEBHOOK).update(timestamp + rawBody).digest('base64')
+    const headers = {
+      'x-zendesk-webhook-signature': signature,
+      'x-zendesk-webhook-signature-timestamp': timestamp
+    }
+
+    const node = await driveNode(headers, body, '/v1/webhook')
+    const worker = await driveWorker(headers, body, '/v1/webhook')
+    expect(node.status, 'webhook-create: node reached 200').toBe(200)
+    expect(worker.status, 'webhook-create: worker reached 200').toBe(200)
+
+    // Success body carries the One-minted number, never a ZD- reference.
+    const nb = node.body as Record<string, unknown>
+    const wb = worker.body as Record<string, unknown>
+    expect(nb.case_number).toBe('OS-9')
+    expect(wb.case_number).toBe('OS-9')
+    // duration_ms differs by runtime; assert shape parity then strip it.
+    expect(typeof nb.duration_ms).toBe('number')
+    expect(typeof wb.duration_ms).toBe('number')
+    const { duration_ms: _n, ...nRest } = nb
+    const { duration_ms: _w, ...wRest } = wb
+    expect(nRest).toStrictEqual(wRest)
+
+    // Worker audit: persisted entry shows the minted number with source 'created'.
+    const workerAudits = workerAuditEntries.map(v => JSON.parse(v) as {
+      destination: { case_number: string; case_number_source: string }
+    })
+    expect(workerAudits.length).toBeGreaterThan(0)
+    for (const entry of workerAudits) {
+      expect(entry.destination.case_number).toBe('OS-9')
+      expect(entry.destination.case_number_source).toBe('created')
+    }
+
+    // Node audit: FileAuditStore wrote the same entry under AUDIT_DIR.
+    const auditDir = process.env.AUDIT_DIR as string
+    const files = await readdir(auditDir)
+    expect(files.length).toBeGreaterThan(0)
+    const nodeAudits = await Promise.all(files.map(async f => {
+      const stored = JSON.parse(await readFile(`${auditDir}/${f}`, 'utf8')) as { value: string }
+      return JSON.parse(stored.value) as { destination: { case_number: string; case_number_source: string } }
+    }))
+    const created = nodeAudits.filter(e => e.destination.case_number === 'OS-9')
+    expect(created.length).toBeGreaterThan(0)
+    for (const entry of created) {
+      expect(entry.destination.case_number_source).toBe('created')
+    }
   })
 })
