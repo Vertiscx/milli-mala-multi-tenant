@@ -347,6 +347,10 @@ export async function documentTicket(
   let failedAttachments: { filename: string; reason: string }[] | undefined
   let pdfBuffer: Buffer | undefined
   let resolvedCaseNumber: string | undefined
+  // True once createCase has minted (LO-01): the outer failure-finalize
+  // must report caseNumberSource 'created' for a latched minted number,
+  // never derive 'custom_field' from its shape.
+  let mintedByCreate = false
 
   try {
     const fetched = await fetchTicketInfo(tenantConfig, ticketId)
@@ -416,6 +420,7 @@ export async function documentTicket(
       // outer failure-finalize catch reports it via resolvedCaseNumber.
       const mintedNumber = created.caseNumber
       resolvedCaseNumber = mintedNumber
+      mintedByCreate = true
 
       // INNER try wrapping stamp + upload (mirror cases.ts steps 4-5).
       try {
@@ -576,9 +581,11 @@ export async function documentTicket(
           outcome: 'failed',
           intent: 'webhook',
           caseNumber,
-          caseNumberSource: resolvedCaseNumber
-            ? (caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field')
-            : 'fallback',
+          caseNumberSource: mintedByCreate
+            ? 'created'
+            : resolvedCaseNumber
+              ? (caseNumber.startsWith('ZD-') ? 'fallback' : 'custom_field')
+              : 'fallback',
           docSystem: ep.type,
           ticketId,
           durationMs: Date.now() - startTime,
