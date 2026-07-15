@@ -53,6 +53,9 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           appKey: requireEnv('KERFISSTJORN_ONESYSTEMS_APP_KEY', env),
           templateFieldId: optionalNumberEnv('KERFISSTJORN_TEMPLATE_FIELD_ID', env),
           kennitalaFieldId: optionalNumberEnv('KERFISSTJORN_KENNITALA_FIELD_ID', env),
+          // MD-02 invariant: the webhook create path refuses to mint
+          // without a case-number field to stamp (duplicate-mint guard).
+          caseNumberFieldId: optionalNumberEnv('KERFISSTJORN_CASE_NUMBER_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('KERFISSTJORN_MALASKRA_API_KEY', env) },
@@ -102,6 +105,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           appKey: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_APP_KEY', env),
           templateFieldId: optionalNumberEnv('SAMGONGUSTOFA_TEMPLATE_FIELD_ID', env),
           kennitalaFieldId: optionalNumberEnv('SAMGONGUSTOFA_KENNITALA_FIELD_ID', env),
+          caseNumberFieldId: optionalNumberEnv('SAMGONGUSTOFA_CASE_NUMBER_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('SAMGONGUSTOFA_MALASKRA_API_KEY', env) },
@@ -127,6 +131,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           appKey: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_APP_KEY', env),
           templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_TEMPLATE_FIELD_ID', env),
           kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_KENNITALA_FIELD_ID', env),
+          caseNumberFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_CASE_NUMBER_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_MALASKRA_API_KEY', env) },
@@ -152,6 +157,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           appKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_APP_KEY', env),
           templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_TEMPLATE_FIELD_ID', env),
           kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_KENNITALA_FIELD_ID', env),
+          caseNumberFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_CASE_NUMBER_FIELD_ID', env),
         },
       },
       malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_MALASKRA_API_KEY', env) },

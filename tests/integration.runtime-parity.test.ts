@@ -78,8 +78,11 @@ const TENANT_ENV: Record<string, string> = {
   KERFISSTJORN_ONESYSTEMS_APP_KEY: K_APPKEY,
   KERFISSTJORN_MALASKRA_API_KEY: MALASKRA_KEY,
   // Phase 6 — webhook create inputs (template + kennitala custom fields)
+  // + the case-number field the create path stamps (MD-02: the create
+  // branch refuses to mint without a field to stamp).
   KERFISSTJORN_TEMPLATE_FIELD_ID: '100',
   KERFISSTJORN_KENNITALA_FIELD_ID: '200',
+  KERFISSTJORN_CASE_NUMBER_FIELD_ID: '7777',
   VINNUEFTIRLIT_ZENDESK_SUBDOMAIN: 'vinnu',
   VINNUEFTIRLIT_ZENDESK_EMAIL: 'v@example.com',
   VINNUEFTIRLIT_ZENDESK_API_TOKEN: V_TOKEN,
@@ -150,7 +153,7 @@ function failRes(status: number, body = 'boom') {
  * URL-routing fetch stub (order-independent so it is byte-identical for
  * the Node and Worker adapters regardless of incidental call interleaving):
  *   getTicket → getTicketComments → getUsersMany → OneSystems auth →
- *   CreateCaseUid → (PUT /tickets skipped: no caseNumberFieldId) → AddDocument2
+ *   CreateCaseUid → stamp/post-back PUT /tickets → AddDocument2
  */
 function installFetchRouter() {
   fetchMock().mockImplementation(async (input: unknown) => {
@@ -162,8 +165,8 @@ function installFetchRouter() {
       return jsonRes({ users: [{ id: 7, name: 'Agent', email: 'agent@example.com' }] })
     }
     if (/\/tickets\/123\.json$/.test(url)) {
-      // getTicket (GET) + GW-01 post-back PUT share this route; the stamp
-      // PUT is never issued (no caseNumberFieldId configured).
+      // getTicket (GET) + case-number stamp PUT + GW-01 post-back PUT all
+      // share this route (order-independent).
       return jsonRes({
         ticket: {
           id: 123, subject: 'Test', brand_id: mode.ticketBrand,
@@ -200,7 +203,7 @@ function makeWorkerEnv() {
       brand_id: ONESYS_BRAND,
       name: 'Kerfisstjórn',
       zendesk: { subdomain: 'kerfis', email: 'k@example.com', apiToken: K_TOKEN, webhookSecret: K_WEBHOOK },
-      endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: K_APPKEY, templateFieldId: 100, kennitalaFieldId: 200 } },
+      endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: K_APPKEY, templateFieldId: 100, kennitalaFieldId: 200, caseNumberFieldId: 7777 } },
       malaskra: { apiKey: MALASKRA_KEY },
       pdf: { companyName: 'Kerfisstjórn', locale: 'is-IS', includeInternalNotes: false }
     }),

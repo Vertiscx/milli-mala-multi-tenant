@@ -792,22 +792,30 @@ describe('documentTicket webhook create path', () => {
     expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
   })
 
-  it('no caseNumberFieldId configured: create engages, stamp is skipped (not an error), upload proceeds into the minted case', async () => {
-    // Field-ID-less endpoint: the case-number field cannot be read (empty
-    // by definition) nor stamped — mirror cases.ts step-4 else-branch.
+  it('no caseNumberFieldId configured: create does NOT engage (no idempotency stamp possible) — falls through to the ZD- fallback (MD-02)', async () => {
+    // Field-ID-less endpoint: the stamp is the ONLY duplicate-mint guard,
+    // and without a field to stamp every at-least-once webhook redelivery
+    // would mint a FRESH case. The gate therefore refuses to mint: warn +
+    // today's fallback behavior instead.
     const tenantConfig = makeCreateTenant({ caseNumberFieldId: undefined })
     const ticket = makeCreateTicket([
       { id: 100, value: 'Almennt erindi' },
       { id: 200, value: '010190-2989' }
     ])
     const calls = installCreateRouter({ ticket })
-    const req = makeRequest({ ticket_id: 123 }, { tenantConfig })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig, auditStore: makeCapturingAuditStore(captured) }
+    )
     const result = await handleWebhook(req)
 
     expect(result.status).toBe(200)
-    expect(result.body.case_number).toBe('2607033')
-    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(1)
+    expect(result.body.case_number).toBe('ZD-123')
+    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
     expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
-    expect(calls.filter(c => c.label === 'upload')).toHaveLength(1)
+
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number_source).toBe('fallback')
   })
 })

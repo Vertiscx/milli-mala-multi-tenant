@@ -373,11 +373,31 @@ export async function documentTicket(
     const createInputs = resolveCreateInputs(ep, ticket)
     const canCreate =
       typeof (docClient as Partial<OneSystemsClient>).createCase === 'function'
+    const createInputsPresent =
+      createInputs.template !== undefined && createInputs.kennitala !== undefined
+    // MD-02: the stamp on ep.caseNumberFieldId is the ONLY re-mint guard in
+    // the design (a webhook redelivery re-reads the field and lands on the
+    // add path). Without a configured field there is NO idempotency guard —
+    // every at-least-once redelivery would mint a FRESH case. So the create
+    // path additionally requires caseNumberFieldId; otherwise warn and fall
+    // through to today's ZD- fallback behavior.
+    if (
+      rawCaseNumberField === undefined &&
+      canCreate &&
+      createInputsPresent &&
+      ep.caseNumberFieldId == null
+    ) {
+      logger.warn(
+        'Create inputs present but no caseNumberFieldId configured — skipping mint (stamp is the only duplicate-mint guard); falling back',
+        { brand_id: brandId, ticket_id: ticketId, doc_endpoint: docEndpoint }
+      )
+    }
     if (
       rawCaseNumberField === undefined &&
       canCreate &&
       createInputs.template !== undefined &&
-      createInputs.kennitala !== undefined
+      createInputs.kennitala !== undefined &&
+      ep.caseNumberFieldId != null
     ) {
       // Mirrors cases.ts LOCKED steps 3→6 by COMPOSING the same stage
       // functions (createCase → stamp → postToCase → recordOutcome).
@@ -400,17 +420,12 @@ export async function documentTicket(
       // INNER try wrapping stamp + upload (mirror cases.ts steps 4-5).
       try {
         // Stamp BEFORE upload (WHCC-02): a Zendesk retry after the stamp
-        // lands on the populated-field add path, never a second mint.
-        if (ep.caseNumberFieldId != null) {
-          await zendesk.setTicketCustomField(ticketId, ep.caseNumberFieldId, mintedNumber)
-          logger.info('Stamped case number on ticket', {
-            brand_id: brandId, ticket_id: ticketId, caseNumber: mintedNumber
-          })
-        } else {
-          logger.info('No caseNumberFieldId configured — skipping stamp (not an error)', {
-            brand_id: brandId, ticket_id: ticketId, caseNumber: mintedNumber
-          })
-        }
+        // lands on the populated-field add path, never a second mint. The
+        // engage gate guarantees caseNumberFieldId is configured (MD-02).
+        await zendesk.setTicketCustomField(ticketId, ep.caseNumberFieldId, mintedNumber)
+        logger.info('Stamped case number on ticket', {
+          brand_id: brandId, ticket_id: ticketId, caseNumber: mintedNumber
+        })
 
         await postToCase(docClient, mintedNumber, ticket, ticketId, pdfBuffer, attachments)
       } catch (err) {
