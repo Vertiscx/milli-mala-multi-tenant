@@ -440,6 +440,13 @@ describe('Node vs Worker /v1/cases runtime parity', () => {
       'x-zendesk-webhook-signature-timestamp': timestamp
     }
 
+    // LO-02: AUDIT_DIR is shared across the whole file and earlier
+    // scenarios (e.g. (1) /v1/cases create) already wrote OS-9 entries
+    // with source 'created' — snapshot the dir BEFORE driving node so the
+    // node-side assertion below only inspects files THIS scenario wrote.
+    const auditDir = process.env.AUDIT_DIR as string
+    const preexisting = new Set(await readdir(auditDir).catch(() => [] as string[]))
+
     const node = await driveNode(headers, body, '/v1/webhook')
     const worker = await driveWorker(headers, body, '/v1/webhook')
     expect(node.status, 'webhook-create: node reached 200').toBe(200)
@@ -468,16 +475,16 @@ describe('Node vs Worker /v1/cases runtime parity', () => {
     }
 
     // Node audit: FileAuditStore wrote the same entry under AUDIT_DIR.
-    const auditDir = process.env.AUDIT_DIR as string
-    const files = await readdir(auditDir)
+    // Only NEW files count (LO-02) — the node webhook create path must
+    // itself have persisted the minted number with source 'created'.
+    const files = (await readdir(auditDir)).filter(f => !preexisting.has(f))
     expect(files.length).toBeGreaterThan(0)
     const nodeAudits = await Promise.all(files.map(async f => {
       const stored = JSON.parse(await readFile(`${auditDir}/${f}`, 'utf8')) as { value: string }
       return JSON.parse(stored.value) as { destination: { case_number: string; case_number_source: string } }
     }))
-    const created = nodeAudits.filter(e => e.destination.case_number === 'OS-9')
-    expect(created.length).toBeGreaterThan(0)
-    for (const entry of created) {
+    for (const entry of nodeAudits) {
+      expect(entry.destination.case_number).toBe('OS-9')
       expect(entry.destination.case_number_source).toBe('created')
     }
   })
