@@ -3,7 +3,8 @@
  */
 
 import { createLogger } from '../../platform/logger.js'
-import type { UploadDocumentParams, DocClient, Logger } from '../../platform/types.js'
+import type { Logger } from '../../platform/types.js'
+import type { UploadDocumentParams, DocClient } from './types.js'
 
 const logger: Logger = createLogger('gopro')
 

@@ -13,10 +13,13 @@ import { resolveEndpoint, validateCaseNumber } from '../../platform/tenant.js'
 import { createDocClient } from './docClient.js'
 import { postResultToTicket } from './postResultToTicket.js'
 import type {
-  HandlerResult, AttachmentsRequest, TenantConfig, Logger,
-  DocumentationOutcome, EndpointConfig, ZendeskTicket, ZendeskComment,
+  HandlerResult, TenantConfig, Logger,
+  EndpointConfig, ZendeskTicket, ZendeskComment,
   DownloadedAttachment
 } from '../../platform/types.js'
+import type {
+  AttachmentsRequest, DocumentationOutcome
+} from './types.js'
 
 const logger: Logger = createLogger('attachments')
 

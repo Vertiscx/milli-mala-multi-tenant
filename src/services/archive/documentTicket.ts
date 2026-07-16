@@ -19,17 +19,19 @@ import { createDocClient } from './docClient.js'
 import type { OneSystemsClient } from './onesystems.js'
 import type {
   HandlerResult,
-  WebhookRequest,
   TenantConfig,
   EndpointConfig,
   ZendeskTicket,
   ZendeskComment,
   ZendeskUser,
-  DocClient,
   DownloadedAttachment,
   AuditStore,
   Logger
 } from '../../platform/types.js'
+import type {
+  WebhookRequest,
+  DocClient
+} from './types.js'
 
 const logger: Logger = createLogger('documentTicket')
 

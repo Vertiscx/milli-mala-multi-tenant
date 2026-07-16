@@ -35,7 +35,8 @@ import { createDocClient } from './docClient.js'
 import { fetchTicketInfo, renderPdf, postToCase } from './documentTicket.js'
 import { recordOutcome } from './postResultToTicket.js'
 import type { OneSystemsClient } from './onesystems.js'
-import type { HandlerResult, TenantConfig, AuditStore, Logger, DocumentationOutcome, EndpointConfig } from '../../platform/types.js'
+import type { HandlerResult, TenantConfig, AuditStore, Logger, EndpointConfig } from '../../platform/types.js'
+import type { DocumentationOutcome } from './types.js'
 
 const logger: Logger = createLogger('cases')
 

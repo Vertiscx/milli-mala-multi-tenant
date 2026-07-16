@@ -17,7 +17,6 @@ import { ZendeskClient } from '../../platform/zendesk.js'
 import { writeAudit } from './documentTicket.js'
 import { createLogger } from '../../platform/logger.js'
 import type {
-  DocumentationOutcome,
   EndpointConfig,
   TenantConfig,
   ZendeskTicket,
@@ -26,6 +25,9 @@ import type {
   AuditStore,
   Logger
 } from '../../platform/types.js'
+import type {
+  DocumentationOutcome
+} from './types.js'
 
 const logger: Logger = createLogger('postResultToTicket')
 
