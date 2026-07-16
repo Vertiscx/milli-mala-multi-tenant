@@ -152,6 +152,12 @@ describe('validateTenantConfig', () => {
     expect(() => validateTenantConfig(tenant)).toThrow('malaskra.apiKey')
   })
 
+  it('should pass for a tenant with valid core fields and no archive section', () => {
+    const tenant = makeValidTenant()
+    delete (tenant.services as any).archive
+    expect(() => validateTenantConfig(tenant)).not.toThrow()
+  })
+
   it('should throw for empty endpoints', () => {
     expect(() => validateTenantConfig(makeValidTenant({ endpoints: {} }))).toThrow('endpoints')
   })

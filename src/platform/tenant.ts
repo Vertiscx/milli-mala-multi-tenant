@@ -129,10 +129,26 @@ export async function resolveTenantConfig(
 /**
  * Validate that a TenantConfig has all required fields.
  * Throws with a descriptive message on failure.
+ *
+ * Core identity + Zendesk credentials are always required. The archive
+ * section (services.archive) is validated only when present — a tenant
+ * with no archive service configured is otherwise valid.
  */
 export function validateTenantConfig(config: TenantConfig): void {
-  const missing: string[] = []
+  validateTenantCore(config)
+
   const archive = config.services?.archive
+  if (archive) {
+    validateArchiveConfig(archive, config.name || config.brand_id)
+  }
+}
+
+/**
+ * Validate the core (always-required) fields of a TenantConfig: identity
+ * and Zendesk credentials. Throws with a descriptive message on failure.
+ */
+export function validateTenantCore(config: TenantConfig): void {
+  const missing: string[] = []
 
   if (!config.brand_id) missing.push('brand_id')
   if (!config.name) missing.push('name')
@@ -151,24 +167,6 @@ export function validateTenantConfig(config: TenantConfig): void {
     )
   }
 
-  // Malaskra section
-  if (!archive?.malaskra?.apiKey) missing.push('malaskra.apiKey')
-
-  // PDF section — required since pdf.ts accesses it unconditionally
-  if (!archive?.pdf) {
-    missing.push('pdf')
-  } else {
-    if (!archive.pdf.companyName) missing.push('pdf.companyName')
-    if (archive.pdf.locale !== undefined && typeof archive.pdf.locale !== 'string') {
-      missing.push('pdf.locale (must be a string)')
-    }
-  }
-
-  // At least one endpoint
-  if (!archive?.endpoints || Object.keys(archive.endpoints).length === 0) {
-    missing.push('endpoints (at least one required)')
-  }
-
   if (missing.length > 0) {
     throw new Error(`Invalid tenant config for "${config.name || config.brand_id}": missing ${missing.join(', ')}`)
   }
@@ -181,12 +179,46 @@ export function validateTenantConfig(config: TenantConfig): void {
   if (config.zendesk?.webhookSecret) {
     validateSecretStrength(config.zendesk.webhookSecret, 'zendesk.webhookSecret', label, MIN_SECRET_LENGTH)
   }
-  if (archive?.malaskra?.apiKey) {
+}
+
+/**
+ * Validate an archive service section (services.archive): malaskra key,
+ * pdf fields, and endpoints (including per-endpoint checks). Throws with
+ * a descriptive message on failure. Only called when the archive section
+ * is present.
+ */
+export function validateArchiveConfig(archive: NonNullable<TenantConfig['services']['archive']>, label: string): void {
+  const missing: string[] = []
+
+  // Malaskra section
+  if (!archive.malaskra?.apiKey) missing.push('malaskra.apiKey')
+
+  // PDF section — required since pdf.ts accesses it unconditionally
+  if (!archive.pdf) {
+    missing.push('pdf')
+  } else {
+    if (!archive.pdf.companyName) missing.push('pdf.companyName')
+    if (archive.pdf.locale !== undefined && typeof archive.pdf.locale !== 'string') {
+      missing.push('pdf.locale (must be a string)')
+    }
+  }
+
+  // At least one endpoint
+  if (!archive.endpoints || Object.keys(archive.endpoints).length === 0) {
+    missing.push('endpoints (at least one required)')
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Invalid tenant config for "${label}": missing ${missing.join(', ')}`)
+  }
+
+  // Secret strength validation (SYN-MUT-28-1)
+  if (archive.malaskra?.apiKey) {
     validateSecretStrength(archive.malaskra.apiKey, 'malaskra.apiKey', label, MIN_SECRET_LENGTH)
   }
 
   // Validate each endpoint
-  for (const [name, ep] of Object.entries(archive!.endpoints)) {
+  for (const [name, ep] of Object.entries(archive.endpoints)) {
     validateEndpoint(name, ep, label)
   }
 }
