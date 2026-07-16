@@ -72,24 +72,28 @@ There is a footgun here called **GW-04 loop-safety**: because we also write back
 The shape:
 
 ```ts
-// src/types.ts
+// src/platform/types.ts (core) + src/services/archive/types.ts (archive)
 TenantConfig = {
   brand_id: '360001234567',
   zendesk:   { subdomain, email, apiToken, webhookSecret },
-  endpoints: {
-    onesystems: { type: 'onesystems', baseUrl, appKey, …fieldIds },
-    gopro:      { type: 'gopro',      baseUrl, username, password, …fieldIds },
-    // workpoint:  { type: 'workpoint', baseUrl, …, …fieldIds }   <-- you
-  },
-  malaskra:  { apiKey },
-  pdf:       { companyName, locale, includeInternalNotes },
+  services: {
+    archive: {
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl, appKey, …fieldIds },
+        gopro:      { type: 'gopro',      baseUrl, username, password, …fieldIds },
+        // workpoint:  { type: 'workpoint', baseUrl, …, …fieldIds }   <-- you
+      },
+      malaskra:  { apiKey },
+      pdf:       { companyName, locale, includeInternalNotes },
+    }
+  }
 }
 ```
 
 Two things to internalize:
 
 1. **One tenant per brand.** `brand_id` → exactly one `TenantConfig`. There is no global tenant state. Every function that needs it takes `tenantConfig` as a parameter.
-2. **A tenant has multiple endpoints.** A single institution may write to OneSystems for some tickets and GoPro for others. The caller picks via the `doc_endpoint` field in the request body, which is a key into `tenantConfig.endpoints`.
+2. **A tenant has multiple endpoints.** A single institution may write to OneSystems for some tickets and GoPro for others. The caller picks via the `doc_endpoint` field in the request body, which is a key into `tenantConfig.services.archive.endpoints`.
 
 **Where tenant data lives at runtime:**
 
@@ -105,18 +109,18 @@ Two things to internalize:
 This is the most important section. Read it twice.
 
 ```
-src/cases.ts ───┐
-src/webhook.ts ─┼──> src/documentTicket.ts  ─┐
-src/attachments.ts ┘                          │
-                                              ▼
-                                   src/docClient.ts  ◄── THE ONLY ep.type SWITCH
-                                              │
-                          ┌───────────────────┼────────────────────┐
-                          ▼                   ▼                    ▼
-                  src/onesystems.ts    src/gopro.ts        src/workpoint.ts (you)
+src/services/archive/cases.ts ───┐
+src/services/archive/webhook.ts ─┼──> src/services/archive/documentTicket.ts  ─┐
+src/services/archive/attachments.ts ┘                                          │
+                                                                                ▼
+                                                     src/services/archive/docClient.ts  ◄── THE ONLY ep.type SWITCH
+                                                                                │
+                                          ┌─────────────────────────────────────┼──────────────────────────────────────┐
+                                          ▼                                    ▼                                       ▼
+                          src/services/archive/onesystems.ts    src/services/archive/gopro.ts    src/services/archive/workpoint.ts (you)
 ```
 
-**`src/docClient.ts` is the one and only place in the codebase that switches on `ep.type`.** Every other layer programs against the `DocClient` interface declared in `src/types.ts`.
+**`src/services/archive/docClient.ts` is the one and only place in the codebase that switches on `ep.type`.** Every other layer programs against the `DocClient` interface declared in `src/services/archive/types.ts`.
 
 ### 4.1 The `DocClient` contract
 
@@ -137,7 +141,7 @@ createCase?(params: CreateCaseParams): Promise<CreateCaseResult>
 OneSystems has both. GoPro has only `uploadDocument`. The cases handler **duck-types** the capability:
 
 ```ts
-// src/cases.ts:178
+// src/services/archive/cases.ts:178
 const canCreateCase =
   typeof (docClient as Partial<OneSystemsClient>).createCase === 'function'
 ```
@@ -148,9 +152,9 @@ If `canCreateCase` is false on the create path, the handler returns `422 outcome
 
 You will (in roughly this order):
 
-1. Add `'workpoint'` to the `EndpointConfig.type` union in `src/types.ts`.
-2. Add a `src/workpoint.ts` exporting `WorkpointClient` with `authenticate` + `uploadDocument` (and `createCase` if Workpoint supports it).
-3. Add a `case 'workpoint':` branch in `createDocClient` in `src/docClient.ts`.
+1. Add `'workpoint'` to the `EndpointConfig.type` union in `src/services/archive/types.ts`.
+2. Add a `src/services/archive/workpoint.ts` exporting `WorkpointClient` with `authenticate` + `uploadDocument` (and `createCase` if Workpoint supports it).
+3. Add a `case 'workpoint':` branch in `createDocClient` in `src/services/archive/docClient.ts`.
 4. Write `tests/workpoint.test.ts` (and `tests/workpoint.createCase.test.ts` if applicable), mirroring the OneSystems / GoPro test files exactly.
 5. Document the new tenant config in `DEPLOYMENT.md`.
 
@@ -158,9 +162,9 @@ Steps 1, 3, 4 are mechanical. Step 2 is where the real work lives — wire forma
 
 **You do NOT need to touch:**
 
-- `src/cases.ts`, `src/webhook.ts`, `src/attachments.ts`, `src/documentTicket.ts` — they are adapter-agnostic.
-- `src/tenant.ts` — SSRF + URL validation applies to your adapter for free.
-- `src/postResultToTicket.ts` — the GW-01 post-back uses the same `caseNumberFieldId`/`lastStatusFieldId`/`lastExportFieldId`/`templateFieldId` fields. You inherit the post-back.
+- `src/services/archive/cases.ts`, `src/services/archive/webhook.ts`, `src/services/archive/attachments.ts`, `src/services/archive/documentTicket.ts` — they are adapter-agnostic.
+- `src/platform/tenant.ts` — SSRF + URL validation applies to your adapter for free.
+- `src/services/archive/postResultToTicket.ts` — the GW-01 post-back uses the same `caseNumberFieldId`/`lastStatusFieldId`/`lastExportFieldId`/`templateFieldId` fields. You inherit the post-back.
 
 If you find yourself wanting to edit any of those files, **stop** and ask. Most of the time it means you've stumbled into something load-bearing.
 
@@ -172,13 +176,13 @@ If you find yourself wanting to edit any of those files, **stop** and ask. Most 
 
 The core value of `POST /v1/cases` is: **if `createCase` succeeds and a later step fails, the caller MUST learn the case number that was minted on their behalf.** Otherwise we silently create orphan cases in OneSystems that nobody knows about. That is unacceptable.
 
-The mechanism: two separate try/catches in `src/cases.ts`, and an outcome enum of **exactly seven codes** (`documented | create_failed | orphan_case | validation | auth | brand_mismatch | gopro_create_unsupported`). The order of gates and the structure of the catches is **locked**.
+The mechanism: two separate try/catches in `src/services/archive/cases.ts`, and an outcome enum of **exactly seven codes** (`documented | create_failed | orphan_case | validation | auth | brand_mismatch | gopro_create_unsupported`). The order of gates and the structure of the catches is **locked**.
 
 For Workpoint, the only thing you need to know is:
 
 - If Workpoint supports case creation, implement `createCase` on your client. The duck-type gate flips automatically.
 - If Workpoint does NOT support case creation, do not implement `createCase`. The duck-type gate produces `gopro_create_unsupported` automatically (yes, the enum value is misnamed — see §6).
-- **Do not** add a `case 'workpoint':` branch anywhere outside `src/docClient.ts`. No handler should know that Workpoint exists by name.
+- **Do not** add a `case 'workpoint':` branch anywhere outside `src/services/archive/docClient.ts`. No handler should know that Workpoint exists by name.
 
 For the full story, read [`docs/architecture/CONCERNS.md`](docs/architecture/CONCERNS.md) "The Locked Failure Order" section — it's the most important section in that doc.
 
@@ -210,13 +214,13 @@ Read these in this order. Stop and explore the code each time something is uncle
 
 In this exact order:
 
-1. **`src/types.ts`** — every interface you'll touch. Internalize `TenantConfig`, `EndpointConfig`, `DocClient`, `UploadDocumentParams`, `CreateCaseParams`, `CreateCaseResult`, `DocumentationOutcome`, `HandlerResult`.
-2. **`src/docClient.ts`** — 30 lines. The factory. This is the seam.
-3. **`src/onesystems.ts`** — the complex adapter (has both upload and createCase, multipart wire format). Skim, don't memorize.
-4. **`src/gopro.ts`** — the simple adapter (upload only, per-file loop, JSON wire format). Skim.
-5. **`src/cases.ts`** — the manual create/append handler. Read the docstring at the top and §"Locked Failure Order" in CONCERNS.md side-by-side with the code. Pay attention to the two try/catches around lines 187–316.
-6. **`src/documentTicket.ts`** — the pipeline stages. The `fetchTicketInfo` brand cross-check is load-bearing.
-7. **`src/postResultToTicket.ts`** — the GW-01 post-back. Notice that nothing throws.
+1. **`src/platform/types.ts`** (core) + **`src/services/archive/types.ts`** (archive) — every interface you'll touch. Internalize `TenantConfig`, `EndpointConfig`, `DocClient`, `UploadDocumentParams`, `CreateCaseParams`, `CreateCaseResult`, `DocumentationOutcome`, `HandlerResult`.
+2. **`src/services/archive/docClient.ts`** — 30 lines. The factory. This is the seam.
+3. **`src/services/archive/onesystems.ts`** — the complex adapter (has both upload and createCase, multipart wire format). Skim, don't memorize.
+4. **`src/services/archive/gopro.ts`** — the simple adapter (upload only, per-file loop, JSON wire format). Skim.
+5. **`src/services/archive/cases.ts`** — the manual create/append handler. Read the docstring at the top and §"Locked Failure Order" in CONCERNS.md side-by-side with the code. Pay attention to the two try/catches around lines 187–316.
+6. **`src/services/archive/documentTicket.ts`** — the pipeline stages. The `fetchTicketInfo` brand cross-check is load-bearing.
+7. **`src/services/archive/postResultToTicket.ts`** — the GW-01 post-back. Notice that nothing throws.
 
 ### 7.3 Third pass — landmines (~30 minutes)
 
@@ -269,7 +273,7 @@ npm run test:coverage
 
 ## 9. House conventions, in one paragraph
 
-TypeScript strict. No `any` (use `unknown` + narrowing). Errors thrown across boundaries carry HTTP-status-text in the message; **never** bearer tokens or passwords. All secret comparisons go through SHA-256 + `timingSafeEqual` from `node:crypto`. Logs are structured JSON, always include `brand_id` (a public ID, not a secret). Validation lives in `src/tenant.ts`; handlers call validators, never reimplement them. Adapters never read module-level mutable state. Tests mirror `src/` file-by-file. Commit messages follow conventional-commit style (`feat(workpoint): …`, `fix(workpoint): …`). **Do not add `Co-Authored-By: Claude` trailers** — author commits as yourself.
+TypeScript strict. No `any` (use `unknown` + narrowing). Errors thrown across boundaries carry HTTP-status-text in the message; **never** bearer tokens or passwords. All secret comparisons go through SHA-256 + `timingSafeEqual` from `node:crypto`. Logs are structured JSON, always include `brand_id` (a public ID, not a secret). Validation lives in `src/platform/tenant.ts`; handlers call validators, never reimplement them. Adapters never read module-level mutable state. Tests mirror `src/` file-by-file. Commit messages follow conventional-commit style (`feat(workpoint): …`, `fix(workpoint): …`). **Do not add `Co-Authored-By: Claude` trailers** — author commits as yourself.
 
 For the full version, read [docs/architecture/CONVENTIONS.md](docs/architecture/CONVENTIONS.md).
 
@@ -280,7 +284,7 @@ For the full version, read [docs/architecture/CONVENTIONS.md](docs/architecture/
 **Honest status:** very little.
 
 - Workpoint is another Icelandic document-archive system, in the same category as OneSystems and GoPro.
-- It will be a third adapter behind the same `DocClient` interface, slotted in at `src/docClient.ts`.
+- It will be a third adapter behind the same `DocClient` interface, slotted in at `src/services/archive/docClient.ts`.
 - We do NOT yet have: vendor API docs, sandbox credentials, the wire format, the auth model, or a confirmed list of institutions that need it.
 
 **What you can do today without those:**
@@ -308,8 +312,8 @@ When you're ready, the lowest-risk first PR is:
 
 Scope:
 
-- `src/types.ts` — add `'workpoint'` to `EndpointConfig['type']`.
-- `src/docClient.ts` — add a `case 'workpoint':` branch that throws `Error('Workpoint adapter not yet implemented')`.
+- `src/services/archive/types.ts` — add `'workpoint'` to `EndpointConfig['type']`.
+- `src/services/archive/docClient.ts` — add a `case 'workpoint':` branch that throws `Error('Workpoint adapter not yet implemented')`.
 - No new tests yet (the throw is intentional; we'll add tests when the adapter exists).
 - Updates to `README.md` mentioning Workpoint as a planned third backend.
 
@@ -343,7 +347,7 @@ You will discover things this guide doesn't cover. Ask. Especially these:
 - "What does Workpoint actually want on the wire?" (We don't know yet.)
 - "Which institutions are migrating to Workpoint, and on what timeline?" (Drives the GW-06 + requirements.json work.)
 - "Is there a Workpoint sandbox?" (Mirrors the OneSystems / GoPro staging story.)
-- "What's the case-number format?" (Affects `validateCaseNumber` looseness in `src/tenant.ts`.)
+- "What's the case-number format?" (Affects `validateCaseNumber` looseness in `src/platform/tenant.ts`.)
 - "Does Workpoint support `createCase`?" (Determines whether you implement the optional method.)
 
 Welcome aboard.

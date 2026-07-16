@@ -17,7 +17,7 @@
  *   documented|create_failed|orphan_case|validation|auth|brand_mismatch|gopro_create_unsupported
  *
  * Composes G1's documentTicket stage fns with G2's createCase /
- * setTicketCustomField. Mirrors src/attachments.ts (the proven sibling
+ * setTicketCustomField. Mirrors src/services/archive/attachments.ts (the proven sibling
  * handler) for the gate phase, then runs the LOCKED 6-step order.
  *
  * Core value: on the CREATE path a minted case number is NEVER silently
@@ -42,8 +42,8 @@ const logger: Logger = createLogger('cases')
 
 /**
  * Verify the X-Api-Key header against the tenant's malaskra API key.
- * Copied verbatim from src/attachments.ts:21-29 (do NOT import/share —
- * src/attachments.ts must stay byte-identical).
+ * Copied verbatim from src/services/archive/attachments.ts:21-29 (do NOT import/share —
+ * src/services/archive/attachments.ts must stay byte-identical).
  */
 function verifyApiKey(headers: Record<string, string>, tenantConfig: TenantConfig): boolean {
   const key = tenantConfig.services.archive?.malaskra?.apiKey

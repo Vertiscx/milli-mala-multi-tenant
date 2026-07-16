@@ -79,7 +79,7 @@ Each tenant is stored as a JSON value with key `tenant:{brand_id}`:
 # Upload tenant config for a brand
 wrangler kv key put --binding=TENANT_KV \
   "tenant:360001234567" \
-  '{"brand_id":"360001234567","name":"Samgongustofa","zendesk":{"subdomain":"samgongustofa","email":"integration@samgongustofa.is","apiToken":"...","webhookSecret":"..."},"endpoints":{"onesystems":{"type":"onesystems","baseUrl":"https://api.onesystems.is","appKey":"..."}},"malaskra":{"apiKey":"..."},"pdf":{"companyName":"Samgongustofa","locale":"is-IS","includeInternalNotes":false}}'
+  '{"brand_id":"360001234567","name":"Samgongustofa","zendesk":{"subdomain":"samgongustofa","email":"integration@samgongustofa.is","apiToken":"...","webhookSecret":"..."},"services":{"archive":{"endpoints":{"onesystems":{"type":"onesystems","baseUrl":"https://api.onesystems.is","appKey":"..."}},"malaskra":{"apiKey":"..."},"pdf":{"companyName":"Samgongustofa","locale":"is-IS","includeInternalNotes":false}}}}'
 ```
 
 See [Tenant Configuration](#tenant-configuration) for the full schema.
@@ -98,6 +98,10 @@ Your worker will be available at `https://milli-mala.<your-subdomain>.workers.de
 ```bash
 wrangler tail
 ```
+
+### Migrating existing KV tenants
+
+Tenant entries seeded before this version used a flat shape (`endpoints`, `malaskra`, `pdf` as top-level keys). This version nests those under `services.archive` (see [Tenant Configuration](#tenant-configuration)). Any KV entry left in the old flat shape has no `services` key at all, so every archive route (`/v1/webhook`, `/v1/attachments`, `/v1/cases`) returns a neutral `400 Invalid request` for that tenant until it is re-seeded with `wrangler kv key put` in the new shape.
 
 ---
 
@@ -348,22 +352,23 @@ Each tenant object has this structure:
 | `zendesk.email` | string | Yes | Zendesk admin email |
 | `zendesk.apiToken` | string | Yes | Zendesk API token (requires **ticket-write** scope — see [Zendesk Setup](#zendesk-setup)) |
 | `zendesk.webhookSecret` | string | Yes | Zendesk webhook signing secret |
-| `endpoints` | map | Yes | At least one archive endpoint |
-| `endpoints.{name}.type` | string | Yes | `"onesystems"` or `"gopro"` |
-| `endpoints.{name}.baseUrl` | string | Yes | Archive system API URL |
-| `endpoints.{name}.appKey` | string | If OneSystems | OneSystems app key |
-| `endpoints.{name}.username` | string | If GoPro | GoPro login username |
-| `endpoints.{name}.password` | string | If GoPro | GoPro login password |
-| `endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID the gateway writes the archive case number to (GW-01 post-back). **Required for webhook case creation** — the create path refuses to mint without a field to stamp (the stamp is the retry/duplicate-mint guard). Node runtime: set via `<TENANT>_CASE_NUMBER_FIELD_ID` |
-| `endpoints.{name}.lastStatusFieldId` | number | No | Zendesk custom field ID for the GW-01 `last_status` value (ratified JSON v1 — see [Result post-back](README.md#result-post-back-gw-01)) |
-| `endpoints.{name}.lastExportFieldId` | number | No | Zendesk **date** custom field ID for the last successful export (`YYYY-MM-DD`) |
-| `endpoints.{name}.templateFieldId` | number | No | Zendesk custom field ID for the case template. Written on the OneSystems create path, and also **read** as the case-template source on the webhook create path (the trigger-stamped `malaskra_snidmat` field — app setting `malaskra_snidmat`) |
-| `endpoints.{name}.kennitalaFieldId` | number | No | Zendesk custom field ID the gateway reads the kennitala from on the OneSystems webhook create path (app setting `kennitala_custom_field`). Ignored (harmless) on GoPro endpoints |
-| `endpoints.{name}.tokenTtlMs` | number | No | Auth token TTL in ms (default: 1500000) |
-| `malaskra.apiKey` | string | Yes | API key for `/v1/cases` and `/v1/attachments` authentication (`X-Api-Key`) |
-| `pdf.companyName` | string | No | Company name in PDF header |
-| `pdf.locale` | string | No | Date formatting locale (default: `is-IS`) |
-| `pdf.includeInternalNotes` | boolean | No | Include internal notes in PDF (default: `false`) |
+| `services.archive` | object | No | Archive integration for this tenant. Omitting it (or an old-shape entry that predates this key) makes every archive route 400 for that tenant — everything below lives under it |
+| `services.archive.endpoints` | map | Yes, within `services.archive` | At least one archive endpoint |
+| `services.archive.endpoints.{name}.type` | string | Yes | `"onesystems"` or `"gopro"` |
+| `services.archive.endpoints.{name}.baseUrl` | string | Yes | Archive system API URL |
+| `services.archive.endpoints.{name}.appKey` | string | If OneSystems | OneSystems app key |
+| `services.archive.endpoints.{name}.username` | string | If GoPro | GoPro login username |
+| `services.archive.endpoints.{name}.password` | string | If GoPro | GoPro login password |
+| `services.archive.endpoints.{name}.caseNumberFieldId` | number | No | Zendesk custom field ID the gateway writes the archive case number to (GW-01 post-back). **Required for webhook case creation** — the create path refuses to mint without a field to stamp (the stamp is the retry/duplicate-mint guard). Node runtime: set via `<TENANT>_CASE_NUMBER_FIELD_ID` |
+| `services.archive.endpoints.{name}.lastStatusFieldId` | number | No | Zendesk custom field ID for the GW-01 `last_status` value (ratified JSON v1 — see [Result post-back](README.md#result-post-back-gw-01)) |
+| `services.archive.endpoints.{name}.lastExportFieldId` | number | No | Zendesk **date** custom field ID for the last successful export (`YYYY-MM-DD`) |
+| `services.archive.endpoints.{name}.templateFieldId` | number | No | Zendesk custom field ID for the case template. Written on the OneSystems create path, and also **read** as the case-template source on the webhook create path (the trigger-stamped `malaskra_snidmat` field — app setting `malaskra_snidmat`) |
+| `services.archive.endpoints.{name}.kennitalaFieldId` | number | No | Zendesk custom field ID the gateway reads the kennitala from on the OneSystems webhook create path (app setting `kennitala_custom_field`). Ignored (harmless) on GoPro endpoints |
+| `services.archive.endpoints.{name}.tokenTtlMs` | number | No | Auth token TTL in ms (default: 1500000) |
+| `services.archive.malaskra.apiKey` | string | Yes, within `services.archive` | API key for `/v1/cases` and `/v1/attachments` authentication (`X-Api-Key`) |
+| `services.archive.pdf.companyName` | string | No | Company name in PDF header |
+| `services.archive.pdf.locale` | string | No | Date formatting locale (default: `is-IS`) |
+| `services.archive.pdf.includeInternalNotes` | boolean | No | Include internal notes in PDF (default: `false`) |
 
 > **Post-back field IDs are optional and graceful.** Any `*FieldId` left unset is skipped — the gateway still posts the internal note. Custom fields are **account-level** in Zendesk: the same numeric IDs apply across every brand on one Zendesk account, so they are configured per Zendesk account, not per brand. They are written back to the ticket by every documentation path (`/v1/cases`, `/v1/webhook`, `/v1/attachments`).
 >

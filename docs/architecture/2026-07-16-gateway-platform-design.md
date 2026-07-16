@@ -138,7 +138,7 @@ interface TenantConfig {
   name: string
   zendesk: ZendeskConfig            // subdomain, email, apiToken, webhookSecret
   services: {
-    archive?: ArchiveConfig         // endpoints, malaskra, pdf — today's config
+    archive?: ArchiveServiceConfig  // endpoints, malaskra, pdf — today's config
     ticketSplit?: TicketSplitConfig // future: service-address list, etc.
     csat?: CsatConfig               // future
   }
