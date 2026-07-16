@@ -7,8 +7,8 @@ import {
   resolveEndpoint,
   sanitizeAuditParam,
   validateCaseNumber
-} from '../src/tenant.js'
-import type { TenantConfig, EndpointConfig } from '../src/types.js'
+} from '../src/platform/tenant.js'
+import type { TenantConfig, EndpointConfig } from '../src/platform/types.js'
 
 function makeValidTenant(overrides: Partial<TenantConfig> = {}): TenantConfig {
   return {

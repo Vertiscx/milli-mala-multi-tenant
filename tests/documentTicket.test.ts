@@ -20,7 +20,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHmac } from 'crypto'
 import { handleWebhook } from '../src/webhook.js'
 import { resolveCreateInputs } from '../src/documentTicket.js'
-import type { TenantConfig, AuditStore, EndpointConfig, ZendeskTicket } from '../src/types.js'
+import type { TenantConfig, AuditStore, EndpointConfig, ZendeskTicket } from '../src/platform/types.js'
 
 // Mock fetch globally (mirrors tests/webhook.test.ts)
 global.fetch = vi.fn() as unknown as typeof fetch

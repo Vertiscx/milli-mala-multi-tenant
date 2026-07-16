@@ -12,10 +12,10 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { buildNote, buildCustomFields, postResultToTicket } from '../src/postResultToTicket.js'
-import type { DocumentationOutcome, EndpointConfig, TenantConfig } from '../src/types.js'
+import type { DocumentationOutcome, EndpointConfig, TenantConfig } from '../src/platform/types.js'
 
 const putMock = vi.fn()
-vi.mock('../src/zendesk.js', () => ({
+vi.mock('../src/platform/zendesk.js', () => ({
   ZendeskClient: class {
     constructor(..._a: unknown[]) {}
     requestWrite(...args: unknown[]) {
