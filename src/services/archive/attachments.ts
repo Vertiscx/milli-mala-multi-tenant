@@ -45,7 +45,8 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
   const brandId = tenantConfig.brand_id
 
   try {
-    const archive = tenantConfig.services.archive
+    // Reachable for archive-less or old-shape tenant configs (services missing) — return the same neutral 400 as an unknown tenant.
+    const archive = tenantConfig.services?.archive
     if (!archive) return { status: 400, body: { error: 'Invalid request' } }
 
     // Auth check

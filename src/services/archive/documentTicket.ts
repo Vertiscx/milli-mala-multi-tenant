@@ -116,6 +116,7 @@ export async function renderPdf(
   userMap: Record<number, string>
 ): Promise<Buffer> {
   return generateTicketPdf(ticket, comments, {
+    // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
     pdfConfig: tenantConfig.services.archive!.pdf,
     userMap
   })
@@ -382,6 +383,7 @@ export async function writeAudit(args: {
       total_comments: comments.length,
       public_comments: comments.filter(c => c.public !== false).length,
       internal_notes: comments.filter(c => c.public === false).length,
+      // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
       internal_notes_included: tenantConfig.services.archive!.pdf.includeInternalNotes,
       total_attachments: attachments.length
     },

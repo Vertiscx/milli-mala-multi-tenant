@@ -62,7 +62,8 @@ export async function handleWebhook(req: WebhookRequest): Promise<HandlerResult>
       return { status: 401, body: { error: 'Webhook timestamp expired' } }
     }
 
-    const archive = tenantConfig.services.archive
+    // Reachable for archive-less or old-shape tenant configs (services missing) — return the same neutral 400 as an unknown tenant.
+    const archive = tenantConfig.services?.archive
     if (!archive) return { status: 400, body: { error: 'Invalid request' } }
 
     // Validate ticket_id as a positive integer
