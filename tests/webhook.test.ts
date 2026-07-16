@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHmac } from 'crypto'
-import { handleWebhook, verifyWebhookSignature, isTimestampFresh } from '../src/webhook.js'
+import { handleWebhook, verifyWebhookSignature, isTimestampFresh } from '../src/services/archive/webhook.js'
 import type { TenantConfig } from '../src/platform/types.js'
 
 // Mock fetch globally

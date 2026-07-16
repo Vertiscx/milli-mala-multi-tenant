@@ -18,8 +18,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHmac } from 'crypto'
-import { handleWebhook } from '../src/webhook.js'
-import { resolveCreateInputs } from '../src/documentTicket.js'
+import { handleWebhook } from '../src/services/archive/webhook.js'
+import { resolveCreateInputs } from '../src/services/archive/documentTicket.js'
 import type { TenantConfig, AuditStore, EndpointConfig, ZendeskTicket } from '../src/platform/types.js'
 
 // Mock fetch globally (mirrors tests/webhook.test.ts)
@@ -1160,7 +1160,7 @@ describe('documentTicket webhook create path', () => {
     f.mockResolvedValue({ ok: true, json: async () => ({ ticket: {} }) })
     const captured: string[] = []
     const tenantConfig = makeCreateTenant()
-    const { recordOutcome } = await import('../src/postResultToTicket.js')
+    const { recordOutcome } = await import('../src/services/archive/postResultToTicket.js')
     await recordOutcome(
       {
         ok: false,

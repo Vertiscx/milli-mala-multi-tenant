@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { OneSystemsClient } from '../src/onesystems.js'
+import { OneSystemsClient } from '../src/services/archive/onesystems.js'
 
 // Mock fetch globally
 global.fetch = vi.fn() as unknown as typeof fetch

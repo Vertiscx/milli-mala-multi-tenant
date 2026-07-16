@@ -2,8 +2,8 @@
  * GoPro (gopro.net) API Client - handles authentication and document upload
  */
 
-import { createLogger } from './platform/logger.js'
-import type { UploadDocumentParams, DocClient, Logger } from './platform/types.js'
+import { createLogger } from '../../platform/logger.js'
+import type { UploadDocumentParams, DocClient, Logger } from '../../platform/types.js'
 
 const logger: Logger = createLogger('gopro')
 

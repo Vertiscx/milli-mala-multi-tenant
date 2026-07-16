@@ -11,7 +11,7 @@
  *  - postResultToTicket NEVER throws even if requestWrite rejects
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { buildNote, buildCustomFields, postResultToTicket } from '../src/postResultToTicket.js'
+import { buildNote, buildCustomFields, postResultToTicket } from '../src/services/archive/postResultToTicket.js'
 import type { DocumentationOutcome, EndpointConfig, TenantConfig } from '../src/platform/types.js'
 
 const putMock = vi.fn()
