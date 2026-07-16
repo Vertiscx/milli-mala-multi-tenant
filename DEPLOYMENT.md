@@ -437,6 +437,16 @@ The `doc_endpoint` value should match one of the keys in the tenant's `endpoints
 
 > **Trigger staging for webhook create (OneSystems).** If the tenant uses the webhook create path, the gateway reads the case template from the `malaskra_snidmat` custom field and the kennitala from the `kennitala_custom_field` field on the fetched ticket. Admins must configure the Zendesk trigger(s) so the `malaskra_snidmat` template field is stamped **BEFORE** the close/webhook trigger fires — an unstamped field means no template is available at create time. Map the app settings `malaskra_snidmat` (template) and `kennitala_custom_field` (kennitala) to the same numeric field IDs configured as `templateFieldId` / `kennitalaFieldId` in the tenant config (see [Tenant Configuration](#tenant-configuration)).
 
+> **Webhook create rejects (422).** When the case-number field is empty on an OneSystems tenant, the gateway creates the case via One — but it refuses loudly (HTTP 422, nothing archived, no fallback reference) when the create intent cannot be honored. The audit log records event `webhook_create_rejected` with one of three outcomes:
+>
+> | Outcome | Meaning | Usual root cause |
+> |---------|---------|------------------|
+> | `missing_template` | Case-number field empty AND template field empty — no create intent was staged | Trigger misconfiguration (template not stamped before the webhook fired), **or** `templateFieldId` missing/wrong in tenant config |
+> | `missing_kennitala` | Template present but the kennitala field is empty — the gateway never invents a value | Agent workflow gap, or `kennitalaFieldId` missing/wrong in tenant config |
+> | `missing_case_number_field_config` | Create intent staged but `caseNumberFieldId` is not configured — without a field to stamp there is no duplicate-mint guard, so the gateway will not mint | Tenant config missing `<TENANT>_CASE_NUMBER_FIELD_ID` (Node) / `caseNumberFieldId` (KV) |
+>
+> A 422 is deliberate and non-retryable: Zendesk does not retry 4xx, and retrying a misconfiguration cannot succeed. Fix the trigger or config, then re-fire the trigger (re-add the marker tag) to document the ticket.
+
 > ### ⚠️ Loop-safety — required (GW-04)
 >
 > After documenting, the gateway writes the result **back onto the ticket** (an internal note plus the status custom fields — the GW-01 post-back). That ticket update will **re-fire the trigger** if its condition can still match, causing an infinite loop (repeated archive uploads and ticket notes for one ticket).
