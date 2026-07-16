@@ -166,7 +166,9 @@ first service on the platform. No logic changes; test count unchanged."
 - Create: `src/services/archive/types.ts` (they land here, unchanged)
 
 **Types that MOVE to `services/archive/types.ts`:**
-`DownloadedAttachment`, `AttachmentsResult`, `UploadDocumentParams`, `DocClient`, `CreateCaseParams`, `CreateCaseResult`, `DocumentationOutcome`, `WebhookRequest`, `AttachmentsRequest`, `PdfBlock`, `PdfRun`
+`UploadDocumentParams`, `DocClient`, `CreateCaseParams`, `CreateCaseResult`, `DocumentationOutcome`, `WebhookRequest`, `AttachmentsRequest`, `PdfBlock`, `PdfRun`
+
+> **Deviation found during execution:** `DownloadedAttachment` and `AttachmentsResult` were originally on the move list, but the platform's Zendesk client itself produces them — moving them would force a forbidden platform→services import. They STAY in `platform/types.ts`.
 
 **Types that STAY in `src/platform/types.ts`:**
 `TenantConfig`, `ZendeskConfig`, `EndpointConfig`, `MalaskraConfig`, `PdfConfig` (still part of TenantConfig until PR 3), `ZendeskTicket`, `ZendeskCustomField`, `ZendeskComment`, `ZendeskAttachment`, `ZendeskUser`, `HandlerResult`, `AuditStore`, `Logger`
