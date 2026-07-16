@@ -264,6 +264,22 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
     // rule. SYN-MUT-28-1 length check still catches accidental placeholders.
     validateSecretStrength(ep.password, `endpoints.${name}.password`, tenantLabel, MIN_PASSWORD_LENGTH, { allowRepeatedChars: true })
   }
+
+  // Custom-field ID validation (CONF-03) — when present, field IDs must be
+  // positive integers. Unset/null means the feature is absent (graceful).
+  // Uniform across all five keys is deliberate: existing configs only ever
+  // set valid numbers, so this adds no regression risk.
+  const fieldIdKeys = [
+    'caseNumberFieldId', 'lastStatusFieldId', 'lastExportFieldId',
+    'templateFieldId', 'kennitalaFieldId'
+  ] as const
+  for (const key of fieldIdKeys) {
+    const v = ep[key]
+    if (v === undefined || v === null) continue
+    if (!Number.isSafeInteger(v) || (v as number) <= 0) {
+      throw new Error(`Endpoint "${name}": ${key} must be a positive integer (got ${JSON.stringify(v)})`)
+    }
+  }
 }
 
 /**

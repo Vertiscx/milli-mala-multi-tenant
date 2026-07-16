@@ -484,6 +484,44 @@ describe('handleCases', () => {
     expect(e.event).not.toBe('ticket_archived')
   })
 
+  // WR-01 pin: create_failed persists a COHERENT pair — case_number null
+  // must never ride with case_number_source 'created' (nothing was minted).
+  it('create_failed → audit entry: case_number null + case_number_source none (never a false "created" claim), 502 body unchanged', async () => {
+    mockTicketPrelude()
+    fetchMock()
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' })
+      // GW-01 failure post-back PUT
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
+
+    const audit = captureAuditStore()
+    const result = await handleCases({
+      body: { ticket_id: 123, create: NS_CREATE },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems',
+      auditStore: audit.store as never
+    })
+    // HTTP body unchanged by the audit normalization.
+    expect(result.status).toBe(502)
+    expect(result.body.ok).toBe(false)
+    expect(result.body.outcome).toBe('create_failed')
+    expect(result.body.caseNumber).toBeUndefined()
+
+    const e = audit.entries[0] as {
+      event: string; outcome: string; intent: string; last_status: string
+      destination: { case_number: string | null; case_number_source: string }
+    }
+    expect(e.event).toBe('create_failed')
+    expect(e.outcome).toBe('create_failed')
+    expect(e.intent).toBe('create')
+    expect(e.last_status).toBe('FAILED')
+    expect(e.destination.case_number).toBeNull()
+    expect(e.destination.case_number_source).toBe('none')
+    // Never a fabricated reference either.
+    expect(JSON.stringify(e)).not.toContain('ZD-')
+  })
+
   // ─── G4 GW-01: post-back fires once, response byte-unchanged ─────────
   describe('G4 — recordOutcome / GW-01 post-back', () => {
     const epWithFields = () =>

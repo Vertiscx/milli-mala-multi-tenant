@@ -8,7 +8,7 @@ import {
   sanitizeAuditParam,
   validateCaseNumber
 } from '../src/tenant.js'
-import type { TenantConfig } from '../src/types.js'
+import type { TenantConfig, EndpointConfig } from '../src/types.js'
 
 function makeValidTenant(overrides: Partial<TenantConfig> = {}): TenantConfig {
   return {
@@ -437,6 +437,96 @@ describe('validateTenantConfig — secret strength', () => {
 
   it('should accept a valid 32+ character random secret', () => {
     expect(() => validateTenantConfig(makeValidTenant())).not.toThrow()
+  })
+})
+
+// ─── Custom-field ID validation (CONF-03) ───────────────────────────
+
+describe('validateTenantConfig — field-ID validation', () => {
+  /** Build a valid tenant whose onesystems endpoint carries the given field-ID overrides. */
+  function makeTenantWithFieldIds(fieldIds: Record<string, unknown>): TenantConfig {
+    return makeValidTenant({
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: 'https://api.onesystems.test',
+          appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS',
+          ...fieldIds
+        } as unknown as EndpointConfig
+      }
+    })
+  }
+
+  it('should pass for a positive-integer kennitalaFieldId', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: 123 }))).not.toThrow()
+  })
+
+  it('should pass when kennitalaFieldId is null', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: null }))).not.toThrow()
+  })
+
+  it('should pass when kennitalaFieldId is omitted', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({}))).not.toThrow()
+  })
+
+  it('should throw for kennitalaFieldId: 0, naming the endpoint and field', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: 0 })))
+      .toThrow('Endpoint "onesystems": kennitalaFieldId must be a positive integer (got 0)')
+  })
+
+  it('should throw for a negative kennitalaFieldId', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: -1 })))
+      .toThrow('kennitalaFieldId must be a positive integer')
+  })
+
+  it('should throw for a non-integer kennitalaFieldId', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: 1.5 })))
+      .toThrow('kennitalaFieldId must be a positive integer')
+  })
+
+  it('should throw for a string kennitalaFieldId', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: '123' })))
+      .toThrow('kennitalaFieldId must be a positive integer (got "123")')
+  })
+
+  it('should throw for an unsafe-integer kennitalaFieldId arriving via KV JSON', () => {
+    // Number.isInteger(1e20) is true, but 1e20 is not exactly representable —
+    // isSafeInteger rejects it so a corrupted field ID fails validation loudly.
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ kennitalaFieldId: 1e20 })))
+      .toThrow('kennitalaFieldId must be a positive integer')
+  })
+
+  it('should throw for a templateFieldId above Number.MAX_SAFE_INTEGER', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ templateFieldId: 2 ** 53 })))
+      .toThrow('templateFieldId must be a positive integer')
+  })
+
+  it('should throw for a malformed templateFieldId', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ templateFieldId: -1 })))
+      .toThrow('templateFieldId must be a positive integer')
+  })
+
+  it('should throw for malformed sibling field IDs (shared loop)', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ caseNumberFieldId: 0 })))
+      .toThrow('caseNumberFieldId must be a positive integer')
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ lastStatusFieldId: 2.5 })))
+      .toThrow('lastStatusFieldId must be a positive integer')
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({ lastExportFieldId: 'x' })))
+      .toThrow('lastExportFieldId must be a positive integer')
+  })
+
+  it('should pass for valid positive-integer field IDs across the board', () => {
+    expect(() => validateTenantConfig(makeTenantWithFieldIds({
+      caseNumberFieldId: 1, lastStatusFieldId: 2, lastExportFieldId: 3,
+      templateFieldId: 4, kennitalaFieldId: 5
+    }))).not.toThrow()
+  })
+
+  it('resolveTenantConfig returns null (does not throw) for a stored config with a malformed field ID', async () => {
+    // KV-runtime path: validation runs inside resolveTenantConfig
+    const badTenant = makeTenantWithFieldIds({ templateFieldId: -1 })
+    const store = new FileTenantStore([badTenant])
+    await expect(resolveTenantConfig('360001234567', store)).resolves.toBeNull()
   })
 })
 

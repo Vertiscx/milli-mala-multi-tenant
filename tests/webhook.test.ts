@@ -226,12 +226,16 @@ describe('handleWebhook', () => {
   })
 
   it('should process valid webhook end-to-end', async () => {
+    // Phase 7 (WHCC-05): an OneSystems tenant no longer gets a ZD- fallback,
+    // so the happy-path e2e documents into a POPULATED case-number field
+    // (caseNumberFieldId 7777 → 'C-100') instead of asserting ZD-123.
     const mockTicket = {
       id: 123,
       subject: 'Test ticket',
       status: 'closed',
       created_at: '2025-01-01T00:00:00Z',
-      brand_id: 360001234567
+      brand_id: 360001234567,
+      custom_fields: [{ id: 7777, value: 'C-100' }]
     }
 
     ;(global.fetch as ReturnType<typeof vi.fn>)
@@ -262,13 +266,23 @@ describe('handleWebhook', () => {
       })
 
     const req = makeRequest({ ticket_id: 123 })
+    req.tenantConfig = makeTenantConfig({
+      endpoints: {
+        onesystems: {
+          type: 'onesystems',
+          baseUrl: 'https://api.onesystems.test',
+          appKey: 'test-key',
+          caseNumberFieldId: 7777
+        }
+      }
+    })
     const result = await handleWebhook(req)
 
     expect(result.status).toBe(200)
     expect(result.body.success).toBe(true)
     expect(result.body.ticket_id).toBe(123)
     expect(result.body.brand_id).toBe('360001234567')
-    expect(result.body.case_number).toBe('ZD-123')
+    expect(result.body.case_number).toBe('C-100')
     expect(result.body.doc_endpoint).toBe('onesystems')
     expect(result.body.doc_system).toBe('onesystems')
     expect(result.body.duration_ms).toBeGreaterThanOrEqual(0)
