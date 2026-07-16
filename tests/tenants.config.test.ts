@@ -90,12 +90,12 @@ describe('loadTenants', () => {
 
   it('preserves Icelandic characters in PDF company name', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants[0].pdf.companyName).toBe('Kerfisstjórn')
-    expect(tenants[1].pdf.companyName).toBe('Vinnueftirlitið')
-    expect(tenants[2].pdf.companyName).toBe('Samgöngustofa')
-    expect(tenants[3].pdf.companyName).toBe('Tryggingastofnun')
-    expect(tenants[4].pdf.companyName).toBe('Tryggingastofnun')
-    expect(tenants[5].pdf.companyName).toBe('HMS')
+    expect(tenants[0].services.archive!.pdf.companyName).toBe('Kerfisstjórn')
+    expect(tenants[1].services.archive!.pdf.companyName).toBe('Vinnueftirlitið')
+    expect(tenants[2].services.archive!.pdf.companyName).toBe('Samgöngustofa')
+    expect(tenants[3].services.archive!.pdf.companyName).toBe('Tryggingastofnun')
+    expect(tenants[4].services.archive!.pdf.companyName).toBe('Tryggingastofnun')
+    expect(tenants[5].services.archive!.pdf.companyName).toBe('HMS')
   })
 
   it('uses per-tenant Zendesk credentials (no shared secrets across tenants)', () => {
@@ -106,48 +106,48 @@ describe('loadTenants', () => {
 
   it('uses different malaskra api keys per tenant (cross-tenant uniqueness)', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants[0].malaskra.apiKey).not.toBe(tenants[1].malaskra.apiKey)
+    expect(tenants[0].services.archive!.malaskra.apiKey).not.toBe(tenants[1].services.archive!.malaskra.apiKey)
   })
 
   it('reads Zendesk subdomain, email, and baseUrl from env vars (not committed in code)', () => {
     const [kerfisstjorn, vinnueftirlit] = loadTenants(validEnv)
     expect(kerfisstjorn.zendesk.subdomain).toBe('kerfisstjorn-test')
     expect(kerfisstjorn.zendesk.email).toBe('admin@kerfisstjorn.test')
-    expect(kerfisstjorn.endpoints.onesystems?.baseUrl).toBe('https://onesystems.test.example/')
+    expect(kerfisstjorn.services.archive!.endpoints.onesystems?.baseUrl).toBe('https://onesystems.test.example/')
     expect(vinnueftirlit.zendesk.subdomain).toBe('vinnueftirlit-test')
     expect(vinnueftirlit.zendesk.email).toBe('admin@vinnueftirlit.test')
-    expect(vinnueftirlit.endpoints.gopro?.baseUrl).toBe('https://gopro.test.example/')
+    expect(vinnueftirlit.services.archive!.endpoints.gopro?.baseUrl).toBe('https://gopro.test.example/')
   })
 
   it('configures Kerfisstjórn with a OneSystems endpoint', () => {
     const [kerfisstjorn] = loadTenants(validEnv)
-    expect(kerfisstjorn.endpoints.onesystems?.type).toBe('onesystems')
+    expect(kerfisstjorn.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
   })
 
   it('configures Vinnueftirlitið with a GoPro endpoint', () => {
     const [, vinnueftirlit] = loadTenants(validEnv)
-    expect(vinnueftirlit.endpoints.gopro?.type).toBe('gopro')
+    expect(vinnueftirlit.services.archive!.endpoints.gopro?.type).toBe('gopro')
   })
 
   it('configures Samgöngustofa with a OneSystems endpoint', () => {
     const [, , samgongustofa] = loadTenants(validEnv)
-    expect(samgongustofa.endpoints.onesystems?.type).toBe('onesystems')
+    expect(samgongustofa.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
   })
 
   it('configures both Tryggingastofnun brands with OneSystems endpoints and distinct brand_ids', () => {
     const [, , , tryggingastofnun, tryggingastofnunInternal] = loadTenants(validEnv)
-    expect(tryggingastofnun.endpoints.onesystems?.type).toBe('onesystems')
+    expect(tryggingastofnun.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
     expect(tryggingastofnun.brand_id).toBe('11204917066386')
-    expect(tryggingastofnunInternal.endpoints.onesystems?.type).toBe('onesystems')
+    expect(tryggingastofnunInternal.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
     expect(tryggingastofnunInternal.brand_id).toBe('36102499292434')
   })
 
   it('configures HMS with a OneSystems endpoint and the expected brand_id', () => {
     const tenants = loadTenants(validEnv)
     const hms = tenants.find(t => t.name === 'HMS')!
-    expect(hms.endpoints.onesystems?.type).toBe('onesystems')
+    expect(hms.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
     expect(hms.brand_id).toBe('25782179205266')
-    expect(hms.pdf.includeInternalNotes).toBe(false)
+    expect(hms.services.archive!.pdf.includeInternalNotes).toBe(false)
   })
 
   it('throws with a clear error when HMS_ZENDESK_API_TOKEN is missing', () => {
@@ -201,14 +201,14 @@ describe('loadTenants', () => {
     }
     const tenants = loadTenants(env)
     const tryggingastofnun = tenants.find(t => t.name === 'Tryggingastofnun')!
-    expect(tryggingastofnun.endpoints.onesystems?.templateFieldId).toBe(11111)
-    expect(tryggingastofnun.endpoints.onesystems?.kennitalaFieldId).toBe(22222)
+    expect(tryggingastofnun.services.archive!.endpoints.onesystems?.templateFieldId).toBe(11111)
+    expect(tryggingastofnun.services.archive!.endpoints.onesystems?.kennitalaFieldId).toBe(22222)
   })
 
   it('succeeds with the field-ID vars unset — both fields undefined (graceful absence)', () => {
     const tenants = loadTenants(validEnv)
     for (const tenant of tenants) {
-      for (const ep of Object.values(tenant.endpoints)) {
+      for (const ep of Object.values(tenant.services.archive!.endpoints)) {
         expect(ep.templateFieldId).toBeUndefined()
         expect(ep.kennitalaFieldId).toBeUndefined()
       }
@@ -228,7 +228,7 @@ describe('loadTenants', () => {
     }
     const tenants = loadTenants(env)
     const vinnueftirlit = tenants.find(t => t.name === 'Vinnueftirlitið')!
-    expect(vinnueftirlit.endpoints.gopro?.templateFieldId).toBeUndefined()
-    expect(vinnueftirlit.endpoints.gopro?.kennitalaFieldId).toBeUndefined()
+    expect(vinnueftirlit.services.archive!.endpoints.gopro?.templateFieldId).toBeUndefined()
+    expect(vinnueftirlit.services.archive!.endpoints.gopro?.kennitalaFieldId).toBeUndefined()
   })
 })

@@ -81,7 +81,7 @@ export class FileTenantStore implements TenantStore {
     // KvTenantStore loads tenants one at a time, so this check only applies to file-based stores.
     const seenApiKeys = new Map<string, string>()
     for (const tenant of data.tenants) {
-      const key = tenant.malaskra?.apiKey
+      const key = tenant.services?.archive?.malaskra?.apiKey
       if (key) {
         const existingTenant = seenApiKeys.get(key)
         if (existingTenant) {
@@ -132,6 +132,7 @@ export async function resolveTenantConfig(
  */
 export function validateTenantConfig(config: TenantConfig): void {
   const missing: string[] = []
+  const archive = config.services?.archive
 
   if (!config.brand_id) missing.push('brand_id')
   if (!config.name) missing.push('name')
@@ -151,20 +152,20 @@ export function validateTenantConfig(config: TenantConfig): void {
   }
 
   // Malaskra section
-  if (!config.malaskra?.apiKey) missing.push('malaskra.apiKey')
+  if (!archive?.malaskra?.apiKey) missing.push('malaskra.apiKey')
 
   // PDF section — required since pdf.ts accesses it unconditionally
-  if (!config.pdf) {
+  if (!archive?.pdf) {
     missing.push('pdf')
   } else {
-    if (!config.pdf.companyName) missing.push('pdf.companyName')
-    if (config.pdf.locale !== undefined && typeof config.pdf.locale !== 'string') {
+    if (!archive.pdf.companyName) missing.push('pdf.companyName')
+    if (archive.pdf.locale !== undefined && typeof archive.pdf.locale !== 'string') {
       missing.push('pdf.locale (must be a string)')
     }
   }
 
   // At least one endpoint
-  if (!config.endpoints || Object.keys(config.endpoints).length === 0) {
+  if (!archive?.endpoints || Object.keys(archive.endpoints).length === 0) {
     missing.push('endpoints (at least one required)')
   }
 
@@ -180,12 +181,12 @@ export function validateTenantConfig(config: TenantConfig): void {
   if (config.zendesk?.webhookSecret) {
     validateSecretStrength(config.zendesk.webhookSecret, 'zendesk.webhookSecret', label, MIN_SECRET_LENGTH)
   }
-  if (config.malaskra?.apiKey) {
-    validateSecretStrength(config.malaskra.apiKey, 'malaskra.apiKey', label, MIN_SECRET_LENGTH)
+  if (archive?.malaskra?.apiKey) {
+    validateSecretStrength(archive.malaskra.apiKey, 'malaskra.apiKey', label, MIN_SECRET_LENGTH)
   }
 
   // Validate each endpoint
-  for (const [name, ep] of Object.entries(config.endpoints)) {
+  for (const [name, ep] of Object.entries(archive!.endpoints)) {
     validateEndpoint(name, ep, label)
   }
 }
@@ -287,7 +288,7 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
  * Returns the EndpointConfig or throws.
  */
 export function resolveEndpoint(tenantConfig: TenantConfig, docEndpoint: string): EndpointConfig {
-  const ep = tenantConfig.endpoints[docEndpoint]
+  const ep = tenantConfig.services.archive?.endpoints[docEndpoint]
   if (!ep) {
     throw new Error(`Unknown doc_endpoint "${docEndpoint}"`)
   }

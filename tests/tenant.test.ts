@@ -10,7 +10,11 @@ import {
 } from '../src/platform/tenant.js'
 import type { TenantConfig, EndpointConfig } from '../src/platform/types.js'
 
-function makeValidTenant(overrides: Partial<TenantConfig> = {}): TenantConfig {
+function makeValidTenant(overrides: Partial<Omit<TenantConfig, 'services'>> & {
+  endpoints?: Record<string, EndpointConfig>
+  malaskra?: { apiKey: string }
+} = {}): TenantConfig {
+  const { endpoints, malaskra, ...rest } = overrides
   return {
     brand_id: '360001234567',
     name: 'Test Tenant',
@@ -20,20 +24,24 @@ function makeValidTenant(overrides: Partial<TenantConfig> = {}): TenantConfig {
       apiToken: 'aaT5kX9mR2vL7nQ8pW3jY6cB4fH1gD0e',
       webhookSecret: 'wS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD'
     },
-    endpoints: {
-      onesystems: {
-        type: 'onesystems',
-        baseUrl: 'https://api.onesystems.test',
-        appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS'
+    services: {
+      archive: {
+        endpoints: endpoints ?? {
+          onesystems: {
+            type: 'onesystems',
+            baseUrl: 'https://api.onesystems.test',
+            appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS'
+          }
+        },
+        malaskra: malaskra ?? { apiKey: 'mK7xR3nT9pQ2vL5jW8cY6bA4fH1gS0eD' },
+        pdf: {
+          companyName: 'Test Company',
+          locale: 'is-IS',
+          includeInternalNotes: false
+        }
       }
     },
-    malaskra: { apiKey: 'mK7xR3nT9pQ2vL5jW8cY6bA4fH1gS0eD' },
-    pdf: {
-      companyName: 'Test Company',
-      locale: 'is-IS',
-      includeInternalNotes: false
-    },
-    ...overrides
+    ...rest
   }
 }
 
@@ -140,7 +148,7 @@ describe('validateTenantConfig', () => {
 
   it('should throw for missing malaskra apiKey', () => {
     const tenant = makeValidTenant()
-    tenant.malaskra.apiKey = ''
+    tenant.services.archive!.malaskra.apiKey = ''
     expect(() => validateTenantConfig(tenant)).toThrow('malaskra.apiKey')
   })
 
@@ -331,19 +339,19 @@ describe('sanitizeAuditParam', () => {
 describe('validateTenantConfig — pdf section', () => {
   it('should throw for missing pdf section', () => {
     const tenant = makeValidTenant()
-    delete (tenant as any).pdf
+    delete (tenant.services.archive as any).pdf
     expect(() => validateTenantConfig(tenant)).toThrow('pdf')
   })
 
   it('should throw for missing pdf.companyName', () => {
     const tenant = makeValidTenant()
-    tenant.pdf.companyName = ''
+    tenant.services.archive!.pdf.companyName = ''
     expect(() => validateTenantConfig(tenant)).toThrow('pdf.companyName')
   })
 
   it('should accept pdf with only companyName', () => {
     const tenant = makeValidTenant()
-    tenant.pdf = { companyName: 'Test' } as any
+    tenant.services.archive!.pdf = { companyName: 'Test' } as any
     expect(() => validateTenantConfig(tenant)).not.toThrow()
   })
 })
@@ -391,7 +399,7 @@ describe('validateTenantConfig — secret strength', () => {
 
   it('should reject malaskra.apiKey shorter than 32 characters', () => {
     const tenant = makeValidTenant()
-    tenant.malaskra.apiKey = 'too-short'
+    tenant.services.archive!.malaskra.apiKey = 'too-short'
     expect(() => validateTenantConfig(tenant)).toThrow('malaskra.apiKey must be at least 32 characters')
   })
 

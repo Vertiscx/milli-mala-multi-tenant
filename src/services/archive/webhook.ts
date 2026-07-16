@@ -62,6 +62,9 @@ export async function handleWebhook(req: WebhookRequest): Promise<HandlerResult>
       return { status: 401, body: { error: 'Webhook timestamp expired' } }
     }
 
+    const archive = tenantConfig.services.archive
+    if (!archive) return { status: 400, body: { error: 'Invalid request' } }
+
     // Validate ticket_id as a positive integer
     const ticket_id = Number(body.ticket_id)
     if (!Number.isInteger(ticket_id) || ticket_id <= 0) {

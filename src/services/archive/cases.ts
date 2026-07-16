@@ -46,7 +46,7 @@ const logger: Logger = createLogger('cases')
  * src/attachments.ts must stay byte-identical).
  */
 function verifyApiKey(headers: Record<string, string>, tenantConfig: TenantConfig): boolean {
-  const key = tenantConfig.malaskra.apiKey
+  const key = tenantConfig.services.archive?.malaskra?.apiKey
   if (!key) return false
   const provided = headers['x-api-key']
   if (!provided) return false
@@ -73,6 +73,9 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
 
   // ─── Gate phase (relative order, mirroring attachments.ts) ──────────
   try {
+    const archive = tenantConfig.services.archive
+    if (!archive) return { status: 400, body: { error: 'Invalid request' } }
+
     // Auth check
     if (!verifyApiKey(headers, tenantConfig)) {
       return { status: 401, body: { ok: false, outcome: 'auth', error: 'Invalid or missing API key' } }

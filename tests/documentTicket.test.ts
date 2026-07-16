@@ -31,7 +31,10 @@ function makeSignature(rawBody: string, timestamp: string, secret: string): stri
     .digest('base64')
 }
 
-function makeTenantConfig(overrides: Partial<TenantConfig> = {}): TenantConfig {
+function makeTenantConfig(overrides: Partial<Omit<TenantConfig, 'services'>> & {
+  endpoints?: Record<string, EndpointConfig>
+} = {}): TenantConfig {
+  const { endpoints, ...rest } = overrides
   return {
     brand_id: '360001234567',
     name: 'Test Tenant',
@@ -41,20 +44,24 @@ function makeTenantConfig(overrides: Partial<TenantConfig> = {}): TenantConfig {
       apiToken: 'test-token',
       webhookSecret: 'test-webhook-secret'
     },
-    endpoints: {
-      onesystems: {
-        type: 'onesystems',
-        baseUrl: 'https://api.onesystems.test',
-        appKey: 'test-key'
+    services: {
+      archive: {
+        endpoints: endpoints ?? {
+          onesystems: {
+            type: 'onesystems',
+            baseUrl: 'https://api.onesystems.test',
+            appKey: 'test-key'
+          }
+        },
+        malaskra: { apiKey: 'test-malaskra-key' },
+        pdf: {
+          companyName: 'Test Company',
+          locale: 'is-IS',
+          includeInternalNotes: false
+        }
       }
     },
-    malaskra: { apiKey: 'test-malaskra-key' },
-    pdf: {
-      companyName: 'Test Company',
-      locale: 'is-IS',
-      includeInternalNotes: false
-    },
-    ...overrides
+    ...rest
   }
 }
 
@@ -1178,7 +1185,7 @@ describe('documentTicket webhook create path', () => {
       },
       {
         tenantConfig,
-        ep: tenantConfig.endpoints.onesystems,
+        ep: tenantConfig.services.archive!.endpoints.onesystems,
         docEndpoint: 'onesystems',
         ticket: baseTicket as ZendeskTicket,
         comments: [],

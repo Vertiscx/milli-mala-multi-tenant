@@ -14,18 +14,22 @@ function makeTenantConfig(overrides: Partial<TenantConfig> = {}): TenantConfig {
       apiToken: 'test-token',
       webhookSecret: 'test-webhook-secret'
     },
-    endpoints: {
-      onesystems: {
-        type: 'onesystems',
-        baseUrl: 'https://api.onesystems.test',
-        appKey: 'test-key'
+    services: {
+      archive: {
+        endpoints: {
+          onesystems: {
+            type: 'onesystems',
+            baseUrl: 'https://api.onesystems.test',
+            appKey: 'test-key'
+          }
+        },
+        malaskra: { apiKey: 'test-malaskra-key' },
+        pdf: {
+          companyName: 'Test Company',
+          locale: 'is-IS',
+          includeInternalNotes: false
+        }
       }
-    },
-    malaskra: { apiKey: 'test-malaskra-key' },
-    pdf: {
-      companyName: 'Test Company',
-      locale: 'is-IS',
-      includeInternalNotes: false
     },
     ...overrides
   }

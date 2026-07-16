@@ -116,7 +116,7 @@ export async function renderPdf(
   userMap: Record<number, string>
 ): Promise<Buffer> {
   return generateTicketPdf(ticket, comments, {
-    pdfConfig: tenantConfig.pdf,
+    pdfConfig: tenantConfig.services.archive!.pdf,
     userMap
   })
 }
@@ -382,7 +382,7 @@ export async function writeAudit(args: {
       total_comments: comments.length,
       public_comments: comments.filter(c => c.public !== false).length,
       internal_notes: comments.filter(c => c.public === false).length,
-      internal_notes_included: tenantConfig.pdf.includeInternalNotes,
+      internal_notes_included: tenantConfig.services.archive!.pdf.includeInternalNotes,
       total_attachments: attachments.length
     },
     destination: {
