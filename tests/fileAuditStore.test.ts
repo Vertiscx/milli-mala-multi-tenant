@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { FileAuditStore } from '../src/fileAuditStore.js'
+import { FileAuditStore } from '../src/platform/fileAuditStore.js'
 
 describe('FileAuditStore', () => {
   let dir: string

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { requireEnv, optionalNumberEnv } from '../src/env.js'
+import { requireEnv, optionalNumberEnv } from '../src/platform/env.js'
 
 describe('requireEnv', () => {
   it('returns the value when the variable is set', () => {

@@ -27,8 +27,8 @@
  * webhook create inputs are unavailable for that tenant.
  */
 
-import type { TenantConfig } from './types.js'
-import { requireEnv, optionalNumberEnv } from './env.js'
+import type { TenantConfig } from './platform/types.js'
+import { requireEnv, optionalNumberEnv } from './platform/env.js'
 
 /**
  * Build the tenant array from environment variables. Called once at startup.

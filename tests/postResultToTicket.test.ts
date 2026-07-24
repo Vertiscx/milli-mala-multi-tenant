@@ -11,11 +11,12 @@
  *  - postResultToTicket NEVER throws even if requestWrite rejects
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { buildNote, buildCustomFields, postResultToTicket } from '../src/postResultToTicket.js'
-import type { DocumentationOutcome, EndpointConfig, TenantConfig } from '../src/types.js'
+import { buildNote, buildCustomFields, postResultToTicket } from '../src/services/archive/postResultToTicket.js'
+import type { EndpointConfig, TenantConfig } from '../src/platform/types.js'
+import type { DocumentationOutcome } from '../src/services/archive/types.js'
 
 const putMock = vi.fn()
-vi.mock('../src/zendesk.js', () => ({
+vi.mock('../src/platform/zendesk.js', () => ({
   ZendeskClient: class {
     constructor(..._a: unknown[]) {}
     requestWrite(...args: unknown[]) {

@@ -21,8 +21,8 @@
  * GW-06 contract change with the malaskra_v3 side first).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { handleCases } from '../src/cases.js'
-import type { TenantConfig } from '../src/types.js'
+import { handleCases } from '../src/services/archive/cases.js'
+import type { TenantConfig } from '../src/platform/types.js'
 import {
   GW06_OUTCOMES,
   REQ_VALID_CREATE,

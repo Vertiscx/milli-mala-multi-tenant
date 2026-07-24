@@ -11,19 +11,19 @@
 
 import { timingSafeEqual, createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { getConfig } from './config.js'
-import { handleWebhook } from './webhook.js'
-import { handleAttachments } from './attachments.js'
-import { handleCases } from './cases.js'
-import { FileTenantStore, resolveTenantConfig, sanitizeAuditParam } from './tenant.js'
+import { getConfig } from './platform/config.js'
+import { handleWebhook } from './services/archive/webhook.js'
+import { handleAttachments } from './services/archive/attachments.js'
+import { handleCases } from './services/archive/cases.js'
+import { FileTenantStore, resolveTenantConfig, sanitizeAuditParam } from './platform/tenant.js'
 import { loadTenants } from './tenants.config.js'
-import { FileAuditStore } from './fileAuditStore.js'
-import { createLogger } from './logger.js'
-import type { TenantConfig, Logger } from './types.js'
+import { FileAuditStore } from './platform/fileAuditStore.js'
+import { createLogger } from './platform/logger.js'
+import type { TenantConfig, Logger } from './platform/types.js'
 
-export { handleWebhook, verifyWebhookSignature, isTimestampFresh } from './webhook.js'
-export { handleAttachments } from './attachments.js'
-export { handleCases } from './cases.js'
+export { handleWebhook, verifyWebhookSignature, isTimestampFresh } from './services/archive/webhook.js'
+export { handleAttachments } from './services/archive/attachments.js'
+export { handleCases } from './services/archive/cases.js'
 
 const logger: Logger = createLogger('main')
 

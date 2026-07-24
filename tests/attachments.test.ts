@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { handleAttachments } from '../src/attachments.js'
-import type { TenantConfig } from '../src/types.js'
+import { handleAttachments } from '../src/services/archive/attachments.js'
+import type { TenantConfig } from '../src/platform/types.js'
 
 global.fetch = vi.fn() as unknown as typeof fetch
 

@@ -2,8 +2,9 @@
  * OneSystems API Client - handles authentication and document upload
  */
 
-import { createLogger } from './logger.js'
-import type { UploadDocumentParams, DocClient, Logger, CreateCaseParams, CreateCaseResult } from './types.js'
+import { createLogger } from '../../platform/logger.js'
+import type { Logger } from '../../platform/types.js'
+import type { UploadDocumentParams, DocClient, CreateCaseParams, CreateCaseResult } from './types.js'
 
 const logger: Logger = createLogger('onesystems')
 

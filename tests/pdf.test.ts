@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { generateTicketPdf, parseHtmlToBlocks } from '../src/pdf.js'
-import type { PdfConfig } from '../src/types.js'
+import { generateTicketPdf, parseHtmlToBlocks } from '../src/services/archive/pdf.js'
+import type { PdfConfig } from '../src/platform/types.js'
 
 const defaultPdfConfig: PdfConfig = {
   companyName: 'Test Company',

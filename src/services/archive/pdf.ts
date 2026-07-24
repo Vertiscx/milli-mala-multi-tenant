@@ -4,7 +4,8 @@
  */
 
 import { jsPDF } from 'jspdf'
-import type { ZendeskTicket, ZendeskComment, PdfConfig, PdfBlock, PdfRun } from './types.js'
+import type { ZendeskTicket, ZendeskComment, PdfConfig } from '../../platform/types.js'
+import type { PdfBlock, PdfRun } from './types.js'
 
 interface PdfOptions {
   pdfConfig: PdfConfig

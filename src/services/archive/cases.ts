@@ -29,13 +29,14 @@
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
-import { createLogger } from './logger.js'
-import { resolveEndpoint, validateCaseNumber } from './tenant.js'
+import { createLogger } from '../../platform/logger.js'
+import { resolveEndpoint, validateCaseNumber } from '../../platform/tenant.js'
 import { createDocClient } from './docClient.js'
 import { fetchTicketInfo, renderPdf, postToCase } from './documentTicket.js'
 import { recordOutcome } from './postResultToTicket.js'
 import type { OneSystemsClient } from './onesystems.js'
-import type { HandlerResult, TenantConfig, AuditStore, Logger, DocumentationOutcome, EndpointConfig } from './types.js'
+import type { HandlerResult, TenantConfig, AuditStore, Logger, EndpointConfig } from '../../platform/types.js'
+import type { DocumentationOutcome } from './types.js'
 
 const logger: Logger = createLogger('cases')
 
@@ -231,7 +232,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     try {
       // 4. Stamp the new case number onto the ticket (create path only)
       if (createdCaseNumber !== undefined && ep.caseNumberFieldId != null) {
-        const { ZendeskClient } = await import('./zendesk.js')
+        const { ZendeskClient } = await import('../../platform/zendesk.js')
         const zendesk = new ZendeskClient(
           tenantConfig.zendesk.subdomain,
           tenantConfig.zendesk.apiToken,
