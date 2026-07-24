@@ -210,17 +210,25 @@ function makeWorkerEnv() {
       brand_id: ONESYS_BRAND,
       name: 'Kerfisstjórn',
       zendesk: { subdomain: 'kerfis', email: 'k@example.com', apiToken: K_TOKEN, webhookSecret: K_WEBHOOK },
-      endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: K_APPKEY, templateFieldId: 100, kennitalaFieldId: 200, caseNumberFieldId: 7777 } },
-      malaskra: { apiKey: MALASKRA_KEY },
-      pdf: { companyName: 'Kerfisstjórn', locale: 'is-IS', includeInternalNotes: false }
+      services: {
+        archive: {
+          endpoints: { onesystems: { type: 'onesystems', baseUrl: ONESYS_BASE, appKey: K_APPKEY, templateFieldId: 100, kennitalaFieldId: 200, caseNumberFieldId: 7777 } },
+          malaskra: { apiKey: MALASKRA_KEY },
+          pdf: { companyName: 'Kerfisstjórn', locale: 'is-IS', includeInternalNotes: false }
+        }
+      }
     }),
     [`tenant:${GOPRO_BRAND}`]: JSON.stringify({
       brand_id: GOPRO_BRAND,
       name: 'Vinnueftirlitið',
       zendesk: { subdomain: 'vinnu', email: 'v@example.com', apiToken: V_TOKEN, webhookSecret: V_WEBHOOK },
-      endpoints: { gopro: { type: 'gopro', baseUrl: GOPRO_BASE, username: 'vuser', password: V_PASSWORD } },
-      malaskra: { apiKey: MALASKRA_KEY },
-      pdf: { companyName: 'Vinnueftirlitið', locale: 'is-IS', includeInternalNotes: false }
+      services: {
+        archive: {
+          endpoints: { gopro: { type: 'gopro', baseUrl: GOPRO_BASE, username: 'vuser', password: V_PASSWORD } },
+          malaskra: { apiKey: MALASKRA_KEY },
+          pdf: { companyName: 'Vinnueftirlitið', locale: 'is-IS', includeInternalNotes: false }
+        }
+      }
     })
   }
   const memAudit: AuditStore = {

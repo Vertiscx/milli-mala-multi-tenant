@@ -81,7 +81,7 @@ export class FileTenantStore implements TenantStore {
     // KvTenantStore loads tenants one at a time, so this check only applies to file-based stores.
     const seenApiKeys = new Map<string, string>()
     for (const tenant of data.tenants) {
-      const key = tenant.malaskra?.apiKey
+      const key = tenant.services?.archive?.malaskra?.apiKey
       if (key) {
         const existingTenant = seenApiKeys.get(key)
         if (existingTenant) {
@@ -129,8 +129,25 @@ export async function resolveTenantConfig(
 /**
  * Validate that a TenantConfig has all required fields.
  * Throws with a descriptive message on failure.
+ *
+ * Core identity + Zendesk credentials are always required. The archive
+ * section (services.archive) is validated only when present — a tenant
+ * with no archive service configured is otherwise valid.
  */
 export function validateTenantConfig(config: TenantConfig): void {
+  validateTenantCore(config)
+
+  const archive = config.services?.archive
+  if (archive) {
+    validateArchiveConfig(archive, config.name || config.brand_id)
+  }
+}
+
+/**
+ * Validate the core (always-required) fields of a TenantConfig: identity
+ * and Zendesk credentials. Throws with a descriptive message on failure.
+ */
+export function validateTenantCore(config: TenantConfig): void {
   const missing: string[] = []
 
   if (!config.brand_id) missing.push('brand_id')
@@ -150,24 +167,6 @@ export function validateTenantConfig(config: TenantConfig): void {
     )
   }
 
-  // Malaskra section
-  if (!config.malaskra?.apiKey) missing.push('malaskra.apiKey')
-
-  // PDF section — required since pdf.ts accesses it unconditionally
-  if (!config.pdf) {
-    missing.push('pdf')
-  } else {
-    if (!config.pdf.companyName) missing.push('pdf.companyName')
-    if (config.pdf.locale !== undefined && typeof config.pdf.locale !== 'string') {
-      missing.push('pdf.locale (must be a string)')
-    }
-  }
-
-  // At least one endpoint
-  if (!config.endpoints || Object.keys(config.endpoints).length === 0) {
-    missing.push('endpoints (at least one required)')
-  }
-
   if (missing.length > 0) {
     throw new Error(`Invalid tenant config for "${config.name || config.brand_id}": missing ${missing.join(', ')}`)
   }
@@ -180,12 +179,46 @@ export function validateTenantConfig(config: TenantConfig): void {
   if (config.zendesk?.webhookSecret) {
     validateSecretStrength(config.zendesk.webhookSecret, 'zendesk.webhookSecret', label, MIN_SECRET_LENGTH)
   }
-  if (config.malaskra?.apiKey) {
-    validateSecretStrength(config.malaskra.apiKey, 'malaskra.apiKey', label, MIN_SECRET_LENGTH)
+}
+
+/**
+ * Validate an archive service section (services.archive): malaskra key,
+ * pdf fields, and endpoints (including per-endpoint checks). Throws with
+ * a descriptive message on failure. Only called when the archive section
+ * is present.
+ */
+export function validateArchiveConfig(archive: NonNullable<TenantConfig['services']['archive']>, label: string): void {
+  const missing: string[] = []
+
+  // Malaskra section
+  if (!archive.malaskra?.apiKey) missing.push('malaskra.apiKey')
+
+  // PDF section — required since pdf.ts accesses it unconditionally
+  if (!archive.pdf) {
+    missing.push('pdf')
+  } else {
+    if (!archive.pdf.companyName) missing.push('pdf.companyName')
+    if (archive.pdf.locale !== undefined && typeof archive.pdf.locale !== 'string') {
+      missing.push('pdf.locale (must be a string)')
+    }
+  }
+
+  // At least one endpoint
+  if (!archive.endpoints || Object.keys(archive.endpoints).length === 0) {
+    missing.push('endpoints (at least one required)')
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Invalid tenant config for "${label}": missing ${missing.join(', ')}`)
+  }
+
+  // Secret strength validation (SYN-MUT-28-1)
+  if (archive.malaskra?.apiKey) {
+    validateSecretStrength(archive.malaskra.apiKey, 'malaskra.apiKey', label, MIN_SECRET_LENGTH)
   }
 
   // Validate each endpoint
-  for (const [name, ep] of Object.entries(config.endpoints)) {
+  for (const [name, ep] of Object.entries(archive.endpoints)) {
     validateEndpoint(name, ep, label)
   }
 }
@@ -287,7 +320,7 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
  * Returns the EndpointConfig or throws.
  */
 export function resolveEndpoint(tenantConfig: TenantConfig, docEndpoint: string): EndpointConfig {
-  const ep = tenantConfig.endpoints[docEndpoint]
+  const ep = tenantConfig.services.archive?.endpoints[docEndpoint]
   if (!ep) {
     throw new Error(`Unknown doc_endpoint "${docEndpoint}"`)
   }

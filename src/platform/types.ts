@@ -8,6 +8,14 @@ export interface TenantConfig {
   brand_id: string
   name: string
   zendesk: ZendeskConfig
+  services: { archive?: ArchiveServiceConfig }
+}
+
+// The archive section groups what used to sit at the top level.
+// It stays defined in platform/types.ts for now, because the folder rule says
+// platform code may not import from services — moving it fully into the
+// service needs per-service config loading, which is future work.
+export interface ArchiveServiceConfig {
   endpoints: Record<string, EndpointConfig>
   malaskra: MalaskraConfig
   pdf: PdfConfig

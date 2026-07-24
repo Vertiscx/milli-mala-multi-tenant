@@ -46,23 +46,27 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         apiToken: requireEnv('KERFISSTJORN_ZENDESK_API_TOKEN', env),
         webhookSecret: requireEnv('KERFISSTJORN_ZENDESK_WEBHOOK_SECRET', env),
       },
-      endpoints: {
-        onesystems: {
-          type: 'onesystems',
-          baseUrl: requireEnv('KERFISSTJORN_ONESYSTEMS_BASE_URL', env),
-          appKey: requireEnv('KERFISSTJORN_ONESYSTEMS_APP_KEY', env),
-          templateFieldId: optionalNumberEnv('KERFISSTJORN_TEMPLATE_FIELD_ID', env),
-          kennitalaFieldId: optionalNumberEnv('KERFISSTJORN_KENNITALA_FIELD_ID', env),
-          // MD-02 invariant: the webhook create path refuses to mint
-          // without a case-number field to stamp (duplicate-mint guard).
-          caseNumberFieldId: optionalNumberEnv('KERFISSTJORN_CASE_NUMBER_FIELD_ID', env),
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('KERFISSTJORN_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('KERFISSTJORN_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('KERFISSTJORN_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('KERFISSTJORN_KENNITALA_FIELD_ID', env),
+              // MD-02 invariant: the webhook create path refuses to mint
+              // without a case-number field to stamp (duplicate-mint guard).
+              caseNumberFieldId: optionalNumberEnv('KERFISSTJORN_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('KERFISSTJORN_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Kerfisstjórn',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
         },
-      },
-      malaskra: { apiKey: requireEnv('KERFISSTJORN_MALASKRA_API_KEY', env) },
-      pdf: {
-        companyName: 'Kerfisstjórn',
-        locale: 'is-IS',
-        includeInternalNotes: false,
       },
     },
     {
@@ -74,19 +78,23 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         apiToken: requireEnv('VINNUEFTIRLIT_ZENDESK_API_TOKEN', env),
         webhookSecret: requireEnv('VINNUEFTIRLIT_ZENDESK_WEBHOOK_SECRET', env),
       },
-      endpoints: {
-        gopro: {
-          type: 'gopro',
-          baseUrl: requireEnv('VINNUEFTIRLIT_GOPRO_BASE_URL', env),
-          username: requireEnv('VINNUEFTIRLIT_GOPRO_USERNAME', env),
-          password: requireEnv('VINNUEFTIRLIT_GOPRO_PASSWORD', env),
+      services: {
+        archive: {
+          endpoints: {
+            gopro: {
+              type: 'gopro',
+              baseUrl: requireEnv('VINNUEFTIRLIT_GOPRO_BASE_URL', env),
+              username: requireEnv('VINNUEFTIRLIT_GOPRO_USERNAME', env),
+              password: requireEnv('VINNUEFTIRLIT_GOPRO_PASSWORD', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('VINNUEFTIRLIT_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Vinnueftirlitið',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
         },
-      },
-      malaskra: { apiKey: requireEnv('VINNUEFTIRLIT_MALASKRA_API_KEY', env) },
-      pdf: {
-        companyName: 'Vinnueftirlitið',
-        locale: 'is-IS',
-        includeInternalNotes: false,
       },
     },
     {
@@ -98,21 +106,25 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         apiToken: requireEnv('SAMGONGUSTOFA_ZENDESK_API_TOKEN', env),
         webhookSecret: requireEnv('SAMGONGUSTOFA_ZENDESK_WEBHOOK_SECRET', env),
       },
-      endpoints: {
-        onesystems: {
-          type: 'onesystems',
-          baseUrl: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_BASE_URL', env),
-          appKey: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_APP_KEY', env),
-          templateFieldId: optionalNumberEnv('SAMGONGUSTOFA_TEMPLATE_FIELD_ID', env),
-          kennitalaFieldId: optionalNumberEnv('SAMGONGUSTOFA_KENNITALA_FIELD_ID', env),
-          caseNumberFieldId: optionalNumberEnv('SAMGONGUSTOFA_CASE_NUMBER_FIELD_ID', env),
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('SAMGONGUSTOFA_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('SAMGONGUSTOFA_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('SAMGONGUSTOFA_KENNITALA_FIELD_ID', env),
+              caseNumberFieldId: optionalNumberEnv('SAMGONGUSTOFA_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('SAMGONGUSTOFA_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Samgöngustofa',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
         },
-      },
-      malaskra: { apiKey: requireEnv('SAMGONGUSTOFA_MALASKRA_API_KEY', env) },
-      pdf: {
-        companyName: 'Samgöngustofa',
-        locale: 'is-IS',
-        includeInternalNotes: false,
       },
     },
     {
@@ -124,21 +136,25 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         apiToken: requireEnv('TRYGGINGASTOFNUN_ZENDESK_API_TOKEN', env),
         webhookSecret: requireEnv('TRYGGINGASTOFNUN_ZENDESK_WEBHOOK_SECRET', env),
       },
-      endpoints: {
-        onesystems: {
-          type: 'onesystems',
-          baseUrl: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_BASE_URL', env),
-          appKey: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_APP_KEY', env),
-          templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_TEMPLATE_FIELD_ID', env),
-          kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_KENNITALA_FIELD_ID', env),
-          caseNumberFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_CASE_NUMBER_FIELD_ID', env),
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('TRYGGINGASTOFNUN_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_KENNITALA_FIELD_ID', env),
+              caseNumberFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Tryggingastofnun',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
         },
-      },
-      malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_MALASKRA_API_KEY', env) },
-      pdf: {
-        companyName: 'Tryggingastofnun',
-        locale: 'is-IS',
-        includeInternalNotes: false,
       },
     },
     {
@@ -150,21 +166,25 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         apiToken: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ZENDESK_API_TOKEN', env),
         webhookSecret: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ZENDESK_WEBHOOK_SECRET', env),
       },
-      endpoints: {
-        onesystems: {
-          type: 'onesystems',
-          baseUrl: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_BASE_URL', env),
-          appKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_APP_KEY', env),
-          templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_TEMPLATE_FIELD_ID', env),
-          kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_KENNITALA_FIELD_ID', env),
-          caseNumberFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_CASE_NUMBER_FIELD_ID', env),
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_KENNITALA_FIELD_ID', env),
+              caseNumberFieldId: optionalNumberEnv('TRYGGINGASTOFNUN_INTERNAL_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Tryggingastofnun',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
         },
-      },
-      malaskra: { apiKey: requireEnv('TRYGGINGASTOFNUN_INTERNAL_MALASKRA_API_KEY', env) },
-      pdf: {
-        companyName: 'Tryggingastofnun',
-        locale: 'is-IS',
-        includeInternalNotes: false,
       },
     },
     {
@@ -176,18 +196,22 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         apiToken: requireEnv('HMS_ZENDESK_API_TOKEN', env),
         webhookSecret: requireEnv('HMS_ZENDESK_WEBHOOK_SECRET', env),
       },
-      endpoints: {
-        onesystems: {
-          type: 'onesystems',
-          baseUrl: requireEnv('HMS_ONESYSTEMS_BASE_URL', env),
-          appKey: requireEnv('HMS_ONESYSTEMS_APP_KEY', env),
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('HMS_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('HMS_ONESYSTEMS_APP_KEY', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('HMS_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'HMS',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
         },
-      },
-      malaskra: { apiKey: requireEnv('HMS_MALASKRA_API_KEY', env) },
-      pdf: {
-        companyName: 'HMS',
-        locale: 'is-IS',
-        includeInternalNotes: false,
       },
     },
   ]

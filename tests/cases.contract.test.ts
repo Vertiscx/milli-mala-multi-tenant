@@ -22,7 +22,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handleCases } from '../src/services/archive/cases.js'
-import type { TenantConfig } from '../src/platform/types.js'
+import type { TenantConfig, EndpointConfig } from '../src/platform/types.js'
 import {
   GW06_OUTCOMES,
   REQ_VALID_CREATE,
@@ -42,7 +42,10 @@ import {
 
 global.fetch = vi.fn() as unknown as typeof fetch
 
-function makeTenantConfig(overrides: Partial<TenantConfig> = {}): TenantConfig {
+function makeTenantConfig(overrides: Partial<Omit<TenantConfig, 'services'>> & {
+  endpoints?: Record<string, EndpointConfig>
+} = {}): TenantConfig {
+  const { endpoints, ...rest } = overrides
   return {
     brand_id: '360001234567',
     name: 'Test Tenant',
@@ -52,17 +55,21 @@ function makeTenantConfig(overrides: Partial<TenantConfig> = {}): TenantConfig {
       apiToken: 'test-token',
       webhookSecret: 'test-webhook-secret'
     },
-    endpoints: {
-      onesystems: {
-        type: 'onesystems',
-        baseUrl: 'https://api.onesystems.test',
-        appKey: 'test-key',
-        caseNumberFieldId: 42
+    services: {
+      archive: {
+        endpoints: endpoints ?? {
+          onesystems: {
+            type: 'onesystems',
+            baseUrl: 'https://api.onesystems.test',
+            appKey: 'test-key',
+            caseNumberFieldId: 42
+          }
+        },
+        malaskra: { apiKey: 'test-malaskra-key' },
+        pdf: { companyName: 'Test Company', locale: 'is-IS', includeInternalNotes: false }
       }
     },
-    malaskra: { apiKey: 'test-malaskra-key' },
-    pdf: { companyName: 'Test Company', locale: 'is-IS', includeInternalNotes: false },
-    ...overrides
+    ...rest
   }
 }
 
