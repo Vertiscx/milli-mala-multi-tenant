@@ -2,8 +2,9 @@
  * GoPro (gopro.net) API Client - handles authentication and document upload
  */
 
-import { createLogger } from '../../platform/logger.js'
+import { createLogger, capBody } from '../../platform/logger.js'
 import type { Logger } from '../../platform/types.js'
+import { fetchWithTimeout } from '../../platform/http.js'
 import type { UploadDocumentParams, DocClient } from './types.js'
 
 const logger: Logger = createLogger('gopro')
@@ -27,7 +28,7 @@ export class GoProClient implements DocClient {
 
   async authenticate(): Promise<void> {
     logger.debug('Authenticating with GoPro')
-    const response = await fetch(`${this.baseUrl}/v2/Authenticate`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/v2/Authenticate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: this.username, password: this.password })
@@ -71,7 +72,7 @@ export class GoProClient implements DocClient {
         content: file.content
       }
 
-      const response = await fetch(`${this.baseUrl}/v2/Documents/Create`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/v2/Documents/Create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -82,7 +83,7 @@ export class GoProClient implements DocClient {
 
       if (!response.ok) {
         const errorText = await response.text()
-        throw new Error(`GoPro upload failed: ${response.status} - ${errorText}`)
+        throw new Error(`GoPro upload failed: ${response.status} - ${capBody(errorText)}`)
       }
 
       const result = await response.json() as Record<string, unknown>

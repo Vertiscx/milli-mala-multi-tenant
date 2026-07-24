@@ -81,6 +81,29 @@ describe('OneSystemsClient', () => {
 
       await expect(client.authenticate()).rejects.toThrow('OneSystems auth failed: 401')
     })
+
+    it('should throw when a 200 auth response contains no token', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ status: 'ok' })
+      })
+
+      await expect(client.authenticate()).rejects.toThrow('no token')
+      // Must NOT look authenticated afterwards — next call re-authenticates
+      expect(client.token).toBeNull()
+      expect(client.tokenExpiry).toBeNull()
+    })
+
+    it('should throw when auth response is an empty string', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        text: async () => ''
+      })
+
+      await expect(client.authenticate()).rejects.toThrow('no token')
+      expect(client.token).toBeNull()
+      expect(client.tokenExpiry).toBeNull()
+    })
   })
 
   describe('ensureAuthenticated', () => {
@@ -218,6 +241,23 @@ describe('OneSystemsClient', () => {
         filename: 'ticket.pdf',
         pdfBuffer: Buffer.from('content')
       })).rejects.toThrow('OneSystems upload failed: 500 - Server error')
+    })
+
+    it('should truncate huge upstream error bodies in thrown errors', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () => '<html>' + 'x'.repeat(50_000) + '</html>'
+      })
+
+      const err = await client.uploadDocument({
+        caseNumber: 'CASE-123',
+        filename: 'ticket.pdf',
+        pdfBuffer: Buffer.from('content')
+      }).catch(e => e as Error)
+      expect(err).toBeInstanceOf(Error)
+      expect(err.message).toContain('OneSystems upload failed: 500')
+      expect(err.message.length).toBeLessThan(3000)
     })
 
     it('should upload attachments as separate AddDocument2 calls after the PDF', async () => {

@@ -2,8 +2,9 @@
  * OneSystems API Client - handles authentication and document upload
  */
 
-import { createLogger } from '../../platform/logger.js'
+import { createLogger, capBody } from '../../platform/logger.js'
 import type { Logger } from '../../platform/types.js'
+import { fetchWithTimeout } from '../../platform/http.js'
 import type { UploadDocumentParams, DocClient, CreateCaseParams, CreateCaseResult } from './types.js'
 
 const logger: Logger = createLogger('onesystems')
@@ -62,7 +63,7 @@ export class OneSystemsClient implements DocClient {
 
   async authenticate(): Promise<void> {
     logger.debug('Authenticating with OneSystems')
-    const response = await fetch(`${this.baseUrl}/api/Authenticate/login`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/Authenticate/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appKey: this.appKey })
@@ -73,9 +74,15 @@ export class OneSystemsClient implements DocClient {
     const text = await response.text()
     let data: unknown
     try { data = JSON.parse(text) } catch { data = text }
-    this.token = typeof data === 'string'
+    const token = typeof data === 'string'
       ? data
       : ((data as Record<string, string>).token || (data as Record<string, string>).accessToken)
+    if (!token) {
+      // A 200 without a token must not mark the client authenticated —
+      // otherwise every call sends "Bearer undefined" until TTL expiry.
+      throw new Error('OneSystems auth response contained no token')
+    }
+    this.token = token
     this.tokenExpiry = Date.now() + this.tokenTtlMs
     logger.info('OneSystems authentication successful')
   }
@@ -141,7 +148,7 @@ export class OneSystemsClient implements DocClient {
 
     logger.info('Uploading to OneSystems', { caseNumber })
 
-    const response = await fetch(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.token}`,
@@ -153,12 +160,12 @@ export class OneSystemsClient implements DocClient {
 
     if (!response.ok) {
       const errorText = await response.text()
-      throw new Error(`OneSystems upload failed: ${response.status} - ${errorText}`)
+      throw new Error(`OneSystems upload failed: ${response.status} - ${capBody(errorText)}`)
     }
 
     logger.info('Upload successful', { caseNumber })
     const pdfResult = await response.json().catch(() => ({ success: true }))
-    logger.info('OneSystems PDF response', { caseNumber, response: pdfResult })
+    logger.info('OneSystems PDF response', { caseNumber, response: capBody(pdfResult) })
 
     // Upload each attachment as a separate call (API accepts one document per request)
     for (const att of attachments) {
@@ -199,7 +206,7 @@ export class OneSystemsClient implements DocClient {
 
       logger.info('Uploading attachment to OneSystems', { caseNumber, filename: att.filename })
 
-      const attResponse = await fetch(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
+      const attResponse = await fetchWithTimeout(`${this.baseUrl}/api/OneRecord/AddDocument2`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.token}`,
@@ -211,12 +218,12 @@ export class OneSystemsClient implements DocClient {
 
       if (!attResponse.ok) {
         const errorText = await attResponse.text()
-        throw new Error(`OneSystems attachment upload failed (${att.filename}): ${attResponse.status} - ${errorText}`)
+        throw new Error(`OneSystems attachment upload failed (${att.filename}): ${attResponse.status} - ${capBody(errorText)}`)
       }
 
       const attResult = await attResponse.json().catch(() => ({ success: true }))
       logger.info('Attachment upload successful', { caseNumber, filename: att.filename })
-      logger.info('OneSystems attachment response', { caseNumber, filename: att.filename, response: attResult })
+      logger.info('OneSystems attachment response', { caseNumber, filename: att.filename, response: capBody(attResult) })
     }
 
     return pdfResult
@@ -246,7 +253,7 @@ export class OneSystemsClient implements DocClient {
 
     logger.info('Creating OneSystems case', { caseTemplate })
 
-    const response = await fetch(`${this.baseUrl}/api/OneRecord/CreateCaseUid`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/OneRecord/CreateCaseUid`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.token}`,
@@ -268,7 +275,7 @@ export class OneSystemsClient implements DocClient {
     }
 
     logger.info('Case created', { caseNumber })
-    logger.info('OneSystems createCase response', { response: res })
+    logger.info('OneSystems createCase response', { response: capBody(res) })
     return { caseNumber, caseTemplate }
   }
 }
