@@ -30,9 +30,13 @@ function tenant(): TenantConfig {
     brand_id: 'B1',
     name: 'T',
     zendesk: { subdomain: 's', email: 'e@x.is', apiToken: 't', webhookSecret: 'w' },
-    endpoints: {},
-    malaskra: { apiKey: 'k' },
-    pdf: { companyName: 'C', locale: 'is-IS', includeInternalNotes: false }
+    services: {
+      archive: {
+        endpoints: {},
+        malaskra: { apiKey: 'k' },
+        pdf: { companyName: 'C', locale: 'is-IS', includeInternalNotes: false }
+      }
+    }
   }
 }
 

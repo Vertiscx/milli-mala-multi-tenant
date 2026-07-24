@@ -4,7 +4,7 @@
  * Behavior-preserving extraction: every stage, ordering, error string,
  * best-effort inner try/catch, and the single post-upload duration_ms
  * computation are reproduced exactly as they were inlined in
- * src/webhook.ts. handleWebhook keeps the auth/freshness/ticket_id gate,
+ * src/services/archive/webhook.ts. handleWebhook keeps the auth/freshness/ticket_id gate,
  * the outer try/catch, startTime, and delegates here.
  *
  * The documentTicket() orchestrator is the reuse seam G3 will compose
@@ -116,7 +116,8 @@ export async function renderPdf(
   userMap: Record<number, string>
 ): Promise<Buffer> {
   return generateTicketPdf(ticket, comments, {
-    pdfConfig: tenantConfig.pdf,
+    // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
+    pdfConfig: tenantConfig.services.archive!.pdf,
     userMap
   })
 }
@@ -382,7 +383,8 @@ export async function writeAudit(args: {
       total_comments: comments.length,
       public_comments: comments.filter(c => c.public !== false).length,
       internal_notes: comments.filter(c => c.public === false).length,
-      internal_notes_included: tenantConfig.pdf.includeInternalNotes,
+      // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
+      internal_notes_included: tenantConfig.services.archive!.pdf.includeInternalNotes,
       total_attachments: attachments.length
     },
     destination: {
@@ -459,7 +461,7 @@ export async function documentTicket(
   // Context captured progressively so the failure-finalize catch can
   // build the richest DocumentationOutcome possible regardless of how
   // far the pipeline got before throwing. The webhook 500 envelope and
-  // src/webhook.ts stay byte-identical — the catch RETHROWS.
+  // src/services/archive/webhook.ts stay byte-identical — the catch RETHROWS.
   let ticket: import('../../platform/types.js').ZendeskTicket | undefined
   let comments: ZendeskComment[] | undefined
   let attachments: DownloadedAttachment[] | undefined
@@ -698,7 +700,7 @@ export async function documentTicket(
     // (before ticket/pdfBuffer exist). recordOutcome/postResultToTicket
     // never throw, but a throw here must not blow up the catch — so the
     // whole failure-finalize is itself wrapped. The original error is
-    // RETHROWN so handleWebhook's 500 envelope + src/webhook.ts stay
+    // RETHROWN so handleWebhook's 500 envelope + src/services/archive/webhook.ts stay
     // byte-identical and control flow is unchanged for existing tests.
     try {
       // WHCC-05: never fabricate ZD- for a createCase-capable client. If

@@ -27,7 +27,7 @@ const logger: Logger = createLogger('attachments')
  * Verify the X-Api-Key header against the tenant's malaskra API key.
  */
 function verifyApiKey(headers: Record<string, string>, tenantConfig: TenantConfig): boolean {
-  const key = tenantConfig.malaskra.apiKey
+  const key = tenantConfig.services.archive?.malaskra?.apiKey
   if (!key) return false
   const provided = headers['x-api-key']
   if (!provided) return false
@@ -45,6 +45,10 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
   const brandId = tenantConfig.brand_id
 
   try {
+    // Reachable for archive-less or old-shape tenant configs (services missing) — return the same neutral 400 as an unknown tenant.
+    const archive = tenantConfig.services?.archive
+    if (!archive) return { status: 400, body: { error: 'Invalid request' } }
+
     // Auth check
     if (!verifyApiKey(headers, tenantConfig)) {
       return { status: 401, body: { error: 'Invalid or missing API key' } }

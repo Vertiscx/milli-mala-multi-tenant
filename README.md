@@ -47,7 +47,7 @@ Each Zendesk brand maps to a tenant. The caller sends `brand_id` and `doc_endpoi
 
 ### Tenant config structure
 
-The `TenantConfig` shape is the same regardless of where it's stored — see `src/types.ts` for the canonical definition. A populated example:
+The `TenantConfig` shape is the same regardless of where it's stored — see `src/platform/types.ts` for the shared core fields and `src/services/archive/types.ts` for the archive-specific fields. A populated example:
 
 ```ts
 {
