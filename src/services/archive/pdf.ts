@@ -279,17 +279,40 @@ export function parseHtmlToBlocks(html: string | null | undefined): PdfBlock[] {
   return blocks
 }
 
+// Named entities we decode to their real character. Covers the HTML
+// basics plus the full Latin-1 letter set — every Icelandic letter
+// (þ ð æ ö á é í ó ú ý and uppercase) MUST survive into the archived
+// PDF; entity-encoded mail (e.g. from Outlook) arrives this way.
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú', yacute: 'ý',
+  Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú', Yacute: 'Ý',
+  thorn: 'þ', THORN: 'Þ', eth: 'ð', ETH: 'Ð', aelig: 'æ', AElig: 'Æ',
+  ouml: 'ö', Ouml: 'Ö', auml: 'ä', Auml: 'Ä', euml: 'ë', Euml: 'Ë',
+  iuml: 'ï', Iuml: 'Ï', uuml: 'ü', Uuml: 'Ü',
+  agrave: 'à', Agrave: 'À', egrave: 'è', Egrave: 'È',
+  igrave: 'ì', Igrave: 'Ì', ograve: 'ò', Ograve: 'Ò', ugrave: 'ù', Ugrave: 'Ù',
+  acirc: 'â', Acirc: 'Â', ecirc: 'ê', Ecirc: 'Ê', icirc: 'î', Icirc: 'Î',
+  ocirc: 'ô', Ocirc: 'Ô', ucirc: 'û', Ucirc: 'Û',
+  aring: 'å', Aring: 'Å', oslash: 'ø', Oslash: 'Ø',
+  atilde: 'ã', Atilde: 'Ã', ntilde: 'ñ', Ntilde: 'Ñ', otilde: 'õ', Otilde: 'Õ',
+  ccedil: 'ç', Ccedil: 'Ç', szlig: 'ß', yuml: 'ÿ'
+}
+
 function decodeEntities(text: string): string {
-  return text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, '/')
-    .replace(/&[#\w]+;/g, ' ')
+  // Single pass: numeric entities (decimal + hex) decode via code point,
+  // named entities via the map, and anything unrecognized is blanked to
+  // a space (the pre-existing catch-all behavior).
+  return text.replace(/&(#[xX]?[0-9a-fA-F]+|\w+);/g, (_m, body: string) => {
+    if (body[0] === '#') {
+      const isHex = body[1] === 'x' || body[1] === 'X'
+      const code = parseInt(body.slice(isHex ? 2 : 1), isHex ? 16 : 10)
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : ' '
+    }
+    return NAMED_ENTITIES[body] ?? ' '
+  })
 }
 
 // ─── Rich Text Renderer ──────────────────────────────────────────────
