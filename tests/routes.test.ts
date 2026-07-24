@@ -65,6 +65,18 @@ describe('archiveRoutes', () => {
     ])
   })
 
+  it('dispatches /v1/attachments into the handler when doc_endpoint is present', async () => {
+    const route = archiveRoutes.find(r => r.path === '/v1/attachments')!
+    const req: GatewayRequest = {
+      body: { doc_endpoint: 'onesystems' },
+      rawBody: '{"doc_endpoint":"onesystems"}',
+      headers: {},
+      tenantConfig: makeTenantConfig(),
+    }
+    const result = await route.handler(req)
+    expect(result).toEqual({ status: 401, body: { error: 'Invalid or missing API key' } })
+  })
+
   it.each(['/v1/webhook', '/v1/attachments', '/v1/cases'])(
     'returns 400 Missing doc_endpoint for %s without calling through, when doc_endpoint is absent',
     async (path) => {
