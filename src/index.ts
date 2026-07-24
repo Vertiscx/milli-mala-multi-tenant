@@ -12,14 +12,13 @@
 import { timingSafeEqual, createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { getConfig } from './platform/config.js'
-import { handleWebhook } from './services/archive/webhook.js'
-import { handleAttachments } from './services/archive/attachments.js'
-import { handleCases } from './services/archive/cases.js'
+import { findRoute, type ServiceRoute } from './platform/http/routes.js'
+import { archiveRoutes } from './services/archive/routes.js'
 import { FileTenantStore, resolveTenantConfig, sanitizeAuditParam } from './platform/tenant.js'
 import { loadTenants } from './tenants.config.js'
 import { FileAuditStore } from './platform/fileAuditStore.js'
 import { createLogger } from './platform/logger.js'
-import type { TenantConfig, Logger } from './platform/types.js'
+import type { Logger } from './platform/types.js'
 
 export { handleWebhook, verifyWebhookSignature, isTimestampFresh } from './services/archive/webhook.js'
 export { handleAttachments } from './services/archive/attachments.js'
@@ -70,9 +69,10 @@ function handleHealth(_req: IncomingMessage, res: ServerResponse): void {
   sendJson(res, 200, { status: 'ok', service: 'milli-mala', version: '2.0.0', timestamp: new Date().toISOString() })
 }
 
-async function handleWebhookHttp(
+async function dispatchServiceRoute(
   req: IncomingMessage,
   res: ServerResponse,
+  route: ServiceRoute,
   tenantStore: FileTenantStore,
   auditStore: FileAuditStore
 ): Promise<void> {
@@ -85,82 +85,16 @@ async function handleWebhookHttp(
       return sendJson(res, 400, { error: 'Invalid JSON body' })
     }
     const brandId = body.brand_id != null ? String(body.brand_id) : undefined
-    const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
-
     if (!brandId) return sendJson(res, 400, { error: 'Missing brand_id' })
-    if (!docEndpoint) return sendJson(res, 400, { error: 'Missing doc_endpoint' })
 
     const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
     if (!tenantConfig) return sendJson(res, 400, { error: 'Invalid request' })
 
     const headers = req.headers as Record<string, string>
-    const result = await handleWebhook({ body, rawBody, headers, tenantConfig, docEndpoint, auditStore })
+    const result = await route.handler({ body, rawBody, headers, tenantConfig, auditStore })
     sendJson(res, result.status, result.body)
   } catch (error) {
     logger.error('HTTP handler error', { error: (error as Error).message })
-    sendJson(res, 500, { error: 'Internal server error' })
-  }
-}
-
-async function handleAttachmentsHttp(
-  req: IncomingMessage,
-  res: ServerResponse,
-  tenantStore: FileTenantStore
-): Promise<void> {
-  try {
-    const rawBody = await getRequestBody(req, MAX_BODY_SIZE)
-    let body: Record<string, unknown>
-    try {
-      body = JSON.parse(rawBody) as Record<string, unknown>
-    } catch {
-      return sendJson(res, 400, { error: 'Invalid JSON body' })
-    }
-    const brandId = body.brand_id != null ? String(body.brand_id) : undefined
-    const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
-
-    if (!brandId) return sendJson(res, 400, { error: 'Missing brand_id' })
-    if (!docEndpoint) return sendJson(res, 400, { error: 'Missing doc_endpoint' })
-
-    const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
-    if (!tenantConfig) return sendJson(res, 400, { error: 'Invalid request' })
-
-    const headers = req.headers as Record<string, string>
-    const result = await handleAttachments({ body, headers, tenantConfig, docEndpoint })
-    sendJson(res, result.status, result.body)
-  } catch (error) {
-    logger.error('Attachments handler error', { error: (error as Error).message })
-    sendJson(res, 500, { error: 'Internal server error' })
-  }
-}
-
-async function handleCasesHttp(
-  req: IncomingMessage,
-  res: ServerResponse,
-  tenantStore: FileTenantStore,
-  auditStore: FileAuditStore
-): Promise<void> {
-  try {
-    const rawBody = await getRequestBody(req, MAX_BODY_SIZE)
-    let body: Record<string, unknown>
-    try {
-      body = JSON.parse(rawBody) as Record<string, unknown>
-    } catch {
-      return sendJson(res, 400, { error: 'Invalid JSON body' })
-    }
-    const brandId = body.brand_id != null ? String(body.brand_id) : undefined
-    const docEndpoint = body.doc_endpoint != null ? String(body.doc_endpoint) : undefined
-
-    if (!brandId) return sendJson(res, 400, { error: 'Missing brand_id' })
-    if (!docEndpoint) return sendJson(res, 400, { error: 'Missing doc_endpoint' })
-
-    const tenantConfig = await resolveTenantConfig(brandId, tenantStore)
-    if (!tenantConfig) return sendJson(res, 400, { error: 'Invalid request' })
-
-    const headers = req.headers as Record<string, string>
-    const result = await handleCases({ body, headers, tenantConfig, docEndpoint, auditStore })
-    sendJson(res, result.status, result.body)
-  } catch (error) {
-    logger.error('Cases handler error', { error: (error as Error).message })
     sendJson(res, 500, { error: 'Internal server error' })
   }
 }
@@ -215,10 +149,10 @@ function startServer(): void {
     const url = new URL(req.url!, `http://localhost:${port}`)
 
     if (url.pathname === '/v1/health' && req.method === 'GET') return handleHealth(req, res)
-    if (url.pathname === '/v1/webhook' && req.method === 'POST') return handleWebhookHttp(req, res, tenantStore, auditStore)
-    if (url.pathname === '/v1/attachments' && req.method === 'POST') return handleAttachmentsHttp(req, res, tenantStore)
-    if (url.pathname === '/v1/cases' && req.method === 'POST') return handleCasesHttp(req, res, tenantStore, auditStore)
     if (url.pathname === '/v1/audit' && req.method === 'GET') return handleAuditHttp(req, res, url, auditStore, config.auditSecret)
+
+    const route = req.method === 'POST' ? findRoute(archiveRoutes, req.method, url.pathname) : undefined
+    if (route) return dispatchServiceRoute(req, res, route, tenantStore, auditStore)
 
     sendJson(res, 404, { error: 'Not found' })
   })
