@@ -10,11 +10,11 @@
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
-import { handleWebhook } from './webhook.js'
-import { handleAttachments } from './attachments.js'
-import { handleCases } from './cases.js'
-import { KvTenantStore, resolveTenantConfig, sanitizeAuditParam } from './tenant.js'
-import type { AuditStore } from './types.js'
+import { handleWebhook } from './services/archive/webhook.js'
+import { handleAttachments } from './services/archive/attachments.js'
+import { handleCases } from './services/archive/cases.js'
+import { KvTenantStore, resolveTenantConfig, sanitizeAuditParam } from './platform/tenant.js'
+import type { AuditStore } from './platform/types.js'
 
 interface CfEnv {
   TENANT_KV?: { get(key: string, format?: string): Promise<string | null> }

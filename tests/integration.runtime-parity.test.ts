@@ -26,7 +26,7 @@ import { request as httpRequest, type Server } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { createHmac } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
-import type { AuditStore } from '../src/types.js'
+import type { AuditStore } from '../src/platform/types.js'
 
 // Capture the http.Server that src/index.ts creates on import. node:http is
 // ESM (non-configurable namespace) so we cannot vi.spyOn createServer; instead

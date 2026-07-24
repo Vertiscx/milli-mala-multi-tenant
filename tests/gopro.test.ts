@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { GoProClient } from '../src/gopro.js'
+import { GoProClient } from '../src/services/archive/gopro.js'
 
 // Mock fetch globally
 global.fetch = vi.fn() as unknown as typeof fetch

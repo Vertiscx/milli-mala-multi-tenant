@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { loadTenants } from '../src/tenants.config.js'
-import { validateTenantConfig } from '../src/tenant.js'
+import { validateTenantConfig } from '../src/platform/tenant.js'
 
 /**
  * Deterministic, fixture-only secret generator. Produces a value of exact

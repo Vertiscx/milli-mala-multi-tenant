@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ZendeskClient } from '../src/zendesk.js'
+import { ZendeskClient } from '../src/platform/zendesk.js'
 
 // Mock fetch globally
 global.fetch = vi.fn() as unknown as typeof fetch

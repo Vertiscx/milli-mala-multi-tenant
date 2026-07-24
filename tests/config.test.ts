@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { getConfig, resetConfig } from '../src/config.js'
+import { getConfig, resetConfig } from '../src/platform/config.js'
 
 describe('Config Module', () => {
   const savedEnv = { ...process.env }

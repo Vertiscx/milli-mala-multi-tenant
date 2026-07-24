@@ -5,7 +5,8 @@
 
 import { OneSystemsClient } from './onesystems.js'
 import { GoProClient } from './gopro.js'
-import type { EndpointConfig, DocClient } from './types.js'
+import type { EndpointConfig } from '../../platform/types.js'
+import type { DocClient } from './types.js'
 
 /**
  * Build a DocClient from an EndpointConfig.

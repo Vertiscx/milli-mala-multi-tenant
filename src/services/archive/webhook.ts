@@ -4,9 +4,10 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { createLogger } from './logger.js'
+import { createLogger } from '../../platform/logger.js'
 import { documentTicket } from './documentTicket.js'
-import type { HandlerResult, WebhookRequest, Logger } from './types.js'
+import type { HandlerResult, Logger } from '../../platform/types.js'
+import type { WebhookRequest } from './types.js'
 
 const logger: Logger = createLogger('webhook')
 

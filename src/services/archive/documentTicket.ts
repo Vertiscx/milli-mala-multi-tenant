@@ -11,24 +11,26 @@
  * with G2's createCase — but G1 wires nothing new.
  */
 
-import { ZendeskClient } from './zendesk.js'
+import { ZendeskClient } from '../../platform/zendesk.js'
 import { generateTicketPdf } from './pdf.js'
-import { createLogger } from './logger.js'
-import { resolveEndpoint, validateCaseNumber } from './tenant.js'
+import { createLogger } from '../../platform/logger.js'
+import { resolveEndpoint, validateCaseNumber } from '../../platform/tenant.js'
 import { createDocClient } from './docClient.js'
 import type { OneSystemsClient } from './onesystems.js'
 import type {
   HandlerResult,
-  WebhookRequest,
   TenantConfig,
   EndpointConfig,
   ZendeskTicket,
   ZendeskComment,
   ZendeskUser,
-  DocClient,
   DownloadedAttachment,
   AuditStore,
   Logger
+} from '../../platform/types.js'
+import type {
+  WebhookRequest,
+  DocClient
 } from './types.js'
 
 const logger: Logger = createLogger('documentTicket')
@@ -458,7 +460,7 @@ export async function documentTicket(
   // build the richest DocumentationOutcome possible regardless of how
   // far the pipeline got before throwing. The webhook 500 envelope and
   // src/webhook.ts stay byte-identical — the catch RETHROWS.
-  let ticket: import('./types.js').ZendeskTicket | undefined
+  let ticket: import('../../platform/types.js').ZendeskTicket | undefined
   let comments: ZendeskComment[] | undefined
   let attachments: DownloadedAttachment[] | undefined
   let failedAttachments: { filename: string; reason: string }[] | undefined
@@ -762,7 +764,7 @@ export async function documentTicket(
           // happened before fetchTicketInfo resolved — fall back to
           // minimal stand-ins so writeAudit/postResultToTicket can still
           // emit the ❌ note + last_status=failed.
-          ticket: ticket ?? ({ id: ticketId, subject: '', status: '', created_at: '' } as import('./types.js').ZendeskTicket),
+          ticket: ticket ?? ({ id: ticketId, subject: '', status: '', created_at: '' } as import('../../platform/types.js').ZendeskTicket),
           comments: comments ?? [],
           attachments: attachments ?? [],
           pdfBuffer: pdfBuffer ?? Buffer.alloc(0),
