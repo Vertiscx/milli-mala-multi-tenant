@@ -73,9 +73,15 @@ export class OneSystemsClient implements DocClient {
     const text = await response.text()
     let data: unknown
     try { data = JSON.parse(text) } catch { data = text }
-    this.token = typeof data === 'string'
+    const token = typeof data === 'string'
       ? data
       : ((data as Record<string, string>).token || (data as Record<string, string>).accessToken)
+    if (!token) {
+      // A 200 without a token must not mark the client authenticated —
+      // otherwise every call sends "Bearer undefined" until TTL expiry.
+      throw new Error('OneSystems auth response contained no token')
+    }
+    this.token = token
     this.tokenExpiry = Date.now() + this.tokenTtlMs
     logger.info('OneSystems authentication successful')
   }
