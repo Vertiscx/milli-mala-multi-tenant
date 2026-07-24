@@ -226,8 +226,18 @@ export async function recordOutcome(
       auditStore: ctx.auditStore
     }
     auditArgs.attachmentsForwarded = o.ok ? ctx.attachments.length : 0
-    // Webhook path → no enrichment (byte-identical persisted entry).
-    if (o.intent !== 'webhook') {
+    // Webhook SUCCESS path → no enrichment (byte-identical persisted
+    // entry). Webhook FAILURES are enriched like every other intent —
+    // without it the entry defaults to event 'ticket_archived' for a run
+    // that failed. Failures already owned by a more specific webhook
+    // branch below (phase-6 'created', phase-7 loud-fail rejects) keep
+    // their own event names and MUST NOT be swallowed here.
+    const loudFailReject =
+      o.outcome === 'missing_template' ||
+      o.outcome === 'missing_kennitala' ||
+      o.outcome === 'missing_case_number_field_config'
+    if (o.intent !== 'webhook' ||
+        (!o.ok && o.caseNumberSource !== 'created' && !loudFailReject)) {
       auditArgs.event = o.outcome === 'documented' ? 'ticket_archived'
         : o.outcome === 'orphan_case' ? 'orphan_case'
         : o.outcome

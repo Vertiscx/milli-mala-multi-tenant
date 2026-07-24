@@ -380,6 +380,73 @@ describe('documentTicket extraction — risk hardening', () => {
     expect(result.status).toBe(500)
     expect(result.body.error).toBe('Internal server error')
   })
+
+  // ─── review H2: failed webhook run must not audit as ticket_archived ──
+  // Post-WHCC-05, an empty case-number field 422s before reaching the doc
+  // system, so this documents into a POPULATED field (fieldedTicket) to
+  // keep exercising the classic pipeline-failure path.
+  it('webhook failure path: persisted audit entry is NOT ticket_archived', async () => {
+    const f = global.fetch as ReturnType<typeof vi.fn>
+    f
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: fieldedTicket }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ comments: [{ id: 1, body: 'Hi', public: true, author_id: 100 }] })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ users: [{ id: 100, name: 'A', email: 'a@test.com' }] })
+      })
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      // OneSystems upload → FAILS (postToCase throws)
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'upload boom' })
+      // GW-01 failure post-back PUT
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
+
+    const captured: string[] = []
+    const auditStore: AuditStore = {
+      put: vi.fn(async (_key: string, value: string) => { captured.push(value) }),
+      get: vi.fn(),
+      list: vi.fn()
+    }
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeFieldedTenant(), auditStore })
+    const result = await handleWebhook(req)
+
+    // Precondition: the run genuinely failed
+    expect(result.status).toBe(500)
+
+    // The persisted audit entry must record the failure, not archival
+    expect(captured.length).toBeGreaterThan(0)
+    const e = JSON.parse(captured[0])
+    expect(e.event).not.toBe('ticket_archived')
+    expect(e.event).toBe('failed')
+    expect(e.outcome).toBe('failed')
+    expect(e.last_status).toBe('FAILED')
+    expect(e.intent).toBe('webhook')
+    expect(e.last_export).toBeUndefined()
+    expect(e.destination.attachments_forwarded).toBe(0)
+  })
+
+  it('webhook SUCCESS path: persisted audit entry stays byte-identical (no enrichment keys)', async () => {
+    mockHappyFetchSequence({ ticket: fieldedTicket })
+    const captured: string[] = []
+    const auditStore: AuditStore = {
+      put: vi.fn(async (_key: string, value: string) => { captured.push(value) }),
+      get: vi.fn(),
+      list: vi.fn()
+    }
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeFieldedTenant(), auditStore })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    expect(captured.length).toBeGreaterThan(0)
+    const e = JSON.parse(captured[0])
+    // Exact key set of today's persisted webhook entry — order included.
+    expect(Object.keys(e)).toEqual([
+      'event', 'timestamp', 'duration_ms', 'brand_id', 'source', 'destination'
+    ])
+    expect(e.event).toBe('ticket_archived')
+  })
 })
 
 // ─── resolveCreateInputs — webhook create input extraction (CONF-01/02) ──
