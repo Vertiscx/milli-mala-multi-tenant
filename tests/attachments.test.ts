@@ -332,6 +332,94 @@ describe('handleAttachments', () => {
     expect((result.body.errors as any[])[0].filename).toBe('b.pdf')
   })
 
+  it('should report failure when all attachment downloads fail', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 400, brand_id: 360001234567 } })
+      })
+      // getTicketComments - two attachments
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          comments: [{
+            id: 1,
+            body: 'Files',
+            attachments: [
+              { file_name: 'a.pdf', content_type: 'application/pdf', size: 100, content_url: 'https://test.zendesk.com/att/a' },
+              { file_name: 'b.pdf', content_type: 'application/pdf', size: 200, content_url: 'https://test.zendesk.com/att/b' }
+            ]
+          }]
+        })
+      })
+      // download a - fails
+      .mockResolvedValueOnce({ ok: false, status: 403 })
+      // download b - fails
+      .mockResolvedValueOnce({ ok: false, status: 403 })
+
+    const result = await handleAttachments({
+      body: { ticket_id: 400, case_number: 'C-400' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+
+    expect(result.body.success).toBe(false)
+    expect(result.body.attachments_forwarded).toBe(0)
+    expect(result.body.attachments_total).toBe(2)
+    expect(result.body.errors).toHaveLength(2)
+    expect((result.body.errors as any[])[0].error).toContain('download')
+  })
+
+  it('should include download failures alongside upload results', async () => {
+    const fakeFileBuffer = Buffer.from('data')
+
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      // getTicket
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 401, brand_id: 360001234567 } })
+      })
+      // getTicketComments - two attachments
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          comments: [{
+            id: 1,
+            body: 'Files',
+            attachments: [
+              { file_name: 'a.pdf', content_type: 'application/pdf', size: 100, content_url: 'https://test.zendesk.com/att/a' },
+              { file_name: 'b.pdf', content_type: 'application/pdf', size: 200, content_url: 'https://test.zendesk.com/att/b' }
+            ]
+          }]
+        })
+      })
+      // download a - succeeds
+      .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => fakeFileBuffer.buffer })
+      // download b - fails
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      // OneSystems auth
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'tok' }) })
+      // Upload a - success
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
+
+    const result = await handleAttachments({
+      body: { ticket_id: 401, case_number: 'C-401' },
+      headers: { 'x-api-key': 'test-malaskra-key' },
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+
+    expect(result.status).toBe(200)
+    expect(result.body.success).toBe(false)
+    expect(result.body.attachments_forwarded).toBe(1)
+    expect(result.body.attachments_total).toBe(2)
+    expect(result.body.errors).toHaveLength(1)
+    expect((result.body.errors as any[])[0].filename).toBe('b.pdf')
+    expect((result.body.errors as any[])[0].error).toContain('download')
+  })
+
   // ─── case_number sanitization (SYN-MUT-28-3) ──────────────────────
 
   it('should reject case_number longer than 100 characters', async () => {
