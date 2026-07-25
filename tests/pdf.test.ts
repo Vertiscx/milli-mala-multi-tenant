@@ -149,6 +149,34 @@ describe('parseHtmlToBlocks', () => {
     expect(blocks[0].runs[0].text).toBe('& < > "')
   })
 
+  it('should decode Icelandic named entities', () => {
+    const blocks = parseHtmlToBlocks('J&oacute;n &THORN;&oacute;r &aelig;tlar a&eth; hj&aacute;lpa &Ouml;ssuri')
+    expect(blocks[0].runs[0].text).toBe('Jón Þór ætlar að hjálpa Össuri')
+  })
+
+  it('should decode all Icelandic letters as named entities', () => {
+    const blocks = parseHtmlToBlocks(
+      '&aacute;&eth;&eacute;&iacute;&oacute;&uacute;&yacute;&thorn;&aelig;&ouml; ' +
+      '&Aacute;&ETH;&Eacute;&Iacute;&Oacute;&Uacute;&Yacute;&THORN;&AElig;&Ouml;'
+    )
+    expect(blocks[0].runs[0].text).toBe('áðéíóúýþæö ÁÐÉÍÓÚÝÞÆÖ')
+  })
+
+  it('should decode decimal and hex numeric entities', () => {
+    const blocks = parseHtmlToBlocks('&#254;&#240;&#230;&#246; &#xDE;&#xD0;&#xC6;&#xD6;')
+    expect(blocks[0].runs[0].text).toBe('þðæö ÞÐÆÖ')
+  })
+
+  it('should still blank unknown entities rather than render them raw', () => {
+    const blocks = parseHtmlToBlocks('a&unknownentity;b')
+    expect(blocks[0].runs[0].text).toBe('a b')
+  })
+
+  it('should blank numeric entities outside the valid code-point range', () => {
+    const blocks = parseHtmlToBlocks('a&#0;b&#x110000;c')
+    expect(blocks[0].runs[0].text).toBe('a b c')
+  })
+
   it('should handle links with href', () => {
     const blocks = parseHtmlToBlocks('<a href="https://example.com">click here</a>')
     expect(blocks).toHaveLength(1)
