@@ -116,12 +116,17 @@ milli-mala-multi-tenant/
 - `src/gopro.ts:10-98`: `GoProClient` class. `authenticate`, `uploadDocument` (per-file loop, no `createCase`).
 
 **Documentation pipeline (shared stages):**
-- `src/documentTicket.ts:51-104`: `fetchTicketInfo` — owns the brand cross-check.
-- `src/documentTicket.ts:109-119`: `renderPdf`.
-- `src/documentTicket.ts:126-145`: `resolveCaseNumber` (webhook path; uses `ep.caseNumberFieldId` or `ZD-${ticketId}`).
-- `src/documentTicket.ts:153-170`: `postToCase` — single `docClient.uploadDocument` call.
-- `src/documentTicket.ts:177-259`: `writeAudit` — best-effort 2-key KV write, 90-day TTL.
-- `src/documentTicket.ts:274-414`: `documentTicket` orchestrator (webhook-only full pipeline).
+- `src/services/archive/documentTicket.ts`: thin orchestrator — composes the `pipeline/` stages in the same order as the original inline pipeline; re-exports the stage functions as the stable public seam for `cases.ts` and tests.
+- `src/services/archive/pipeline/` — one module per pipeline stage:
+  - `fetch.ts`: `fetchTicketInfo` — owns the brand cross-check (fail-closed 403) and the best-effort author-resolution lookup.
+  - `render.ts`: `renderPdf`.
+  - `caseNumber.ts`: `resolveCaseNumber` (webhook path; `ep.caseNumberFieldId` or `ZD-${ticketId}` fallback) + `resolveCreateInputs`/`readCaseNumberField` for the webhook-create gate.
+  - `deliver.ts`: `postToCase` — single `docClient.uploadDocument` call.
+  - `createFlow.ts`: `runWebhookCreateFlow` — the webhook create branch (template/kennitala/config 422 loud-fail rejects, mint → stamp → upload, post-mint 207 orphan-case handling).
+  - `audit.ts`: `writeAudit` + `standardEnrichment` — best-effort 2-key KV write, 90-day TTL.
+  - `finalize.ts`: `finalizeWebhookFailure` — outer-catch GW-01 failure post-back, extracted verbatim from `documentTicket.ts`'s former catch body.
+
+Audit events are declared by outcome producers (`auditEnrichment`), never inferred by recordOutcome.
 
 **Post-back (GW-01 finalization):**
 - `src/postResultToTicket.ts:60-84`: `buildNote` (Icelandic ✅/❌ template).

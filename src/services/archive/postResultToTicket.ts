@@ -14,7 +14,7 @@
  */
 
 import { ZendeskClient } from '../../platform/zendesk.js'
-import { writeAudit } from './documentTicket.js'
+import { writeAudit } from './pipeline/audit.js'
 import { createLogger } from '../../platform/logger.js'
 import type {
   EndpointConfig,
@@ -226,53 +226,19 @@ export async function recordOutcome(
       auditStore: ctx.auditStore
     }
     auditArgs.attachmentsForwarded = o.ok ? ctx.attachments.length : 0
-    // Webhook path → no enrichment (byte-identical persisted entry).
-    if (o.intent !== 'webhook') {
-      auditArgs.event = o.outcome === 'documented' ? 'ticket_archived'
-        : o.outcome === 'orphan_case' ? 'orphan_case'
-        : o.outcome
-      auditArgs.outcome = o.outcome
-      // WR-01: never persist a source claim for an ABSENT case number.
-      // cases.ts passes caseNumberSource 'created' on create_failed (the
-      // create INTENT), but nothing was minted — persisting
-      // case_number: null + case_number_source: 'created' is semantically
-      // false. Normalize to 'none' whenever o.caseNumber is undefined so
-      // the persisted pair stays coherent (matches writeAudit's own
-      // absent-caseNumber derivation).
-      auditArgs.caseNumberSource =
-        o.caseNumber === undefined ? 'none' : o.caseNumberSource
-      auditArgs.intent = o.intent
-      auditArgs.lastStatus = o.outcome === 'documented' ? 'OK'
-        : o.outcome === 'orphan_case' ? 'ORPHAN'
-        : 'FAILED'
-      if (o.outcome === 'documented') auditArgs.lastExport = o.timestamp
-    } else if (o.caseNumberSource === 'created') {
-      // Phase 6 webhook create path: without this, writeAudit would derive
-      // 'custom_field' for a One-minted number (!startsWith('ZD-')). The
-      // populated-field and fallback webhook entries stay byte-identical
-      // (their o.caseNumberSource never equals 'created', so this branch
-      // cannot fire for them).
-      auditArgs.caseNumberSource = 'created'
-      // Orphan (207) entries are NET-NEW this phase, so enriching them
-      // breaks no pre-existing shape: persist the outcome key so operators
-      // can find orphaned cases in the audit store (MD-01). Success create
-      // entries (outcome 'documented') gain NO new keys.
-      if (o.outcome === 'orphan_case') {
-        auditArgs.outcome = o.outcome
-      }
-    } else if (
-      o.outcome === 'missing_template' ||
-      o.outcome === 'missing_kennitala' ||
-      o.outcome === 'missing_case_number_field_config'
-    ) {
-      // Phase 7 loud-fail webhook rejects (WHCC-05, AUDIT-01/02): one
-      // shared greppable event, distinguished by the per-mode outcome.
-      // NET-NEW entries — enriching them breaks no pre-existing shape;
-      // existing webhook entries (documented/orphan_case/failed) gain NO
-      // new keys.
-      auditArgs.event = 'webhook_create_rejected'
-      auditArgs.outcome = o.outcome
-      auditArgs.caseNumberSource = 'none'
+    // The PRODUCER of the outcome declares its audit enrichment
+    // (o.auditEnrichment). Absent → no enrichment keys: the persisted
+    // entry keeps the legacy byte-identical webhook-success shape.
+    // recordOutcome performs NO inference — see pipeline/audit.ts
+    // standardEnrichment() for the standard key set.
+    const e = o.auditEnrichment
+    if (e) {
+      if (e.event !== undefined) auditArgs.event = e.event
+      if (e.outcome !== undefined) auditArgs.outcome = e.outcome
+      if (e.caseNumberSource !== undefined) auditArgs.caseNumberSource = e.caseNumberSource
+      if (e.lastStatus !== undefined) auditArgs.lastStatus = e.lastStatus
+      if (e.lastExport !== undefined) auditArgs.lastExport = e.lastExport
+      if (e.intent !== undefined) auditArgs.intent = e.intent
     }
     await writeAudit(auditArgs)
   } catch (err) {

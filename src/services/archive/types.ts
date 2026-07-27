@@ -30,6 +30,22 @@ export interface CreateCaseResult {
 // ─── Documentation Outcome (GW-01 finalization seam) ─────────────────
 
 /**
+ * Explicit audit-entry enrichment, DECLARED by the code path that
+ * produces the DocumentationOutcome — recordOutcome never infers it.
+ * Absent (undefined) means "no enrichment": the persisted entry keeps
+ * the legacy byte-identical webhook-success shape (no extra keys).
+ * Key names mirror writeAudit's optional args 1:1.
+ */
+export interface AuditEnrichment {
+  event?: string
+  outcome?: string
+  caseNumberSource?: string
+  lastStatus?: string
+  lastExport?: string
+  intent?: string
+}
+
+/**
  * Typed object built by each pipeline path at its terminal point and
  * passed once to recordOutcome(). Carries everything writeAudit +
  * postResultToTicket need; no path-specific branching downstream.
@@ -53,6 +69,7 @@ export interface DocumentationOutcome {
   sanitizedReason?: string
   timestamp: string
   auditRef?: string
+  auditEnrichment?: AuditEnrichment
 }
 
 // ─── Handler Types ───────────────────────────────────────────────────
