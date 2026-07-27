@@ -81,6 +81,29 @@ describe('OneSystemsClient', () => {
 
       await expect(client.authenticate()).rejects.toThrow('OneSystems auth failed: 401')
     })
+
+    it('should throw when a 200 auth response contains no token', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ status: 'ok' })
+      })
+
+      await expect(client.authenticate()).rejects.toThrow('no token')
+      // Must NOT look authenticated afterwards — next call re-authenticates
+      expect(client.token).toBeNull()
+      expect(client.tokenExpiry).toBeNull()
+    })
+
+    it('should throw when auth response is an empty string', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        text: async () => ''
+      })
+
+      await expect(client.authenticate()).rejects.toThrow('no token')
+      expect(client.token).toBeNull()
+      expect(client.tokenExpiry).toBeNull()
+    })
   })
 
   describe('ensureAuthenticated', () => {

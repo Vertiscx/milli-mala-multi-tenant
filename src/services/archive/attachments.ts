@@ -142,8 +142,9 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
     // 2. Fetch attachments from Zendesk
     const comments = await zendesk.getTicketComments(ticketId)
     const attachments = await zendesk.fetchAttachments(comments)
+    const downloadFailures = attachments.failed ?? []
 
-    if (attachments.length === 0) {
+    if (attachments.length === 0 && downloadFailures.length === 0) {
       logger.info('No attachments found on ticket', { brand_id: brandId, ticketId })
       await finalizePostBack(ep, ticket, comments, attachments, 0, 0, [])
       return {
@@ -163,7 +164,11 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
     const docClient = createDocClient(ep)
 
     let forwarded = 0
-    const errors: { filename: string; error: string }[] = []
+    // Seed with download failures so they are reported the same way as
+    // upload failures (response errors, ❌ note, failed-attachments list).
+    const errors: { filename: string; error: string }[] = downloadFailures.map(
+      f => ({ filename: f.filename, error: `download failed: ${f.reason}` })
+    )
 
     for (const att of attachments) {
       try {
@@ -181,15 +186,16 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
       }
     }
 
+    const total = attachments.length + downloadFailures.length
     const duration = Date.now() - startTime
     logger.info('Attachment forwarding complete', {
       brand_id: brandId, ticketId, caseNumber, docEndpoint,
       doc_system: ep.type,
-      total: attachments.length, forwarded, failed: errors.length, duration_ms: duration
+      total, forwarded, failed: errors.length, duration_ms: duration
     })
 
     await finalizePostBack(
-      ep, ticket, comments, attachments, forwarded, attachments.length,
+      ep, ticket, comments, attachments, forwarded, total,
       errors.map(e => ({ filename: e.filename, reason: e.error }))
     )
 
@@ -202,7 +208,7 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
         case_number: caseNumber,
         doc_endpoint: docEndpoint,
         doc_system: ep.type,
-        attachments_total: attachments.length,
+        attachments_total: total,
         attachments_forwarded: forwarded,
         errors: errors.length > 0 ? errors : undefined,
         duration_ms: duration
