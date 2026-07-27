@@ -80,4 +80,28 @@ describe('all HTTP clients pass a timeout signal', () => {
     const init = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
     expect(init.signal).toBeInstanceOf(AbortSignal)
   })
+
+  it('ZendeskClient.fetchAttachments uses a timeout signal for the download', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(8)
+    })
+    const client = new ZendeskClient('sub', 'token', 'a@b.c')
+    await client.fetchAttachments([
+      {
+        id: 1,
+        attachments: [
+          {
+            id: 101,
+            file_name: 'doc.pdf',
+            content_url: 'https://sub.zendesk.com/attachments/101',
+            content_type: 'application/pdf',
+            size: 8
+          }
+        ]
+      }
+    ] as any)
+    const init = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
 })

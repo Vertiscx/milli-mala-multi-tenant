@@ -140,7 +140,7 @@ export class ZendeskClient {
           failed.push({ filename: att.file_name, reason: 'non-Zendesk URL' })
           continue
         }
-        const response = await fetch(att.content_url, {
+        const response = await fetchWithTimeout(att.content_url, {
           headers: { 'Authorization': `Basic ${this.auth}` }
         })
         if (!response.ok) {
