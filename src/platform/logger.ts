@@ -33,3 +33,17 @@ export function createLogger(component: string): Logger {
     error: (msg: string, data?: Record<string, unknown>) => log('error', msg, data)
   }
 }
+
+/**
+ * Cap upstream response bodies before they enter log lines or Error
+ * messages — doc systems can return multi-KB HTML error pages, and
+ * successful responses may carry case metadata that has no business
+ * being persisted unbounded in logs.
+ */
+const BODY_LOG_CAP = 2048
+export function capBody(v: unknown): string {
+  const s = typeof v === 'string' ? v : JSON.stringify(v)
+  return s && s.length > BODY_LOG_CAP
+    ? `${s.slice(0, BODY_LOG_CAP)}… [truncated ${s.length - BODY_LOG_CAP} chars]`
+    : s ?? ''
+}

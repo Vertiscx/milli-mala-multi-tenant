@@ -194,6 +194,23 @@ describe('GoProClient', () => {
       })).rejects.toThrow('GoPro upload failed: 500 - Server error')
     })
 
+    it('should truncate huge upstream error bodies in thrown errors', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () => 'x'.repeat(50_000)
+      })
+
+      const err = await client.uploadDocument({
+        caseNumber: 'CASE-123',
+        filename: 'ticket.pdf',
+        pdfBuffer: Buffer.from('content')
+      }).catch(e => e as Error)
+      expect(err).toBeInstanceOf(Error)
+      expect(err.message).toContain('GoPro upload failed: 500')
+      expect(err.message.length).toBeLessThan(3000)
+    })
+
     it('should throw when succeeded is false', async () => {
       ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
