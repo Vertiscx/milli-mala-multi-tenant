@@ -54,10 +54,46 @@ describe('ZendeskClient', () => {
       ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: false,
         status: 404,
-        statusText: 'Not Found'
+        statusText: 'Not Found',
+        text: async () => ''
       })
 
       await expect(client.getTicket(999)).rejects.toThrow('Zendesk API error')
+    })
+
+    it('should include the response body in thrown errors (statusText is empty over HTTP/2)', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        statusText: '',
+        text: async () => '{"error":"RecordInvalid","description":"custom field 42 is invalid"}'
+      })
+
+      await expect(client.getTicket(1)).rejects.toThrow(/422.*custom field 42 is invalid/)
+    })
+
+    it('should truncate very large error bodies', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: '',
+        text: async () => 'x'.repeat(10_000)
+      })
+
+      const err = await client.getTicket(1).catch(e => e as Error)
+      expect(err).toBeInstanceOf(Error)
+      expect(err.message.length).toBeLessThan(1000)
+    })
+
+    it('should still throw when reading the error body itself fails', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: '',
+        text: async () => { throw new Error('stream reset') }
+      })
+
+      await expect(client.getTicket(1)).rejects.toThrow('Zendesk API error: 502')
     })
   })
 
