@@ -216,6 +216,36 @@ describe('validateTenantConfig', () => {
 
   // ─── baseUrl validation ─────────────────────────────────────────────
 
+  it('should strip a trailing slash from baseUrl', () => {
+    const tenant = makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://api.onesystems.test/', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
+      }
+    })
+    validateTenantConfig(tenant)
+    expect(tenant.services!.archive!.endpoints.onesystems!.baseUrl).toBe('https://api.onesystems.test')
+  })
+
+  it('should strip multiple trailing slashes from baseUrl', () => {
+    const tenant = makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://api.onesystems.test/base///', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
+      }
+    })
+    validateTenantConfig(tenant)
+    expect(tenant.services!.archive!.endpoints.onesystems!.baseUrl).toBe('https://api.onesystems.test/base')
+  })
+
+  it('should leave a clean baseUrl unchanged', () => {
+    const tenant = makeValidTenant({
+      endpoints: {
+        onesystems: { type: 'onesystems', baseUrl: 'https://api.onesystems.test/base', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' }
+      }
+    })
+    validateTenantConfig(tenant)
+    expect(tenant.services!.archive!.endpoints.onesystems!.baseUrl).toBe('https://api.onesystems.test/base')
+  })
+
   it('should reject HTTP baseUrl (requires HTTPS)', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {

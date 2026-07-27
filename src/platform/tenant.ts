@@ -272,6 +272,10 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
       if ((err as Error).message.startsWith('Endpoint')) throw err
       throw new Error(`Endpoint "${name}": invalid baseUrl "${ep.baseUrl}"`)
     }
+    // Normalize: strip trailing slashes so `${baseUrl}/api/...` joins
+    // cleanly — a configured trailing slash produced double-slash URLs
+    // that 404'd every upload (staging incident, 2026-05).
+    ep.baseUrl = ep.baseUrl.replace(/\/+$/, '')
   }
 
   if (ep.type === 'onesystems') {
