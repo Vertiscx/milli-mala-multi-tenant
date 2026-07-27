@@ -289,6 +289,28 @@ describe('handleCases', () => {
     expect(result.body.caseNumber).toBe('OS-2')
   })
 
+  // (11b) orphan_case must not leak raw downstream error text to the client
+  it('orphan_case 207 body carries a generic error, not the upstream response', async () => {
+    mockTicketPrelude()
+    fetchMock()
+      .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ token: 'os' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ caseNumber: 'OS-2' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) })
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'internal-host.example secret stack trace' })
+
+    const result = await handleCases({
+      body: { ticket_id: 123, create: NS_CREATE },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).toBe(207)
+    expect(typeof result.body.error).toBe('string')
+    expect(result.body.error).not.toContain('internal-host')
+    expect(result.body.error).not.toContain('secret')
+    expect(result.body.error).not.toContain('OneSystems upload failed')
+  })
+
   // (12) case_number path upload fail → generic 500, NOT a GW-06 outcome
   it('case_number path upload fail → 500 { error,duration_ms } no ok/outcome/caseNumber, no CreateCaseUid', async () => {
     mockTicketPrelude()
