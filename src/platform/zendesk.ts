@@ -3,6 +3,7 @@
  */
 
 import { createLogger } from './logger.js'
+import { fetchWithTimeout } from './http.js'
 import type { ZendeskTicket, ZendeskComment, ZendeskUser, DownloadedAttachment, AttachmentsResult, Logger } from './types.js'
 
 const logger: Logger = createLogger('zendesk')
@@ -17,7 +18,7 @@ export class ZendeskClient {
   }
 
   async request(endpoint: string): Promise<Record<string, unknown>> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
       headers: { 'Authorization': `Basic ${this.auth}`, 'Content-Type': 'application/json' }
     })
     if (!response.ok) {
@@ -31,7 +32,7 @@ export class ZendeskClient {
     method: 'PUT' | 'POST',
     body: unknown
   ): Promise<Record<string, unknown>> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
       method,
       headers: { 'Authorization': `Basic ${this.auth}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -120,7 +121,7 @@ export class ZendeskClient {
             failed.push({ filename: att.file_name, reason: 'non-Zendesk URL' })
             continue
           }
-          const response = await fetch(att.content_url, {
+          const response = await fetchWithTimeout(att.content_url, {
             headers: { 'Authorization': `Basic ${this.auth}` }
           })
           if (!response.ok) {

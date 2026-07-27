@@ -4,6 +4,7 @@
 
 import { createLogger } from '../../platform/logger.js'
 import type { Logger } from '../../platform/types.js'
+import { fetchWithTimeout } from '../../platform/http.js'
 import type { UploadDocumentParams, DocClient } from './types.js'
 
 const logger: Logger = createLogger('gopro')
@@ -27,7 +28,7 @@ export class GoProClient implements DocClient {
 
   async authenticate(): Promise<void> {
     logger.debug('Authenticating with GoPro')
-    const response = await fetch(`${this.baseUrl}/v2/Authenticate`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/v2/Authenticate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: this.username, password: this.password })
@@ -71,7 +72,7 @@ export class GoProClient implements DocClient {
         content: file.content
       }
 
-      const response = await fetch(`${this.baseUrl}/v2/Documents/Create`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/v2/Documents/Create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
