@@ -34,6 +34,7 @@ import { resolveEndpoint, validateCaseNumber } from '../../platform/tenant.js'
 import { createDocClient } from './docClient.js'
 import { fetchTicketInfo, renderPdf, postToCase } from './documentTicket.js'
 import { recordOutcome } from './postResultToTicket.js'
+import { standardEnrichment } from './pipeline/audit.js'
 import type { OneSystemsClient } from './onesystems.js'
 import type { HandlerResult, TenantConfig, AuditStore, Logger, EndpointConfig } from '../../platform/types.js'
 import type { DocumentationOutcome } from './types.js'
@@ -204,23 +205,22 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         // SEPARATE catch — distinct from the inner steps-4-5 catch and the
         // outer 500. Nothing was minted, so NO created_case_number.
         logger.error('createCase failed', { brand_id: brandId, ticketId, error: (err as Error).message })
-        await finalize(
-          {
-            ok: false,
-            outcome: 'create_failed',
-            intent: 'create',
-            caseNumberSource: 'created',
-            docSystem: ep.type,
-            ticketId,
-            durationMs: Date.now() - startTime,
-            pdfFilename: `ticket-${ticketId}.pdf`,
-            pdfSizeBytes: pdfBuffer.length,
-            failedAttachments,
-            sanitizedReason: 'Stofnun máls mistókst',
-            timestamp: new Date().toISOString()
-          },
-          ep
-        )
+        const o: DocumentationOutcome = {
+          ok: false,
+          outcome: 'create_failed',
+          intent: 'create',
+          caseNumberSource: 'created',
+          docSystem: ep.type,
+          ticketId,
+          durationMs: Date.now() - startTime,
+          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfSizeBytes: pdfBuffer.length,
+          failedAttachments,
+          sanitizedReason: 'Stofnun máls mistókst',
+          timestamp: new Date().toISOString()
+        }
+        o.auditEnrichment = standardEnrichment(o)
+        await finalize(o, ep)
         return {
           status: 502,
           body: { ok: false, outcome: 'create_failed', error: 'Case creation failed' }
@@ -262,27 +262,26 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         logger.error('Post-create step failed — orphan case', {
           brand_id: brandId, ticketId, caseNumber: createdCaseNumber, error: (err as Error).message
         })
-        await finalize(
-          {
-            ok: false,
-            outcome: 'orphan_case',
-            intent: 'create',
-            caseNumber: createdCaseNumber,
-            caseNumberSource: 'created',
-            docSystem: ep.type,
-            // orphan_case: case# is NOT re-written by the post-back
-            // (the step-4 stamp already owns the field). Only the
-            // status field + note are written via finalize.
-            ticketId,
-            durationMs: Date.now() - startTime,
-            pdfFilename: `ticket-${ticketId}.pdf`,
-            pdfSizeBytes: pdfBuffer.length,
-            failedAttachments,
-            sanitizedReason: 'Skjalfesting eftir stofnun máls mistókst',
-            timestamp: new Date().toISOString()
-          },
-          ep
-        )
+        const o: DocumentationOutcome = {
+          ok: false,
+          outcome: 'orphan_case',
+          intent: 'create',
+          caseNumber: createdCaseNumber,
+          caseNumberSource: 'created',
+          docSystem: ep.type,
+          // orphan_case: case# is NOT re-written by the post-back
+          // (the step-4 stamp already owns the field). Only the
+          // status field + note are written via finalize.
+          ticketId,
+          durationMs: Date.now() - startTime,
+          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfSizeBytes: pdfBuffer.length,
+          failedAttachments,
+          sanitizedReason: 'Skjalfesting eftir stofnun máls mistókst',
+          timestamp: new Date().toISOString()
+        }
+        o.auditEnrichment = standardEnrichment(o)
+        await finalize(o, ep)
         return {
           status: 207,
           body: {
@@ -300,24 +299,23 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
       // GW-01 finalizer fires here (terminal failure) so the agent sees a
       // ❌ note + last_status. The HTTP 500 envelope from the OUTER catch
       // is UNCHANGED — finalize is a best-effort side-effect only.
-      await finalize(
-        {
-          ok: false,
-          outcome: 'failed',
-          intent: 'case_number',
-          caseNumber,
-          caseNumberSource: 'provided',
-          docSystem: ep.type,
-          ticketId,
-          durationMs: Date.now() - startTime,
-          pdfFilename: `ticket-${ticketId}.pdf`,
-          pdfSizeBytes: pdfBuffer.length,
-          failedAttachments,
-          sanitizedReason: 'Skjalfesting í fyrirliggjandi mál mistókst',
-          timestamp: new Date().toISOString()
-        },
-        ep
-      )
+      const o: DocumentationOutcome = {
+        ok: false,
+        outcome: 'failed',
+        intent: 'case_number',
+        caseNumber,
+        caseNumberSource: 'provided',
+        docSystem: ep.type,
+        ticketId,
+        durationMs: Date.now() - startTime,
+        pdfFilename: `ticket-${ticketId}.pdf`,
+        pdfSizeBytes: pdfBuffer.length,
+        failedAttachments,
+        sanitizedReason: 'Skjalfesting í fyrirliggjandi mál mistókst',
+        timestamp: new Date().toISOString()
+      }
+      o.auditEnrichment = standardEnrichment(o)
+      await finalize(o, ep)
       // Rethrow to the OUTER catch → generic 500. NOT orphan_case, NO
       // created_case_number, no 8th code.
       throw err
@@ -326,25 +324,24 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     // 6. Success
     const duration = Date.now() - startTime
     const lastExport = new Date().toISOString()
-    await finalize(
-      {
-        ok: true,
-        outcome: 'documented',
-        intent: hasCreate ? 'create' : 'case_number',
-        caseNumber,
-        caseNumberSource: hasCreate ? 'created' : 'provided',
-        docSystem: ep.type,
-        // templateFieldId written ONLY on the OneSystems create path.
-        template: hasCreate ? createdTemplate : undefined,
-        ticketId,
-        durationMs: duration,
-        pdfFilename: `ticket-${ticketId}.pdf`,
-        pdfSizeBytes: pdfBuffer.length,
-        failedAttachments,
-        timestamp: lastExport
-      },
-      ep
-    )
+    const o: DocumentationOutcome = {
+      ok: true,
+      outcome: 'documented',
+      intent: hasCreate ? 'create' : 'case_number',
+      caseNumber,
+      caseNumberSource: hasCreate ? 'created' : 'provided',
+      docSystem: ep.type,
+      // templateFieldId written ONLY on the OneSystems create path.
+      template: hasCreate ? createdTemplate : undefined,
+      ticketId,
+      durationMs: duration,
+      pdfFilename: `ticket-${ticketId}.pdf`,
+      pdfSizeBytes: pdfBuffer.length,
+      failedAttachments,
+      timestamp: lastExport
+    }
+    o.auditEnrichment = standardEnrichment(o)
+    await finalize(o, ep)
     logger.info('Cases request complete', {
       brand_id: brandId, ticketId, docEndpoint, doc_system: ep.type,
       caseNumber, created: hasCreate, last_status: 'OK', last_export: lastExport
