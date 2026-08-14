@@ -30,10 +30,10 @@ Milli-mala acts as a DMZ gateway — Zendesk and Malaskra never see archive cred
 ### Tech stack
 
 - **Language**: TypeScript (strict mode)
-- **Runtime**: Cloudflare Workers (primary), Node.js / Docker / K8s also supported
+- **Runtime**: Node.js 20 in a Docker container — this is what runs in production. Cloudflare Workers and K8s are also supported by the codebase but are not deployed.
 - **PDF**: jsPDF (CF Workers compatible, no filesystem needed)
 - **Audit**: Cloudflare KV (Workers) or file-based store (Docker/Node.js), 90-day TTL
-- **Tests**: Vitest (170+ tests)
+- **Tests**: Vitest (400+ tests across 22 files)
 - **License**: Apache 2.0
 
 ## Multi-tenant design
