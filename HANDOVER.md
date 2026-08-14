@@ -27,6 +27,7 @@ Málaskrá app    ──→  (container)  ──→ (OneSystems / GoPro)
 |--------|------|------|--------|
 | `POST` | `/v1/webhook` | Zendesk HMAC-SHA256 | Sækir miða, býr til PDF, sendir í skjalakerfi |
 | `POST` | `/v1/attachments` | `X-Api-Key` header | Sendir viðhengi í skjalakerfi (kallað frá Málaskrá) |
+| `POST` | `/v1/cases` | `X-Api-Key` header | Stofnar mál í skjalakerfi (kallað frá Málaskrá) |
 | `GET` | `/v1/health` | Ekkert | Health check |
 | `GET` | `/v1/audit` | Bearer token | Audit log fyrirspurnir (valkvæmt) |
 
@@ -42,7 +43,7 @@ Allar nauðsynlegar umhverfisbreytur eru taldar upp í `.env.example`. Vanti ein
 
 **Rotation:** Engin kóðabreyting. DevOps uppfærir umhverfisbreytuna og endurræsir gáminn.
 
-Hvernig gögn eru send í skjalakerfi er skilgreint í módúlum per kerfi (`onesystems.ts`, `gopro.ts`) — allar stofnanir á sama skjalakerfi fá sama format.
+Hvernig gögn eru send í skjalakerfi er skilgreint í módúlum per kerfi (`src/services/archive/onesystems.ts`, `src/services/archive/gopro.ts`) — allar stofnanir á sama skjalakerfi fá sama format.
 
 ## Logging
 
@@ -75,7 +76,7 @@ Engin önnur netumferð. Engin inbound tenging við innri net.
 | Engin leyndarmál í kóða | Allt kemur úr tenant config |
 | Almenn villuboð | Engir stacktrace eða leyndarmál í svörum |
 
-170+ unit tests, `npm audit` sýnir enga þekkta veikleika. SBOM (CycloneDX) fylgir í repo.
+400+ unit tests í 22 skrám, `npm audit` sýnir enga þekkta veikleika. SBOM (CycloneDX) fylgir í repo.
 
 ## X-Road
 
@@ -92,6 +93,6 @@ Dependencies:     1 (jsPDF, MIT leyfi)
 Gagnagrunnur:     Enginn
 Geymsla:          Engin (valkvæður audit log)
 Tenant config:    src/tenants.config.ts + umhverfisbreytur
-Tests:            170+
+Tests:            400+
 Leyfi:            Apache 2.0
 ```
