@@ -48,18 +48,18 @@ Compatibility date pinned to `2024-09-23` (`wrangler.toml:3`).
 ## Key Dependencies
 
 **Critical (runtime — there is exactly one):**
-- **jspdf** ^4.1.0 — pure-JS PDF renderer. The ONLY production dependency. Used by `src/pdf.ts` to render Zendesk tickets to A4 PDFs (`new jsPDF({ unit: 'pt', format: 'a4' })`, `doc.text`, `doc.setFont('helvetica', …)`, `doc.output('arraybuffer')`). jsPDF runs in both Node and the Workers V8 isolate without polyfills; everything else the gateway needs (HTTP, crypto, base64) comes from Node built-ins or Workers globals.
+- **jspdf** ^4.1.0 — pure-JS PDF renderer. The ONLY production dependency. Used by `src/services/archive/pdf.ts` to render Zendesk tickets to A4 PDFs (`new jsPDF({ unit: 'pt', format: 'a4' })`, `doc.text`, `doc.setFont('helvetica', …)`, `doc.output('arraybuffer')`). jsPDF runs in both Node and the Workers V8 isolate without polyfills; everything else the gateway needs (HTTP, crypto, base64) comes from Node built-ins or Workers globals.
 
 **Standard library (no package, but load-bearing):**
-- `node:crypto` — `createHmac` for Zendesk webhook signature verification (`src/webhook.ts:6,21-25`); `timingSafeEqual` + `createHash` for constant-time API-key and bearer-token checks (`src/attachments.ts:9,29-33`, `src/cases.ts:31,47-55`, `src/index.ts:12,179-181`).
+- `node:crypto` — `createHmac` for Zendesk webhook signature verification (`src/services/archive/webhook.ts:6,21-25`); `timingSafeEqual` + `createHash` for constant-time API-key and bearer-token checks (`src/services/archive/attachments.ts:9,29-33`, `src/services/archive/cases.ts:31,47-55`, `src/index.ts:12,179-181`).
 - `node:http` — Node entrypoint server (`src/index.ts:13,214`).
-- `node:fs/promises` — `FileAuditStore` reads/writes JSON files for the Docker audit store (`src/fileAuditStore.ts:7`).
-- `node:path` — `join` for audit file paths (`src/fileAuditStore.ts:8`).
+- `node:fs/promises` — `FileAuditStore` reads/writes JSON files for the Docker audit store (`src/platform/fileAuditStore.ts:7`).
+- `node:path` — `join` for audit file paths (`src/platform/fileAuditStore.ts:8`).
 - Global `fetch` (Node 20+ and Workers) — every outbound HTTP call (Zendesk API, OneSystems, GoPro, Zendesk attachment downloads) uses native `fetch` directly; no axios/got/undici-wrapper.
 
 **Infrastructure (Cloudflare bindings — declared in `wrangler.toml`, not in `package.json`):**
-- KV namespace **`TENANT_KV`** — tenant config store keyed by `tenant:<brand_id>` (`src/tenant.ts:48-58` `KvTenantStore`).
-- KV namespace **`AUDIT_LOG`** — append-only audit entries keyed by `audit:<brand_id>:<ts>:<ticket_id>` and `ticket:<brand_id>:<ticket_id>:<ts>` with `expirationTtl: 90 * 24 * 60 * 60` (90 days) (`src/documentTicket.ts:242-258`).
+- KV namespace **`TENANT_KV`** — tenant config store keyed by `tenant:<brand_id>` (`src/platform/tenant.ts:48-58` `KvTenantStore`).
+- KV namespace **`AUDIT_LOG`** — append-only audit entries keyed by `audit:<brand_id>:<ts>:<ticket_id>` and `ticket:<brand_id>:<ticket_id>:<ts>` with `expirationTtl: 90 * 24 * 60 * 60` (90 days) (`src/services/archive/documentTicket.ts:242-258`).
 - Secret **`AUDIT_SECRET`** — bearer token gating `GET /v1/audit` (set via `wrangler secret put AUDIT_SECRET`).
 
 **Development:**
@@ -69,14 +69,14 @@ Compatibility date pinned to `2024-09-23` (`wrangler.toml:3`).
 
 **Environment:**
 
-Two runtimes use two different config-loading strategies, but the data shape (`TenantConfig` from `src/types.ts:7-14`) is identical:
+Two runtimes use two different config-loading strategies, but the data shape (`TenantConfig` from `src/platform/types.ts:7-12`) is identical:
 
 | Target | Where tenants come from | Where secrets come from |
 |--------|------------------------|-------------------------|
-| Node / Docker / ECS | `loadTenants()` in `src/tenants.config.ts` builds a hard-coded array of two tenants and pulls every credential through `requireEnv(NAME)` (`src/env.ts:12-21` — throws if missing/empty, fails the container at startup) | Flat env vars, one set per tenant, prefixed by tenant slug (`KERFISSTJORN_*`, `VINNUEFTIRLIT_*`). Template in `.env.example`. |
-| Cloudflare Workers | `KvTenantStore.get('tenant:<brand_id>')` reads JSON from the `TENANT_KV` binding (`src/tenant.ts:41-58`) | Embedded in the KV JSON blob (Zendesk credentials, doc-system credentials, malaskra apiKey) + the worker-level `AUDIT_SECRET` set via `wrangler secret put` |
+| Node / Docker / ECS | `loadTenants()` in `src/tenants.config.ts` builds a hard-coded array of two tenants and pulls every credential through `requireEnv(NAME)` (`src/platform/env.ts:12-21` — throws if missing/empty, fails the container at startup) | Flat env vars, one set per tenant, prefixed by tenant slug (`KERFISSTJORN_*`, `VINNUEFTIRLIT_*`). Template in `.env.example`. |
+| Cloudflare Workers | `KvTenantStore.get('tenant:<brand_id>')` reads JSON from the `TENANT_KV` binding (`src/platform/tenant.ts:41-58`) | Embedded in the KV JSON blob (Zendesk credentials, doc-system credentials, malaskra apiKey) + the worker-level `AUDIT_SECRET` set via `wrangler secret put` |
 
-Instance-level (non-tenant) config is read once from `process.env` by `getConfig()` in `src/config.ts:17-30`: `PORT` (default 8080), `LOG_LEVEL` (default `info`), `AUDIT_SECRET` (default empty → 401 on `/v1/audit`).
+Instance-level (non-tenant) config is read once from `process.env` by `getConfig()` in `src/platform/config.ts:17-30`: `PORT` (default 8080), `LOG_LEVEL` (default `info`), `AUDIT_SECRET` (default empty → 401 on `/v1/audit`).
 
 The Node entrypoint also honours `AUDIT_DIR` (default `./audit-data`) for the `FileAuditStore` (`src/index.ts:212`).
 

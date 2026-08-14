@@ -34,9 +34,9 @@ There is no `lint` script. There is no `pretest` typecheck hook — run `npm run
 **Location:** `tests/` at the repo root, **not** co-located with sources. `tsconfig.json:20` explicitly excludes `tests` from the emitted build.
 
 **Naming:** `<source>.test.ts` mirroring the file under test:
-- `tests/onesystems.test.ts` → `src/onesystems.ts`
-- `tests/gopro.test.ts` → `src/gopro.ts`
-- `tests/cases.test.ts` → `src/cases.ts`
+- `tests/onesystems.test.ts` → `src/services/archive/onesystems.ts`
+- `tests/gopro.test.ts` → `src/services/archive/gopro.ts`
+- `tests/cases.test.ts` → `src/services/archive/cases.ts`
 
 **Qualified suffixes** for specialized test kinds:
 - `tests/cases.contract.test.ts` — frozen GW-06 wire-contract lock (cross-repo fixture consumer)
@@ -179,7 +179,7 @@ Variant builders (`goproTenantConfig()` in `tests/cases.contract.test.ts:69-75`)
 `tests/fixtures/gw06-contract.fixtures.ts` is **the** authoritative wire-contract fixture set for GW-06. Key properties:
 
 1. **No vitest imports** — plain TS data, framework-agnostic.
-2. **Derived from `.planning` / GW-06 specs, NOT from `src/cases.ts`.** Every value has a `GW-06 L<n>` or `CTX L<n>` line cite in a comment. Sourcing from the implementation would be circular (test asserts implementation matches itself).
+2. **Derived from `.planning` / GW-06 specs, NOT from `src/services/archive/cases.ts`.** Every value has a `GW-06 L<n>` or `CTX L<n>` line cite in a comment. Sourcing from the implementation would be circular (test asserts implementation matches itself).
 3. **Vendored byte-identical** into the malaskra_v3 repo, which asserts its tolerant zod parser accepts every RESPONSE fixture and rejects every invalid REQUEST fixture. Both ends testing the same fixtures proves the cross-repo seam without wiring the systems.
 4. The frozen 7-outcome enum `GW06_OUTCOMES` is a readonly `as const` tuple — order-pinned. Tests assert `RESPONSE_FIXTURES_GW06.map(f => f.body.outcome)` equals it 1:1.
 
@@ -247,7 +247,7 @@ Sequential `mockResolvedValueOnce` chain — auth first, then operation. Pre-set
 
 ### 2. `tests/cases.test.ts` — add scenarios through the gateway
 
-If the new adapter supports `createCase`, add a `documented` happy-path test through `handleCases`. If it doesn't, the existing `RES_GOPRO_CREATE_UNSUPPORTED` path covers it generically (the duck-typed capability check in `src/cases.ts:178-180` means any adapter without `createCase` falls through to 422 automatically).
+If the new adapter supports `createCase`, add a `documented` happy-path test through `handleCases`. If it doesn't, the existing `RES_GOPRO_CREATE_UNSUPPORTED` path covers it generically (the duck-typed capability check in `src/services/archive/cases.ts:178-180` means any adapter without `createCase` falls through to 422 automatically).
 
 ### 3. `tests/cases.contract.test.ts` — usually NO change
 
@@ -286,7 +286,7 @@ expect(parsed.caseNumber).toBe('CASE-123')
 Don't try to parse multipart bodies — `expect(callBody).toContain('name="<field>"')` plus `expect(callBody).toContain('<expected value>')` is the convention (`tests/onesystems.test.ts:151-161`).
 
 ### Error-precedence tests
-When two errors could fire, write a test that triggers BOTH conditions and asserts which wins. Reference the comment in `src/documentTicket.ts:311-314` for the rationale.
+When two errors could fire, write a test that triggers BOTH conditions and asserts which wins. Reference the comment in `src/services/archive/documentTicket.ts:311-314` for the rationale.
 
 ### Best-effort assertions
 For best-effort side-effects (audit, GW-01 finalizer), test BOTH branches: the side-effect succeeds and updates state; the side-effect throws and is swallowed, leaving the HTTP response unchanged. `tests/postResultToTicket.test.ts` is the template.

@@ -94,7 +94,7 @@ milli-mala-multi-tenant/
 - `.env.example`: Template of all `requireEnv` keys consumed by `src/tenants.config.ts`.
 
 **Configuration (runtime):**
-- `src/config.ts`: Instance-level singleton (`port`, `logLevel`, `auditSecret`). Built once from `process.env`.
+- `src/platform/config.ts`: Instance-level singleton (`port`, `logLevel`, `auditSecret`). Built once from `process.env`.
 - `src/tenants.config.ts`: The list of tenants and which env vars supply their secrets. **Edit here when onboarding a new tenant (Node deploy).**
 - `tenants.json`: Local seed file used by `DEPLOYMENT.md` instructions to bulk-write to `TENANT_KV` for the Workers deploy. Contains secrets → gitignored, never read at runtime.
 
@@ -103,52 +103,52 @@ milli-mala-multi-tenant/
 - `src/index.ts:217-221`: Node route table (same paths).
 
 **Tenant resolution + validation:**
-- `src/tenant.ts:41-58`: `KvTenantStore` (CF path).
-- `src/tenant.ts:62-77`: `FileTenantStore` (Node path).
-- `src/tenant.ts:86-106`: `resolveTenantConfig` — single fail-closed entry point.
-- `src/tenant.ts:112-158`: `validateTenantConfig` + `validateEndpoint` (SSRF guard, subdomain pattern).
-- `src/tenant.ts:203-209`: `resolveEndpoint` — `tenantConfig.endpoints[docEndpoint]` lookup.
-- `src/tenant.ts:225-230`: `validateCaseNumber` — applies to `case_number` on the wire.
+- `src/platform/tenant.ts:41-58`: `KvTenantStore` (CF path).
+- `src/platform/tenant.ts:62-77`: `FileTenantStore` (Node path).
+- `src/platform/tenant.ts:86-106`: `resolveTenantConfig` — single fail-closed entry point.
+- `src/platform/tenant.ts:112-158`: `validateTenantConfig` + `validateEndpoint` (SSRF guard, subdomain pattern).
+- `src/platform/tenant.ts:203-209`: `resolveEndpoint` — `tenantConfig.endpoints[docEndpoint]` lookup.
+- `src/platform/tenant.ts:225-230`: `validateCaseNumber` — applies to `case_number` on the wire.
 
 **Doc-system adapters + factory:**
-- `src/docClient.ts:14-30`: `createDocClient(ep, user?)` — **THE ONLY `ep.type` switch.**
-- `src/onesystems.ts:45-210`: `OneSystemsClient` class. `authenticate`, `uploadDocument` (multipart), `createCase` (JSON).
-- `src/gopro.ts:10-98`: `GoProClient` class. `authenticate`, `uploadDocument` (per-file loop, no `createCase`).
+- `src/services/archive/docClient.ts:14-30`: `createDocClient(ep, user?)` — **THE ONLY `ep.type` switch.**
+- `src/services/archive/onesystems.ts:45-210`: `OneSystemsClient` class. `authenticate`, `uploadDocument` (multipart), `createCase` (JSON).
+- `src/services/archive/gopro.ts:10-98`: `GoProClient` class. `authenticate`, `uploadDocument` (per-file loop, no `createCase`).
 
 **Documentation pipeline (shared stages):**
-- `src/documentTicket.ts:51-104`: `fetchTicketInfo` — owns the brand cross-check.
-- `src/documentTicket.ts:109-119`: `renderPdf`.
-- `src/documentTicket.ts:126-145`: `resolveCaseNumber` (webhook path; uses `ep.caseNumberFieldId` or `ZD-${ticketId}`).
-- `src/documentTicket.ts:153-170`: `postToCase` — single `docClient.uploadDocument` call.
-- `src/documentTicket.ts:177-259`: `writeAudit` — best-effort 2-key KV write, 90-day TTL.
-- `src/documentTicket.ts:274-414`: `documentTicket` orchestrator (webhook-only full pipeline).
+- `src/services/archive/documentTicket.ts:51-104`: `fetchTicketInfo` — owns the brand cross-check.
+- `src/services/archive/documentTicket.ts:109-119`: `renderPdf`.
+- `src/services/archive/documentTicket.ts:126-145`: `resolveCaseNumber` (webhook path; uses `ep.caseNumberFieldId` or `ZD-${ticketId}`).
+- `src/services/archive/documentTicket.ts:153-170`: `postToCase` — single `docClient.uploadDocument` call.
+- `src/services/archive/documentTicket.ts:177-259`: `writeAudit` — best-effort 2-key KV write, 90-day TTL.
+- `src/services/archive/documentTicket.ts:274-414`: `documentTicket` orchestrator (webhook-only full pipeline).
 
 **Post-back (GW-01 finalization):**
-- `src/postResultToTicket.ts:60-84`: `buildNote` (Icelandic ✅/❌ template).
-- `src/postResultToTicket.ts:97-110`: `buildLastStatusValue` (compact JSON v1 cross-repo contract).
-- `src/postResultToTicket.ts:122-149`: `buildCustomFields` (reads per-endpoint field IDs).
-- `src/postResultToTicket.ts:156-195`: `postResultToTicket` — single atomic PUT, never throws.
-- `src/postResultToTicket.ts:205-244`: `recordOutcome` — once-per-request finalizer (writeAudit + postResultToTicket).
+- `src/services/archive/postResultToTicket.ts:60-84`: `buildNote` (Icelandic ✅/❌ template).
+- `src/services/archive/postResultToTicket.ts:97-110`: `buildLastStatusValue` (compact JSON v1 cross-repo contract).
+- `src/services/archive/postResultToTicket.ts:122-149`: `buildCustomFields` (reads per-endpoint field IDs).
+- `src/services/archive/postResultToTicket.ts:156-195`: `postResultToTicket` — single atomic PUT, never throws.
+- `src/services/archive/postResultToTicket.ts:205-244`: `recordOutcome` — once-per-request finalizer (writeAudit + postResultToTicket).
 
 **Zendesk client:**
-- `src/zendesk.ts:14-16`: Constructor + basic-auth header.
-- `src/zendesk.ts:19-27`: `request` (GET).
-- `src/zendesk.ts:29-43`: `requestWrite` (PUT/POST) — used by GW-01 post-back.
-- `src/zendesk.ts:45-55`: `setTicketCustomField` — one-field PUT helper.
-- `src/zendesk.ts:57-76`: `getTicket`, `getTicketComments`, `getUser`, `getUsersMany`.
-- `src/zendesk.ts:78+`: `fetchAttachments` (downloads with `failed[]` sidecar).
+- `src/platform/zendesk.ts:14-16`: Constructor + basic-auth header.
+- `src/platform/zendesk.ts:19-27`: `request` (GET).
+- `src/platform/zendesk.ts:29-43`: `requestWrite` (PUT/POST) — used by GW-01 post-back.
+- `src/platform/zendesk.ts:45-55`: `setTicketCustomField` — one-field PUT helper.
+- `src/platform/zendesk.ts:57-76`: `getTicket`, `getTicketComments`, `getUser`, `getUsersMany`.
+- `src/platform/zendesk.ts:78+`: `fetchAttachments` (downloads with `failed[]` sidecar).
 
 **PDF:**
-- `src/pdf.ts:14`: `generateTicketPdf(ticket, comments, { pdfConfig, userMap })` — pure function, returns Buffer.
+- `src/services/archive/pdf.ts:14`: `generateTicketPdf(ticket, comments, { pdfConfig, userMap })` — pure function, returns Buffer.
 
 **Error mapping:**
-- Per-handler outer catch returns 500 `{ error: 'Internal server error', duration_ms }`. See `src/cases.ts:353-359`, `src/attachments.ts:204-207`, `src/webhook.ts:73-76`.
-- GW-06 envelope codes (cases path): `src/cases.ts` returns explicit `{ ok: false, outcome, error }` per failure mode. Codes locked in `src/cases.ts` JSDoc lines 14-18.
+- Per-handler outer catch returns 500 `{ error: 'Internal server error', duration_ms }`. See `src/services/archive/cases.ts:353-359`, `src/services/archive/attachments.ts:204-207`, `src/services/archive/webhook.ts:73-76`.
+- GW-06 envelope codes (cases path): `src/services/archive/cases.ts` returns explicit `{ ok: false, outcome, error }` per failure mode. Codes locked in `src/services/archive/cases.ts` JSDoc lines 14-18.
 
 **Audit store:**
-- `src/types.ts:181-185`: `AuditStore` interface (`put`/`get`/`list`).
+- `src/platform/types.ts:124-128`: `AuditStore` interface (`put`/`get`/`list`).
 - Cloudflare implementation: KV binding from `wrangler.toml` (`AUDIT_LOG`), no custom code.
-- Node implementation: `src/fileAuditStore.ts:19-89` (one JSON file per key under `./audit-data/`).
+- Node implementation: `src/platform/fileAuditStore.ts:19-89` (one JSON file per key under `./audit-data/`).
 
 **Tests:**
 - `tests/onesystems.test.ts`, `tests/onesystems.createCase.test.ts`: OneSystems wire contract.
@@ -162,13 +162,13 @@ milli-mala-multi-tenant/
 **Files:**
 - One concern per file. Filename matches the primary export's domain (e.g., `onesystems.ts` exports `OneSystemsClient`).
 - Lowercase. camelCase for multi-word (`docClient.ts`, `documentTicket.ts`, `postResultToTicket.ts`, `fileAuditStore.ts`).
-- Tests mirror source: `src/cases.ts` ↔ `tests/cases.test.ts`. Contract tests append `.contract`: `tests/cases.contract.test.ts`.
+- Tests mirror source: `src/services/archive/cases.ts` ↔ `tests/cases.test.ts`. Contract tests append `.contract`: `tests/cases.contract.test.ts`.
 
 **Directories:**
 - Flat. No subdirectories under `src/`. Adapters are NOT in their own folder. **Do not introduce `src/adapters/`** — the convention is flat.
 
 **Types:**
-- All shared types in `src/types.ts`. PascalCase. Section comment dividers (`// ─── Section ───`).
+- Shared types in `src/platform/types.ts`, archive-specific types in `src/services/archive/types.ts`. PascalCase. Section comment dividers (`// ─── Section ───`).
 
 **Imports:**
 - All intra-repo imports use `./*.js` extensions (ESM + Workers requirement). When adding `src/workpoint.ts`, import it as `from './workpoint.js'`.
@@ -179,26 +179,26 @@ milli-mala-multi-tenant/
 
 Read these files in this order before touching anything:
 
-1. **`src/types.ts`** — Skim sections `Tenant Configuration` and `Document System Types`. You will widen one union and may add fields to one interface.
-2. **`src/docClient.ts`** — The whole file (30 lines). This is the ONE file that must learn about Workpoint.
-3. **`src/onesystems.ts`** (210 lines) — Read end to end. Note the auth-token caching pattern (`ensureAuthenticated`), the `DocClient` implementation, the optional `createCase` method, and the no-tokens-in-error-messages discipline (`src/onesystems.ts:167`).
-4. **`src/gopro.ts`** (98 lines) — Read end to end for the simpler shape (only `uploadDocument`).
-5. **`src/tenant.ts:160-197`** — `validateEndpoint`. You will add a `workpoint` branch checking whatever credentials it needs.
-6. **`src/cases.ts:178-185`** — Confirm you understand duck-typed capability detection. If Workpoint supports `createCase` you do nothing here; if it doesn't, the existing 422 `gopro_create_unsupported` path will fire (despite the name, the code is generic).
-7. **`src/postResultToTicket.ts`** — Skim. The post-back reads `ep.caseNumberFieldId`, `ep.lastStatusFieldId`, `ep.lastExportFieldId`, `ep.templateFieldId` generically — Workpoint inherits this for free.
+1. **`src/platform/types.ts` / `src/services/archive/types.ts`** — Skim sections `Tenant Configuration` and `Document System Types`. You will widen one union and may add fields to one interface.
+2. **`src/services/archive/docClient.ts`** — The whole file (30 lines). This is the ONE file that must learn about Workpoint.
+3. **`src/services/archive/onesystems.ts`** (210 lines) — Read end to end. Note the auth-token caching pattern (`ensureAuthenticated`), the `DocClient` implementation, the optional `createCase` method, and the no-tokens-in-error-messages discipline (`src/services/archive/onesystems.ts:167`).
+4. **`src/services/archive/gopro.ts`** (98 lines) — Read end to end for the simpler shape (only `uploadDocument`).
+5. **`src/platform/tenant.ts:160-197`** — `validateEndpoint`. You will add a `workpoint` branch checking whatever credentials it needs.
+6. **`src/services/archive/cases.ts:178-185`** — Confirm you understand duck-typed capability detection. If Workpoint supports `createCase` you do nothing here; if it doesn't, the existing 422 `gopro_create_unsupported` path will fire (despite the name, the code is generic).
+7. **`src/services/archive/postResultToTicket.ts`** — Skim. The post-back reads `ep.caseNumberFieldId`, `ep.lastStatusFieldId`, `ep.lastExportFieldId`, `ep.templateFieldId` generically — Workpoint inherits this for free.
 8. **`tests/onesystems.test.ts` + `tests/onesystems.createCase.test.ts`** — Mirror these for `tests/workpoint.test.ts`. The pattern uses `global.fetch = vi.fn()` + per-test `mockResolvedValueOnce`.
 
 Then make these edits, in this order:
 
-1. **`src/types.ts:25`** — Widen `EndpointConfig.type`:
+1. **`src/platform/types.ts:32`** — Widen `EndpointConfig.type`:
    ```ts
    type: 'onesystems' | 'gopro' | 'workpoint'
    ```
    Add any Workpoint-specific credential fields below the existing OneSystems/GoPro ones.
 
-2. **New file `src/workpoint.ts`** — Create a `WorkpointClient` class implementing `DocClient`. Mirror `src/gopro.ts` shape if the API is simple, `src/onesystems.ts` if it needs multipart. Token TTL default 25 minutes (`25 * 60 * 1000`).
+2. **New file `src/workpoint.ts`** — Create a `WorkpointClient` class implementing `DocClient`. Mirror `src/services/archive/gopro.ts` shape if the API is simple, `src/services/archive/onesystems.ts` if it needs multipart. Token TTL default 25 minutes (`25 * 60 * 1000`).
 
-3. **`src/docClient.ts:14-30`** — Add a third branch:
+3. **`src/services/archive/docClient.ts:14-30`** — Add a third branch:
    ```ts
    if (ep.type === 'workpoint') {
      if (!ep.<credField>) throw new Error('Workpoint endpoint missing <credField>')
@@ -206,7 +206,7 @@ Then make these edits, in this order:
    }
    ```
 
-4. **`src/tenant.ts:185-192`** — Add a branch in `validateEndpoint`:
+4. **`src/platform/tenant.ts:185-192`** — Add a branch in `validateEndpoint`:
    ```ts
    } else if (ep.type === 'workpoint') {
      if (!ep.<credField>) missing.push('<credField>')
@@ -222,15 +222,15 @@ Then make these edits, in this order:
 **Files you should NOT need to touch:**
 
 - `src/worker.ts`, `src/index.ts` — runtime adapters, doc-system-agnostic.
-- `src/webhook.ts`, `src/cases.ts`, `src/attachments.ts` — handlers program against `DocClient`, not `ep.type`.
-- `src/documentTicket.ts`, `src/postResultToTicket.ts` — pipeline and post-back are generic.
-- `src/zendesk.ts`, `src/pdf.ts`, `src/logger.ts`, `src/config.ts`, `src/env.ts` — orthogonal.
+- `src/services/archive/webhook.ts`, `src/services/archive/cases.ts`, `src/services/archive/attachments.ts` — handlers program against `DocClient`, not `ep.type`.
+- `src/services/archive/documentTicket.ts`, `src/services/archive/postResultToTicket.ts` — pipeline and post-back are generic.
+- `src/platform/zendesk.ts`, `src/services/archive/pdf.ts`, `src/platform/logger.ts`, `src/platform/config.ts`, `src/platform/env.ts` — orthogonal.
 
 If you find yourself editing any of those, step back: you are probably reaching for the `ep.type` anti-pattern (see `ARCHITECTURE.md` → Anti-Patterns) when a duck-typed capability check or an interface method would do.
 
 ### New feature (non-adapter)
 
-- Cross-cutting (logging, error mapping, SSRF policy): `src/tenant.ts` or `src/logger.ts`; never per-handler.
+- Cross-cutting (logging, error mapping, SSRF policy): `src/platform/tenant.ts` or `src/platform/logger.ts`; never per-handler.
 - New endpoint (new `POST /v1/*`): create `src/<name>.ts` exporting `handle<Name>({ body, headers, tenantConfig, docEndpoint }): Promise<HandlerResult>`, then wire two routes — one in `src/worker.ts`, one in `src/index.ts`. Add `tests/<name>.test.ts`.
 
 ### Utilities
