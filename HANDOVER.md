@@ -1,5 +1,8 @@
 # Milli-Mala: Tæknilegt yfirlit fyrir DevOps
 
+Þetta skjal lýsir kerfinu — arkitektúr, öryggi, netumferð. Fyrir daglegan
+rekstur (útgáfur, rollback, leyndarmál) sjá [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
 ## Hvað er þetta
 
 Multi-tenant brú milli Zendesk og skjalakerfa (OneSystems, GoPro). Tekur á móti webhook frá Zendesk eða API kalli frá Málaskrá, sækir miða og viðhengi úr Zendesk, býr til PDF, og sendir í skjalakerfi stofnunar.
