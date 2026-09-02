@@ -141,6 +141,15 @@ describe('loadTenants', () => {
     expect(samgongustofa.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
   })
 
+  it('includes internal notes in the Samgöngustofa PDF — the only tenant that does', () => {
+    const tenants = loadTenants(validEnv)
+    const samgongustofa = tenants.find(t => t.name === 'Samgöngustofa')!
+    expect(samgongustofa.services.archive!.pdf.includeInternalNotes).toBe(true)
+    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa')) {
+      expect(other.services.archive!.pdf.includeInternalNotes).toBe(false)
+    }
+  })
+
   it('configures both Tryggingastofnun brands with OneSystems endpoints and distinct brand_ids', () => {
     const [, , , tryggingastofnun, tryggingastofnunInternal] = loadTenants(validEnv)
     expect(tryggingastofnun.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
