@@ -118,7 +118,14 @@ const TENANT_ENV: Record<string, string> = {
   HMS_ZENDESK_WEBHOOK_SECRET: 'hms-zendesk-webhook-secret-0123456789',
   HMS_ONESYSTEMS_BASE_URL: ONESYS_BASE,
   HMS_ONESYSTEMS_APP_KEY: 'hms-onesystems-app-key-0123456789abcd',
-  HMS_MALASKRA_API_KEY: MALASKRA_KEY
+  HMS_MALASKRA_API_KEY: MALASKRA_KEY,
+  SYSLUMENN_ZENDESK_SUBDOMAIN: 'digitaliceland',
+  SYSLUMENN_ZENDESK_EMAIL: 's@example.com',
+  SYSLUMENN_ZENDESK_API_TOKEN: 'syslumenn-zendesk-api-token-0123456',
+  SYSLUMENN_ZENDESK_WEBHOOK_SECRET: 'syslumenn-zendesk-webhook-secret-012',
+  SYSLUMENN_ONESYSTEMS_BASE_URL: ONESYS_BASE,
+  SYSLUMENN_ONESYSTEMS_APP_KEY: 'syslumenn-onesystems-app-key-0123456',
+  SYSLUMENN_MALASKRA_API_KEY: MALASKRA_KEY
 }
 
 const savedEnv: Record<string, string | undefined> = {}
