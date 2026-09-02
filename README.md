@@ -1,15 +1,18 @@
 # Milli-mála
 
-**Multi-tenant gateway between Zendesk and the document archives of Icelandic public institutions.**
+**A multi-tenant gateway for Zendesk integrations in the Icelandic public sector.**
 
 _Last updated: 2026-09-02._
 
-Institutions handle citizen correspondence in Zendesk and are obliged to file it in their official archive. Milli-mála does the filing: it receives a signed request naming a ticket, fetches the ticket from Zendesk, renders it to PDF, and uploads PDF and attachments into the institution's archive case. It can also create the archive case and write the case number back onto the ticket.
+Icelandic public institutions handle citizen correspondence in Zendesk. Anything Zendesk needs to reach beyond itself, such as an archive, a case system, or another government service, runs into the same problems: proving a request really came from Zendesk, holding credentials for the far system without exposing them, telling institutions apart, and keeping an audit trail. Milli-mála solves those once. It receives signed events from Zendesk, resolves which institution they belong to, holds the credentials for both sides, runs the integration, and records what happened.
 
-It holds credentials for both sides so neither side has to. Zendesk never sees archive credentials. Archives never see Zendesk credentials.
+The shared part is the **platform**: HTTP handling, signature and key verification, tenant resolution, the Zendesk client, credential custody, audit logging. Integrations are **services** built on it.
+
+**Archiving is the first service, the reason the platform exists, and the only one in production today.** Institutions are obliged to file citizen correspondence in their official archive. The archive service receives a request naming a ticket, fetches it from Zendesk, renders it to PDF, and uploads PDF and attachments into the institution's archive case. It can also create the case and write the case number back onto the ticket. Zendesk never sees archive credentials. Archives never see Zendesk credentials.
 
 | | |
 |---|---|
+| Services | Archive (production). Others are added under `src/services/` without touching the platform. |
 | Archive backends | OneSystems, GoPro |
 | Tenants | One per Zendesk brand. Seven configured. |
 | Production | One Node.js container on AWS ECS, run by Digital Iceland |
@@ -20,10 +23,8 @@ It holds credentials for both sides so neither side has to. Zendesk never sees a
 
 | Read this | When you want to |
 |---|---|
-| [ONBOARDING.md](ONBOARDING.md) | Join the project. Reading order, people, open decisions. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Understand how a request moves through the system and why it behaves the way it does. |
 | [OPERATIONS.md](OPERATIONS.md) | Deploy, roll back, add a tenant, rotate a secret, read the audit log, diagnose a failure. |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Change the code. Branching, tests, how work reaches the upstream repository. |
 
 ## Endpoints
 
@@ -70,5 +71,5 @@ curl localhost:8080/v1/health
 ## Repositories
 
 - **[Vertiscx/milli-mala-multi-tenant](https://github.com/Vertiscx/milli-mala-multi-tenant)** is where work happens.
-- **[island-is/milli-mala-multi-tenant](https://github.com/island-is/milli-mala-multi-tenant)** is the upstream that production deploys from. It receives squashed pull requests from the fork. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- **[island-is/milli-mala-multi-tenant](https://github.com/island-is/milli-mala-multi-tenant)** is the upstream that production deploys from. It receives squashed pull requests from the fork.
 - **[Vertiscx/malaskra_v2](https://github.com/Vertiscx/malaskra_v2)** is the Zendesk sidebar app that calls `/v1/cases` and `/v1/attachments`.
