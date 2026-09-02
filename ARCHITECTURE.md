@@ -16,7 +16,7 @@ Read [README.md](README.md) first for the short version and local setup. Read [O
 
 Two archive products are supported: **OneSystems** and **GoPro**. Seven institutions are configured today.
 
-A second service, email inspection, was built in mid-2026 and is not merged; see [ONBOARDING.md](ONBOARDING.md#open-decisions). The rest of this document describes the platform and the archive service as they run today.
+A second service, email inspection, was built in mid-2026 and is not merged. The rest of this document describes the platform and the archive service as they run today.
 
 ---
 

@@ -23,7 +23,6 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 
 | Read this | When you want to |
 |---|---|
-| [ONBOARDING.md](ONBOARDING.md) | Join the project. Reading order, people, open decisions. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Understand how a request moves through the system and why it behaves the way it does. |
 | [OPERATIONS.md](OPERATIONS.md) | Deploy, roll back, add a tenant, rotate a secret, read the audit log, diagnose a failure. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Change the code. Branching, tests, how work reaches the upstream repository. |

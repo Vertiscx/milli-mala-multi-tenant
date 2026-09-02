@@ -41,3 +41,6 @@ CLAUDE.md
 # Internal documents
 MEETING-BRIEF-*
 EFTIRFYLGNI-*
+
+# Vertis-internal working documents — never committed, never upstreamed
+docs/vertis/
