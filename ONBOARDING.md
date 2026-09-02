@@ -4,9 +4,9 @@ _Last updated: 2026-09-02._
 
 You are joining a small, security-reviewed integration service that runs inside Digital Iceland's platform and is built and maintained by Vertis. This page tells you what to read, in what order, who is involved, and which questions are still open so you do not spend time re-deriving them.
 
-## What it is, in three sentences
+## What it is, in four sentences
 
-Icelandic public institutions handle citizen correspondence in Zendesk and are legally obliged to file it in their official archive. Milli-mála sits between the two: it takes a signed request naming a ticket, turns the ticket into a PDF, and files it into the institution's archive case, creating the case if needed. It holds the credentials for both sides so that Zendesk never sees archive credentials and archives never see Zendesk credentials.
+Milli-mála is a multi-tenant gateway for Zendesk integrations in the Icelandic public sector: it proves a request came from Zendesk or an authorised app, works out which institution it belongs to, holds the credentials for whatever system is on the other side, runs the integration, and records what happened. Integrations are services built on that shared platform. The first service, and the only one in production, is archiving: institutions are legally obliged to file citizen correspondence in their official archive, so the service turns a ticket into a PDF and files it into the institution's archive case, creating the case if needed. Zendesk never sees archive credentials and archives never see Zendesk credentials.
 
 The name means "between cases". Write it with the accent in prose.
 

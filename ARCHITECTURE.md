@@ -2,19 +2,21 @@
 
 _Last updated: 2026-09-02. Describes `main` as of island-is #40._
 
-Milli-mála is a multi-tenant gateway between Zendesk and the document-archive systems used by Icelandic public institutions. This document explains how a request moves through it, how tenants are isolated, where the extension points are, and what the system deliberately does not do.
+Milli-mála is a multi-tenant gateway for Zendesk integrations in the Icelandic public sector. It has two layers: a **platform** that authenticates requests, resolves tenants, holds credentials and writes audit entries, and **services** that run one integration each on top of it. One service exists in production, the archive service, and it is the reason the platform was built. This document explains how a request moves through the system, how tenants are isolated, where the extension points are, and what the system deliberately does not do.
 
-Read [README.md](README.md) first for the one-paragraph version and local setup. Read [OPERATIONS.md](OPERATIONS.md) for deploying and running it.
+Read [README.md](README.md) first for the short version and local setup. Read [OPERATIONS.md](OPERATIONS.md) for deploying and running it.
 
 ---
 
 ## 1. What it does
 
-An institution handles citizen correspondence in Zendesk and is obliged to file that correspondence in its official archive. Milli-mála does the filing. It receives a signed request that names a ticket, fetches the ticket from Zendesk, renders it to PDF, and uploads the PDF and any attachments into the institution's archive case. If the ticket has no case yet, it can ask the archive to create one and write the new case number back onto the ticket.
+**The platform** solves the problems every Zendesk integration for an institution runs into: proving a request came from Zendesk or from an authorised app, telling institutions apart, holding credentials for the far system without exposing them, and keeping a record of what happened. It knows nothing about archives.
 
-It holds credentials for both sides so that neither side has to. Zendesk never sees archive credentials. Archive systems never see Zendesk credentials.
+**The archive service** is the integration in production. An institution handles citizen correspondence in Zendesk and is obliged to file it in its official archive. The service receives a signed request naming a ticket, fetches the ticket from Zendesk, renders it to PDF, and uploads the PDF and any attachments into the institution's archive case. If the ticket has no case yet, it can ask the archive to create one and write the new case number back onto the ticket. Zendesk never sees archive credentials. Archive systems never see Zendesk credentials.
 
 Two archive products are supported: **OneSystems** and **GoPro**. Seven institutions are configured today.
+
+A second service, email inspection, was built in mid-2026 and is not merged; see [ONBOARDING.md](ONBOARDING.md#open-decisions). The rest of this document describes the platform and the archive service as they run today.
 
 ---
 
