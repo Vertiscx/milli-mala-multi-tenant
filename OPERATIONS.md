@@ -103,7 +103,7 @@ Two layers.
 
 The full list with current tenants is [.env.example](.env.example).
 
-Validation runs at boot. The container refuses to start on a missing required variable, a subdomain with invalid characters, a non-HTTPS or private-address archive URL, a short or repeated-character secret, a duplicated Málaskrá key, or a non-integer field ID. The error names the variable.
+Validation runs at boot. The container refuses to start on a missing required variable, a subdomain with invalid characters, a non-HTTPS or private-address archive URL, a short or repeated-character secret, or a non-integer field ID. The error names the variable.
 
 ## 5. Adding a tenant
 

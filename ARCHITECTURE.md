@@ -154,7 +154,7 @@ Tenants are declared in `src/tenants.config.ts` with every secret read from an e
 - a Zendesk subdomain containing anything but letters, digits and hyphens,
 - an archive `baseUrl` that is not HTTPS or that points at a private or loopback address,
 - a secret shorter than 32 characters or made of one repeated character,
-- two tenants sharing a Málaskrá key,
+- two tenants sharing a Málaskrá key (**only when loaded from JSON; the production path in `src/index.ts` bypasses this check**, so uniqueness is an operational rule until the guard moves into the store constructor),
 - a field ID that is not a positive integer.
 
 A request for one tenant can only ever read that tenant's Zendesk and write to that tenant's archive. There is no cross-tenant code path.
