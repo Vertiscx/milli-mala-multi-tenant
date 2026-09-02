@@ -67,9 +67,3 @@ cp .env.example .env    # fill in values
 npm run dev             # tsx --watch on port 8080
 curl localhost:8080/v1/health
 ```
-
-## Repositories
-
-- **[Vertiscx/milli-mala-multi-tenant](https://github.com/Vertiscx/milli-mala-multi-tenant)** is where work happens.
-- **[island-is/milli-mala-multi-tenant](https://github.com/island-is/milli-mala-multi-tenant)** is the upstream that production deploys from. It receives squashed pull requests from the fork.
-- **[Vertiscx/malaskra_v2](https://github.com/Vertiscx/malaskra_v2)** is the Zendesk sidebar app that calls `/v1/cases` and `/v1/attachments`.
