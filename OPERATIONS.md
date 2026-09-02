@@ -26,10 +26,9 @@ The Cloudflare Workers entry point in the repository is **not** deployed anywher
 
 | Role | Owns |
 |---|---|
-| Vertis product owner | Priorities, institution relationships, what goes upstream |
-| Vertis technical ops | Day-to-day: tenant onboarding, secret hand-offs, triage, PRs, deploy requests |
+| Integration maintainers (currently Vertis) | Priorities, institution relationships, tenant onboarding, secret hand-offs, triage, PRs, deploy requests |
 | Digital Iceland DevOps | The ECS service, Parameter Store, pressing the deploy button, rollback |
-| island-is reviewers | Approving squashed PRs into the upstream repository |
+| Repository reviewers | Approving PRs into this repository |
 | Institution admins | Their Zendesk brand: webhook, trigger, Málaskrá app install |
 
 ## 3. Deploying
@@ -43,7 +42,7 @@ It has three triggers. Only one works for our workflow:
 | Trigger | Result |
 |---|---|
 | `workflow_dispatch` on `main` | **Works.** This is how every production deploy has happened. |
-| Pull request merged into `main` | **Fails** when the PR came from the Vertiscx fork. GitHub does not expose the OIDC secret to fork-originated events, so the job runs under the runner's default role and is denied `ecs:DescribeTaskDefinition`. Every merged fork PR shows a red "Build and Deploy" run. That red run is expected and means nothing was deployed. |
+| Pull request merged into `main` | **Fails** when the PR came from a fork. GitHub does not expose the OIDC secret to fork-originated events, so the job runs under the runner's default role and is denied `ecs:DescribeTaskDefinition`. Every merged fork PR shows a red "Build and Deploy" run. That red run is expected and means nothing was deployed. |
 | Push of a `v*` tag | Untested. |
 
 Consequence: **merging to upstream `main` does not put code in production.** Someone must run the workflow by hand afterwards.
@@ -119,7 +118,7 @@ End to end, in the order that avoids the two common mistakes (deploying before s
      **The trigger must be one-shot.** The gateway writes a note back onto the ticket, which re-evaluates triggers. Use a marker tag the trigger requires and removes in the same run, for example condition "tag `malaskra_doc_pending` present", actions "notify webhook" and "remove tag `malaskra_doc_pending`". A trigger on a bare condition like "status is solved" loops in production.
    - If the tenant uses case creation from the webhook, the template field must be stamped by an earlier trigger, before the archive trigger fires.
    - Install the Málaskrá app on the brand and set its API key secure setting to the value you will generate in step 4.
-3. **Code:** open a PR on the fork adding the tenant block to `src/tenants.config.ts` and the variable names to `.env.example`. The existing blocks are the template. Run `npm test`; the config test loads the real list with placeholder values. Then squash to upstream.
+3. **Code:** open a PR adding the tenant block to `src/tenants.config.ts` and the variable names to `.env.example`. The existing blocks are the template. Run `npm test`; the config test loads the real list with placeholder values.
 4. **Secrets:** prepare the variable block, fill in the values, and send it to DevOps through a secure channel (Bitwarden Send). Never paste secrets into a PR, an issue, a chat, or a planning note. Ask DevOps to confirm the values are in Parameter Store.
 5. **Deploy** as in section 3, only after step 4 is confirmed.
 6. **Verify** with one real ticket on the new brand.
