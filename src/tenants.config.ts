@@ -122,7 +122,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           pdf: {
             companyName: 'Samgöngustofa',
             locale: 'is-IS',
-            includeInternalNotes: false,
+            includeInternalNotes: true,
           },
         },
       },
