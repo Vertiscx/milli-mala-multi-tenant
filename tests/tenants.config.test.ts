@@ -67,12 +67,19 @@ const validEnv: Record<string, string> = {
   HMS_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
   HMS_ONESYSTEMS_APP_KEY: testSecret('hms-os-appkey', 40),
   HMS_MALASKRA_API_KEY: testSecret('hms-malaskra-key', 40),
+  SYSLUMENN_ZENDESK_SUBDOMAIN: 'syslumenn-test',
+  SYSLUMENN_ZENDESK_EMAIL: 'admin@syslumenn.test',
+  SYSLUMENN_ZENDESK_API_TOKEN: testSecret('syslu-zd-token', 40),
+  SYSLUMENN_ZENDESK_WEBHOOK_SECRET: testSecret('syslu-zd-webhook', 40),
+  SYSLUMENN_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
+  SYSLUMENN_ONESYSTEMS_APP_KEY: testSecret('syslu-os-appkey', 40),
+  SYSLUMENN_MALASKRA_API_KEY: testSecret('syslu-malaskra-key', 40),
 }
 
 describe('loadTenants', () => {
   it('returns all tenants when all env vars are set', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants).toHaveLength(6)
+    expect(tenants).toHaveLength(7)
     expect(tenants[0].name).toBe('Kerfisstjórn')
     expect(tenants[1].name).toBe('Vinnueftirlitið')
     expect(tenants[2].name).toBe('Samgöngustofa')
@@ -132,6 +139,15 @@ describe('loadTenants', () => {
   it('configures Samgöngustofa with a OneSystems endpoint', () => {
     const [, , samgongustofa] = loadTenants(validEnv)
     expect(samgongustofa.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
+  })
+
+  it('includes internal notes in the Samgöngustofa PDF — the only tenant that does', () => {
+    const tenants = loadTenants(validEnv)
+    const samgongustofa = tenants.find(t => t.name === 'Samgöngustofa')!
+    expect(samgongustofa.services.archive!.pdf.includeInternalNotes).toBe(true)
+    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa')) {
+      expect(other.services.archive!.pdf.includeInternalNotes).toBe(false)
+    }
   })
 
   it('configures both Tryggingastofnun brands with OneSystems endpoints and distinct brand_ids', () => {
