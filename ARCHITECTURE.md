@@ -215,7 +215,6 @@ The container runs as a non-root user, exposes port 8080, and has one runtime de
 
 - **`src/worker.ts` and `KvTenantStore`.** A Cloudflare Workers runtime exists and is kept in sync by a runtime-parity test. It is not deployed anywhere. Production is the Node container on AWS ECS at Digital Iceland. Treat the Worker path as an experiment that may be removed.
 - **`entrypoint.sh` and `TENANTS_JSON`.** The entrypoint writes an optional `TENANTS_JSON` env var to a file, but `src/index.ts` loads tenants from `tenants.config.ts`, not from that file. This is a leftover.
-- **Anything under `.planning/`.** Vertis-internal working notes, excluded from the upstream repository.
 
 ---
 
