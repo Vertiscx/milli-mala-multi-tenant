@@ -25,7 +25,6 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Understand how a request moves through the system and why it behaves the way it does. |
 | [OPERATIONS.md](OPERATIONS.md) | Deploy, roll back, add a tenant, rotate a secret, read the audit log, diagnose a failure. |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Change the code. Branching, tests, how work reaches the upstream repository. |
 
 ## Endpoints
 
@@ -72,5 +71,5 @@ curl localhost:8080/v1/health
 ## Repositories
 
 - **[Vertiscx/milli-mala-multi-tenant](https://github.com/Vertiscx/milli-mala-multi-tenant)** is where work happens.
-- **[island-is/milli-mala-multi-tenant](https://github.com/island-is/milli-mala-multi-tenant)** is the upstream that production deploys from. It receives squashed pull requests from the fork. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- **[island-is/milli-mala-multi-tenant](https://github.com/island-is/milli-mala-multi-tenant)** is the upstream that production deploys from. It receives squashed pull requests from the fork.
 - **[Vertiscx/malaskra_v2](https://github.com/Vertiscx/malaskra_v2)** is the Zendesk sidebar app that calls `/v1/cases` and `/v1/attachments`.
