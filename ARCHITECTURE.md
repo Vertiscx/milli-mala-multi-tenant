@@ -154,7 +154,7 @@ Tenants are declared in `src/tenants.config.ts` with every secret read from an e
 - a Zendesk subdomain containing anything but letters, digits and hyphens,
 - an archive `baseUrl` that is not HTTPS or that points at a private or loopback address,
 - a secret shorter than 32 characters or made of one repeated character,
-- two tenants sharing a Málaskrá key,
+- two tenants sharing a Málaskrá key (**only when loaded from JSON; the production path in `src/index.ts` bypasses this check**, so uniqueness is an operational rule until the guard moves into the store constructor),
 - a field ID that is not a positive integer.
 
 A request for one tenant can only ever read that tenant's Zendesk and write to that tenant's archive. There is no cross-tenant code path.
@@ -215,7 +215,6 @@ The container runs as a non-root user, exposes port 8080, and has one runtime de
 
 - **`src/worker.ts` and `KvTenantStore`.** A Cloudflare Workers runtime exists and is kept in sync by a runtime-parity test. It is not deployed anywhere. Production is the Node container on AWS ECS at Digital Iceland. Treat the Worker path as an experiment that may be removed.
 - **`entrypoint.sh` and `TENANTS_JSON`.** The entrypoint writes an optional `TENANTS_JSON` env var to a file, but `src/index.ts` loads tenants from `tenants.config.ts`, not from that file. This is a leftover.
-- **Anything under `.planning/`.** Vertis-internal working notes, excluded from the upstream repository.
 
 ---
 
