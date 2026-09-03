@@ -16,4 +16,4 @@
 Dockerfile                          @island-is/devops
 docker-compose.yml                  @island-is/devops
 wrangler.toml                       @island-is/devops
-DEPLOYMENT.md                       @island-is/devops
+OPERATIONS.md                       @island-is/devops
