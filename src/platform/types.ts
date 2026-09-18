@@ -8,7 +8,28 @@ export interface TenantConfig {
   brand_id: string
   name: string
   zendesk: ZendeskConfig
-  services: { archive?: ArchiveServiceConfig }
+  services: { archive?: ArchiveServiceConfig; ticketUpdate?: TicketUpdateServiceConfig }
+}
+
+// Credentials for the ticketUpdate service (src/services/ticketUpdate/):
+// a Zendesk OAuth client (Client Credentials grant) this service uses to
+// call the Zendesk API on Zendesk's own behalf, in place of the tenant's
+// Basic-auth apiToken. Scoped under services (not the shared zendesk
+// block above) because it belongs to one specific service, the same way
+// ArchiveServiceConfig's endpoint credentials do.
+//
+// webhookSecret is deliberately separate from zendesk.webhookSecret above:
+// Zendesk generates one independent signing secret per webhook target and
+// never lets it be set to a chosen value (confirmed against Zendesk's own
+// webhook API docs), so the webhook target that calls this service's
+// endpoint has its own secret, distinct from the one signing the archive
+// webhook.
+export interface TicketUpdateServiceConfig {
+  webhookSecret: string
+  oauth: {
+    clientId: string
+    clientSecret: string
+  }
 }
 
 // The archive section groups what used to sit at the top level.

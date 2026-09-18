@@ -25,10 +25,52 @@
  * Optional numeric custom-field IDs (the template/kennitala field-ID
  * variables) use `optionalNumberEnv` and may be unset — unset means the
  * webhook create inputs are unavailable for that tenant.
+ *
+ * The ticket-update service is opt-in per tenant the same way: see
+ * `ticketUpdateSection` below.
  */
 
-import type { TenantConfig } from './platform/types.js'
+import type { TenantConfig, TicketUpdateServiceConfig } from './platform/types.js'
 import { requireEnv, optionalNumberEnv } from './platform/env.js'
+
+/**
+ * Build the optional `services.ticketUpdate` section for a tenant.
+ *
+ * Unlike the archive section, this one is opt-in per tenant: a tenant with
+ * none of the three variables set simply has no ticketUpdate section, and
+ * `/v1/tickets/update` returns a neutral 400 for its brand. That keeps a
+ * service nobody has provisioned yet from being able to stop the container
+ * — and with it the archive service — from booting.
+ *
+ * A *partly* configured tenant is still a hard boot failure: the three
+ * values only make sense together, so a typo or a half-finished rollout
+ * should be loud rather than silently leave the service switched off.
+ */
+function ticketUpdateSection(
+  prefix: string,
+  env: Record<string, string | undefined>
+): { ticketUpdate?: TicketUpdateServiceConfig } {
+  const names = {
+    webhookSecret: `${prefix}_TICKET_UPDATE_WEBHOOK_SECRET`,
+    clientId: `${prefix}_ZENDESK_OAUTH_CLIENT_ID`,
+    clientSecret: `${prefix}_ZENDESK_OAUTH_CLIENT_SECRET`,
+  }
+
+  if (Object.values(names).every((name) => !env[name])) return {}
+
+  return {
+    ticketUpdate: {
+      // Independent from zendesk.webhookSecret — Zendesk generates one
+      // signing secret per webhook target, never a chosen value, so the
+      // webhook target calling this service has its own secret.
+      webhookSecret: requireEnv(names.webhookSecret, env),
+      oauth: {
+        clientId: requireEnv(names.clientId, env),
+        clientSecret: requireEnv(names.clientSecret, env),
+      },
+    },
+  }
+}
 
 /**
  * Build the tenant array from environment variables. Called once at startup.
@@ -155,6 +197,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
             includeInternalNotes: false,
           },
         },
+        ...ticketUpdateSection('TRYGGINGASTOFNUN', env),
       },
     },
     {

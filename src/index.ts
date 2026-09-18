@@ -19,10 +19,12 @@ import { loadTenants } from './tenants.config.js'
 import { FileAuditStore } from './platform/fileAuditStore.js'
 import { createLogger } from './platform/logger.js'
 import type { Logger } from './platform/types.js'
+import { handleTicketUpdateHttp } from './services/ticketUpdate/handler.js'
 
 export { handleWebhook, verifyWebhookSignature, isTimestampFresh } from './services/archive/webhook.js'
 export { handleAttachments } from './services/archive/attachments.js'
 export { handleCases } from './services/archive/cases.js'
+export { handleTicketUpdate } from './services/ticketUpdate/handler.js'
 
 const logger: Logger = createLogger('main')
 
@@ -150,6 +152,7 @@ function startServer(): void {
 
     if (url.pathname === '/v1/health' && req.method === 'GET') return handleHealth(req, res)
     if (url.pathname === '/v1/audit' && req.method === 'GET') return handleAuditHttp(req, res, url, auditStore, config.auditSecret)
+    if (url.pathname === '/v1/tickets/update' && req.method === 'POST') return handleTicketUpdateHttp(req, res, tenantStore)
 
     const route = req.method === 'POST' ? findRoute(archiveRoutes, req.method, url.pathname) : undefined
     if (route) return dispatchServiceRoute(req, res, route, tenantStore, auditStore)
