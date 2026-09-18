@@ -155,6 +155,16 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
             includeInternalNotes: false,
           },
         },
+        ticketUpdate: {
+          // Independent from zendesk.webhookSecret above — Zendesk generates
+          // one signing secret per webhook target, never a chosen value, so
+          // the webhook target calling this service has its own secret.
+          webhookSecret: requireEnv('TRYGGINGASTOFNUN_TICKET_UPDATE_WEBHOOK_SECRET', env),
+          oauth: {
+            clientId: requireEnv('TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_ID', env),
+            clientSecret: requireEnv('TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_SECRET', env),
+          },
+        },
       },
     },
     {

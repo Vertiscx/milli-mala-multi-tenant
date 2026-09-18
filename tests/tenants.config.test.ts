@@ -53,6 +53,9 @@ const validEnv: Record<string, string> = {
   TRYGGINGASTOFNUN_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
   TRYGGINGASTOFNUN_ONESYSTEMS_APP_KEY: testSecret('trygg-os-appkey', 40),
   TRYGGINGASTOFNUN_MALASKRA_API_KEY: testSecret('trygg-malaskra-key', 40),
+  TRYGGINGASTOFNUN_TICKET_UPDATE_WEBHOOK_SECRET: testSecret('trygg-ticket-update-webhook', 40),
+  TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_ID: testSecret('trygg-oauth-client-id', 40),
+  TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_SECRET: testSecret('trygg-oauth-client-secret', 40),
   TRYGGINGASTOFNUN_INTERNAL_ZENDESK_SUBDOMAIN: 'tryggingastofnun-test',
   TRYGGINGASTOFNUN_INTERNAL_ZENDESK_EMAIL: 'admin@tryggingastofnun.test',
   TRYGGINGASTOFNUN_INTERNAL_ZENDESK_API_TOKEN: testSecret('tryggint-zd-token', 40),
@@ -156,6 +159,24 @@ describe('loadTenants', () => {
     expect(tryggingastofnun.brand_id).toBe('11204917066386')
     expect(tryggingastofnunInternal.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
     expect(tryggingastofnunInternal.brand_id).toBe('36102499292434')
+  })
+
+  it('configures ticketUpdate credentials for Tryggingastofnun only', () => {
+    const tenants = loadTenants(validEnv)
+    const tryggingastofnun = tenants.find(t => t.name === 'Tryggingastofnun')!
+    expect(tryggingastofnun.services.ticketUpdate?.webhookSecret).toBe(testSecret('trygg-ticket-update-webhook', 40))
+    expect(tryggingastofnun.services.ticketUpdate?.oauth.clientId).toBe(testSecret('trygg-oauth-client-id', 40))
+    expect(tryggingastofnun.services.ticketUpdate?.oauth.clientSecret).toBe(testSecret('trygg-oauth-client-secret', 40))
+
+    for (const other of tenants.filter(t => t.name !== 'Tryggingastofnun')) {
+      expect(other.services.ticketUpdate).toBeUndefined()
+    }
+  })
+
+  it('throws with a clear error when TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_SECRET is missing', () => {
+    const env = { ...validEnv }
+    delete env.TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_SECRET
+    expect(() => loadTenants(env)).toThrow('TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_SECRET')
   })
 
   it('configures HMS with a OneSystems endpoint and the expected brand_id', () => {
