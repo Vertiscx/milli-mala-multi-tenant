@@ -98,9 +98,13 @@ Two layers.
 | `<T>_ONESYSTEMS_BASE_URL` and `<T>_ONESYSTEMS_APP_KEY` | OneSystems tenants | HTTPS, public hostname, **no trailing slash**. |
 | `<T>_GOPRO_BASE_URL`, `<T>_GOPRO_USERNAME`, `<T>_GOPRO_PASSWORD` | GoPro tenants | Password 16+ characters. |
 | `<T>_MALASKRA_API_KEY` | yes | Generate fresh: `openssl rand -hex 24`. Must be unique across tenants. The same value goes into the Málaskrá app's secure setting for that brand. |
+| `<T>_TICKET_UPDATE_WEBHOOK_SECRET` | opt-in | Shown once by Zendesk when that webhook is created. 32+ characters. **Not the same value as `<T>_ZENDESK_WEBHOOK_SECRET`** — Zendesk generates one signing secret per webhook target and never lets it be chosen. |
+| `<T>_ZENDESK_OAUTH_CLIENT_ID`, `<T>_ZENDESK_OAUTH_CLIENT_SECRET` | opt-in | Credentials of a Zendesk OAuth client (Client Credentials grant) on that tenant's account, scoped `tickets:write`. Secret 32+ characters. |
 | `<T>_TEMPLATE_FIELD_ID`, `<T>_KENNITALA_FIELD_ID`, `<T>_CASE_NUMBER_FIELD_ID` | optional | Numeric Zendesk custom-field IDs. Not secrets. Account-level, so every brand on the same Zendesk account uses the same three numbers. Without `CASE_NUMBER_FIELD_ID` the webhook will not create cases. |
 
 The full list with current tenants is [.env.example](.env.example).
+
+The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — the container starts normally. **Some but not all three set is a boot failure** naming the missing variable, so a typo or a half-finished rollout is loud rather than silently leaving the service switched off.
 
 Validation runs at boot. The container refuses to start on a missing required variable, a subdomain with invalid characters, a non-HTTPS or private-address archive URL, a short or repeated-character secret, or a non-integer field ID. The error names the variable.
 
@@ -122,6 +126,19 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 4. **Secrets:** prepare the variable block, fill in the values, and send it to DevOps through a secure channel (Bitwarden Send). Never paste secrets into a PR, an issue, a chat, or a planning note. Ask DevOps to confirm the values are in Parameter Store.
 5. **Deploy** as in section 3, only after step 4 is confirmed.
 6. **Verify** with one real ticket on the new brand.
+
+## 5a. Enabling the ticket-update service for a tenant
+
+`/v1/tickets/update` is a separate service from archiving and is enabled per tenant.
+
+1. **Zendesk side:** create an OAuth client (Admin Center, Apps and integrations, APIs, OAuth clients) on the tenant's account, note the client ID and secret. Then create a second webhook pointing at `https://milli-mala.tooling.island.is/v1/tickets/update`, enable its signing secret and copy it — it is a different value from the archive webhook's. The trigger body puts `brand_id` inside `ticket`:
+   ```json
+   { "ticket": { "id": "{{ticket.id}}", "brand_id": "{{ticket.brand.id}}", "status": "solved" } }
+   ```
+   The same one-shot marker-tag discipline as the archive trigger applies.
+2. **Code:** add the `services.ticketUpdate` section to the tenant block in `src/tenants.config.ts` and the three variable names to `.env.example`.
+3. **Secrets:** send all three values to DevOps as in section 5 step 4 and confirm they are in Parameter Store before deploying. Provision the three together: a deployment carrying only one or two of them fails to boot.
+4. **Deploy**, then verify with one real ticket.
 
 ## 6. Rotating a secret
 

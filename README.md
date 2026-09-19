@@ -33,10 +33,11 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 | `POST` | `/v1/webhook` | Zendesk trigger | Zendesk HMAC-SHA256 signature |
 | `POST` | `/v1/cases` | Málaskrá sidebar app | `X-Api-Key` |
 | `POST` | `/v1/attachments` | Málaskrá sidebar app | `X-Api-Key` |
+| `POST` | `/v1/tickets/update` | Zendesk trigger | Zendesk HMAC-SHA256 signature |
 | `GET` | `/v1/audit` | Operator | `Authorization: Bearer <AUDIT_SECRET>` |
 | `GET` | `/v1/health` | Load balancer | none |
 
-Every POST carries the same three fields. `brand_id` selects the tenant; `doc_endpoint` selects which of that tenant's archives to file into.
+Every archive POST (`/v1/webhook`, `/v1/cases`, `/v1/attachments`) carries the same three fields. `brand_id` selects the tenant; `doc_endpoint` selects which of that tenant's archives to file into.
 
 ```json
 {
@@ -48,6 +49,20 @@ Every POST carries the same three fields. `brand_id` selects the tenant; `doc_en
 
 `/v1/cases` additionally takes exactly one of `case_number` (file into an existing case) or `create` (create a case first). Its response is a fixed envelope with an `outcome` of `documented`, `orphan_case`, `create_failed`, `validation`, `auth`, `brand_mismatch` or `gopro_create_unsupported`. See [ARCHITECTURE.md](ARCHITECTURE.md#5-case-numbers-and-the-failure-rules) for what each means and why.
 
+`/v1/tickets/update` belongs to a different service and takes a different shape: `brand_id` sits **inside** `ticket`, alongside the ticket id and whatever fields are to be set.
+
+```json
+{
+  "ticket": {
+    "id": "12345",
+    "brand_id": "11037960588818",
+    "status": "solved"
+  }
+}
+```
+
+It updates the ticket through the Zendesk API using a per-tenant OAuth client (Client Credentials grant) rather than the tenant's Basic-auth API token, so the access token never travels back through Zendesk's own trigger machinery. Everything in `ticket` except `id` and `brand_id` is forwarded to Zendesk as the fields to set. It is signed with its own webhook secret, independent of the archive webhook's — Zendesk generates one signing secret per webhook target and never lets it be set to a chosen value.
+
 After every documentation attempt the gateway posts an internal note on the ticket with the result, and stamps custom fields if the tenant has them configured.
 
 ## Local development
@@ -56,7 +71,7 @@ Requires Node.js 20 or later.
 
 ```bash
 npm ci
-npm test              # 422 tests, under a second
+npm test              # 439 tests, under a second
 npm run typecheck
 ```
 

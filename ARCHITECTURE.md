@@ -16,6 +16,8 @@ Read [README.md](README.md) first for the short version and local setup. Read [O
 
 Two archive products are supported: **OneSystems** and **GoPro**. Seven institutions are configured today.
 
+**The ticket-update service** is the platform's second service. It lets a Zendesk trigger update a ticket through the Zendesk API using a per-tenant OAuth client (Client Credentials grant) instead of a Basic-auth API token, which is the direction Zendesk is moving. The gateway makes the API call itself, so the access token never travels back through Zendesk's trigger machinery or its logs. It shares nothing with the archive service but the platform underneath it.
+
 A second service, email inspection, was built in mid-2026 and is not merged. The rest of this document describes the platform and the archive service as they run today.
 
 ---
@@ -29,6 +31,9 @@ A second service, email inspection, was built in mid-2026 and is not merged. The
   Málaskrá app ─────────▶│  POST /v1/cases        (X-Api-Key)   │────▶    or
   (agent sidebar)        │  POST /v1/attachments  (X-Api-Key)   │       GoPro
                          │                                      │
+  Zendesk trigger ──────▶│  POST /v1/tickets/update (HMAC)      │──┐
+                         │                                      │  │ Zendesk API
+                         │                                      │◀─┘ (OAuth token)
   Operator ─────────────▶│  GET  /v1/audit        (Bearer)      │
   Load balancer ────────▶│  GET  /v1/health       (none)        │
                          └──────────────────────────────────────┘
@@ -79,9 +84,14 @@ src/
     gopro.ts                GoPro adapter (upload only)
     pdf.ts                  jsPDF rendering
     types.ts                Archive-only types (DocClient, DocumentationOutcome, ...)
+
+  services/ticketUpdate/    The ticket-update capability. Independent of archive.
+    handler.ts              /v1/tickets/update: verify signature + freshness, then update via the Zendesk API
+    oauthClient.ts          Zendesk OAuth (Client Credentials) token fetch + per-tenant in-memory cache
+    types.ts                The Zendesk OAuth token response
 ```
 
-The rule that keeps this honest: `platform/` never imports from `services/`. A second service could be added under `services/` without touching the platform.
+The rule that keeps this honest: `platform/` never imports from `services/`, and services do not import each other. `services/ticketUpdate/` was added without touching the platform beyond one optional field on `TenantConfig`; it duplicates the twenty lines of signature verification rather than reaching into the archive service for them.
 
 ---
 
@@ -111,6 +121,9 @@ Same as webhook from step 3 on, but authenticated by `X-Api-Key` against the ten
 
 **`/v1/attachments`** (Málaskrá app)
 Authenticated by `X-Api-Key`. Forwards attachments to an existing case. No PDF.
+
+**`/v1/tickets/update`** (Zendesk trigger, ticket-update service)
+The one route that does not use the shared gate above, because its payload puts `brand_id` inside `ticket` rather than at the top level. It resolves the tenant and verifies the signature itself, against that tenant's own `services.ticketUpdate.webhookSecret` — a different secret from the archive webhook's, since Zendesk issues one per webhook target. Then it fetches or reuses a cached OAuth access token for the tenant, `PUT`s the fields to `tickets/{id}.json`, and retries once with a fresh token if Zendesk rejects the cached one with 401. The response carries no ticket content.
 
 ---
 
@@ -146,7 +159,11 @@ services.archive:
   endpoints:  { <name>: { type, baseUrl, appKey | username+password, field IDs } }
   malaskra:   { apiKey }
   pdf:        { companyName, locale, includeInternalNotes }
+services.ticketUpdate (optional):
+  webhookSecret, oauth: { clientId, clientSecret }
 ```
+
+Both service sections are optional and independent. `services.ticketUpdate` is built only when all three of its environment variables are set: unset means the tenant does not use the service and `/v1/tickets/update` returns a neutral 400 for its brand, so a service no tenant has provisioned cannot stop the container — and with it archiving — from booting. Set partly, it still fails at boot, naming the missing variable.
 
 Tenants are declared in `src/tenants.config.ts` with every secret read from an environment variable named `<TENANT>_<FIELD>`. Validation at boot rejects:
 
@@ -232,11 +249,12 @@ In priority order.
 
 ## 12. Tests
 
-23 files, 422 tests, `npm test`. Highlights:
+23 files, 439 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
 - `tests/pipeline.guards.test.ts` covers the case-number rules in section 5.
 - `tests/tenants.config.test.ts` checks the real tenant list loads with placeholder secrets.
+- `tests/ticketUpdate.test.ts` covers the ticket-update route: signature and freshness rejection, the OAuth token cache, and the 401 retry.
 
 CI runs tests on Node 20 and 22 on every PR, plus CodeQL.
