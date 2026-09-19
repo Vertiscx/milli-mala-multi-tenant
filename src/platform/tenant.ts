@@ -141,6 +141,11 @@ export function validateTenantConfig(config: TenantConfig): void {
   if (archive) {
     validateArchiveConfig(archive, config.name || config.brand_id)
   }
+
+  const ticketUpdate = config.services?.ticketUpdate
+  if (ticketUpdate) {
+    validateTicketUpdateConfig(ticketUpdate, config.name || config.brand_id)
+  }
 }
 
 /**
@@ -221,6 +226,29 @@ export function validateArchiveConfig(archive: NonNullable<TenantConfig['service
   for (const [name, ep] of Object.entries(archive.endpoints)) {
     validateEndpoint(name, ep, label)
   }
+}
+
+/**
+ * Validate a ticket-update service section (services.ticketUpdate): the
+ * Zendesk OAuth client credentials (Client Credentials grant) this service
+ * uses to call the Zendesk API. Throws with a descriptive message on
+ * failure. Only called when the section is present.
+ */
+export function validateTicketUpdateConfig(
+  ticketUpdate: NonNullable<TenantConfig['services']['ticketUpdate']>,
+  label: string
+): void {
+  const missing: string[] = []
+  if (!ticketUpdate.webhookSecret) missing.push('webhookSecret')
+  if (!ticketUpdate.oauth?.clientId) missing.push('oauth.clientId')
+  if (!ticketUpdate.oauth?.clientSecret) missing.push('oauth.clientSecret')
+
+  if (missing.length > 0) {
+    throw new Error(`Invalid tenant config for "${label}": missing ${missing.join(', ')}`)
+  }
+
+  validateSecretStrength(ticketUpdate.webhookSecret, 'ticketUpdate.webhookSecret', label, MIN_SECRET_LENGTH)
+  validateSecretStrength(ticketUpdate.oauth.clientSecret, 'ticketUpdate.oauth.clientSecret', label, MIN_SECRET_LENGTH)
 }
 
 /**
