@@ -181,11 +181,13 @@ services.ticketCreate (optional):
   apiKey, oauth: { clientId, clientSecret }
 ```
 
-The service sections are optional and independent. `services.ticketUpdate` is built only when all three of its environment variables are set: unset means the tenant does not use the service and `/v1/tickets/update` returns a neutral 400 for its brand, so a service no tenant has provisioned cannot stop the container — and with it archiving — from booting. Set partly, it still fails at boot, naming the missing variable.
+The service sections are optional and independent. `services.ticketUpdate` is built only when all three of its environment variables are set: unset means the tenant does not use the service, and `/v1/tickets/update` returns a neutral 400 for its brand. Set partly, the tenant is treated as broken and skipped, naming the missing variable. `services.ticketCreate` works the same way.
 
-Tenants are declared in `src/tenants.config.ts` with every secret read from an environment variable named `<TENANT>_<FIELD>`. Validation at boot rejects:
+Tenants are declared in `src/tenants.config.ts` with every secret read from an environment variable named `<TENANT>_<FIELD>`. Each one is built and validated **independently**: a tenant that fails is skipped, logged, and reported on `/v1/health`, while the rest load and serve. One institution's mistake cannot stop archiving for the others. A boot that loads no tenant at all is still fatal.
 
-- a missing required variable (the container does not start),
+Validation at boot rejects:
+
+- a missing required variable (that tenant is skipped),
 - a Zendesk subdomain containing anything but letters, digits and hyphens,
 - an archive `baseUrl` that is not HTTPS or that points at a private or loopback address,
 - a secret shorter than 32 characters or made of one repeated character,
@@ -193,6 +195,8 @@ Tenants are declared in `src/tenants.config.ts` with every secret read from an e
 - a field ID that is not a positive integer.
 
 The Zendesk `email`, `apiToken` and `webhookSecret` are required only for a tenant with `services.archive`: the archive service's Zendesk client and webhook signature check are the only things that use them. A tenant without archive needs just the subdomain, and if it does set either secret anyway, the strength rule above still applies.
+
+The same validation runs again in `resolveTenantConfig` on every request, which is what catches drift in a store loaded from elsewhere. Running it at boot as well means a bad value is reported once, by name, instead of once per request.
 
 A request for one tenant can only ever read that tenant's Zendesk and write to that tenant's archive. There is no cross-tenant code path.
 
@@ -272,13 +276,14 @@ In priority order.
 
 ## 12. Tests
 
-24 files, 509 tests, `npm test`. Highlights:
+25 files, 526 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
 - `tests/pipeline.guards.test.ts` covers the case-number rules in section 5.
-- `tests/tenants.config.test.ts` checks the real tenant list loads with placeholder secrets.
+- `tests/tenants.config.test.ts` checks the real tenant list loads with placeholder secrets, and that one broken tenant is skipped rather than taking the others down.
 - `tests/ticketUpdate.test.ts` covers the ticket-update route: signature and freshness rejection, the OAuth token cache, and the 401 retry.
 - `tests/ticketCreate.test.ts` covers the ticket-create route: API key and Idempotency-Key checks, the restricted fields, the 401 retry, the 409 and 502 mappings, and that no submitted values reach the logs.
+- `tests/health.test.ts` pins what `/v1/health` reveals to an anonymous caller versus an operator holding the audit token.
 
 CI runs tests on Node 20 and 22 on every PR, plus CodeQL.

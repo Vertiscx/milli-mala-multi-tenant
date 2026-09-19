@@ -74,6 +74,11 @@ export class FileTenantStore implements TenantStore {
     return this.tenants.get(brandId) ?? null
   }
 
+  /** How many tenants this store holds. Reported on /v1/health. */
+  get size(): number {
+    return this.tenants.size
+  }
+
   static fromJson(json: string): FileTenantStore {
     const data = JSON.parse(json) as { tenants: TenantConfig[] }
 
