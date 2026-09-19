@@ -30,17 +30,18 @@
  * `ticketUpdateSection` below.
  */
 
-import type { TenantConfig, TicketUpdateServiceConfig } from './platform/types.js'
+import type { TenantConfig, TenantLoadFailure, TicketUpdateServiceConfig } from './platform/types.js'
 import { requireEnv, optionalNumberEnv } from './platform/env.js'
+import { validateTenantConfig } from './platform/tenant.js'
 
 /**
  * Build the optional `services.ticketUpdate` section for a tenant.
  *
  * Unlike the archive section, this one is opt-in per tenant: a tenant with
  * none of the three variables set simply has no ticketUpdate section, and
- * `/v1/tickets/update` returns a neutral 400 for its brand. That keeps a
- * service nobody has provisioned yet from being able to stop the container
- * — and with it the archive service — from booting.
+ * `/v1/tickets/update` returns a neutral 400 for its brand. Absent config
+ * means the service is switched off for that tenant, not that the tenant is
+ * broken — so it is not reported as a load failure either.
  *
  * A *partly* configured tenant is still a hard boot failure: the three
  * values only make sense together, so a typo or a half-finished rollout
@@ -72,14 +73,17 @@ function ticketUpdateSection(
   }
 }
 
+type TenantBuilder = [name: string, build: (env: Record<string, string | undefined>) => TenantConfig]
+
 /**
- * Build the tenant array from environment variables. Called once at startup.
- * Throws if any required env var is missing — the container will fail to
- * start, which is intentional (fail fast on misconfiguration).
+ * Every tenant, each one built by its own function so that one tenant's
+ * configuration cannot stop another's from being built. The label repeats
+ * the entry's `name` because it has to be known even when the build throws;
+ * a test asserts the two never drift apart.
  */
-export function loadTenants(env: Record<string, string | undefined> = process.env): TenantConfig[] {
+function tenantBuilders(): TenantBuilder[] {
   return [
-    {
+    ['Kerfisstjórn', (env: Record<string, string | undefined>): TenantConfig => ({
       brand_id: '30220057411090',
       name: 'Kerfisstjórn',
       zendesk: {
@@ -110,8 +114,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
       },
-    },
-    {
+    })],
+    ['Vinnueftirlitið', (env: Record<string, string | undefined>): TenantConfig => ({
       brand_id: '28710908212242',
       name: 'Vinnueftirlitið',
       zendesk: {
@@ -138,8 +142,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
       },
-    },
-    {
+    })],
+    ['Samgöngustofa', (env: Record<string, string | undefined>): TenantConfig => ({
       brand_id: '11037960588818',
       name: 'Samgöngustofa',
       zendesk: {
@@ -168,8 +172,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
       },
-    },
-    {
+    })],
+    ['Tryggingastofnun', (env: Record<string, string | undefined>): TenantConfig => ({
       brand_id: '11204917066386',
       name: 'Tryggingastofnun',
       zendesk: {
@@ -199,8 +203,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         },
         ...ticketUpdateSection('TRYGGINGASTOFNUN', env),
       },
-    },
-    {
+    })],
+    ['Tryggingastofnun-internal', (env: Record<string, string | undefined>): TenantConfig => ({
       brand_id: '36102499292434',
       name: 'Tryggingastofnun-internal',
       zendesk: {
@@ -229,8 +233,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
       },
-    },
-    {
+    })],
+    ['HMS', (env: Record<string, string | undefined>): TenantConfig => ({
       brand_id: '25782179205266',
       name: 'HMS',
       zendesk: {
@@ -256,8 +260,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
       },
-    },
-    {
+    })],
+    ['Sýslumenn', (env: Record<string, string | undefined>): TenantConfig => ({
       brand_id: '5311999061778',
       name: 'Sýslumenn',
       zendesk: {
@@ -288,6 +292,66 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
       },
-    },
+    })],
   ]
+}
+
+export type { TenantLoadFailure }
+
+export interface TenantLoadResult {
+  tenants: TenantConfig[]
+  failures: TenantLoadFailure[]
+}
+
+/**
+ * Build every tenant independently, keeping the ones that succeed.
+ *
+ * A tenant whose variables are missing, or whose values fail validation, is
+ * left out of the result and reported in `failures`; the rest load and serve
+ * normally. This is what stops one institution's typo from taking every
+ * other institution's archiving down with it. The caller is expected to log
+ * the failures loudly and expose them on /v1/health — a skipped tenant is a
+ * degraded deployment, not a healthy one.
+ *
+ * Requests for a skipped tenant get the same neutral 400 an unknown brand
+ * already gets, because it is simply not in the store.
+ *
+ * Validation runs here as well as in `resolveTenantConfig`, so that a bad
+ * URL or a weak secret is caught once at boot rather than on every request.
+ */
+export function loadTenantsIsolated(
+  env: Record<string, string | undefined> = process.env
+): TenantLoadResult {
+  const tenants: TenantConfig[] = []
+  const failures: TenantLoadFailure[] = []
+
+  for (const [name, build] of tenantBuilders()) {
+    try {
+      const tenant = build(env)
+      validateTenantConfig(tenant)
+      tenants.push(tenant)
+    } catch (err) {
+      failures.push({ name, error: (err as Error).message })
+    }
+  }
+
+  return { tenants, failures }
+}
+
+/**
+ * Strict load: every tenant or nothing.
+ *
+ * Used by the tenant-list test, which exists to prove the committed list is
+ * well-formed, and by any caller that would rather not start at all than
+ * start degraded. The error names every tenant that failed and why, so a
+ * misconfigured deployment is fixed in one pass rather than one deploy per
+ * missing variable.
+ */
+export function loadTenants(env: Record<string, string | undefined> = process.env): TenantConfig[] {
+  const { tenants, failures } = loadTenantsIsolated(env)
+  if (failures.length > 0) {
+    const detail = failures.map((f) => `  ${f.name}: ${f.error}`).join('\n')
+    throw new Error(`Invalid tenant configuration (${failures.length} of ${failures.length + tenants.length} tenants):\n${detail}`)
+  }
+  return tenants
 }

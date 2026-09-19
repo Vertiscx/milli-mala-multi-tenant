@@ -14,7 +14,7 @@ How milli-mála is deployed and run in production, and what to do when something
 | Host | AWS ECS, cluster `tooling-prod`, service `prod-milli-mala-multi-tenant`, region `eu-west-1` |
 | Image registry | ECR `821090935708.dkr.ecr.eu-west-1.amazonaws.com/milli-mala-multi-tenant` |
 | Public URL | `https://milli-mala.tooling.island.is` |
-| Health | `GET /v1/health` returns `{"status":"ok", ...}` |
+| Health | `GET /v1/health` returns `{"status":"ok", ...}`, or `"degraded"` when a tenant was skipped at boot |
 | Port | 8080 |
 | Logs | Structured JSON on stdout, one line per event, `brand_id` on every line |
 | Secrets | AWS Parameter Store, injected as environment variables |
@@ -61,7 +61,7 @@ Consequence: **merging to upstream `main` does not put code in production.** Som
    ```bash
    curl https://milli-mala.tooling.island.is/v1/health
    ```
-   then send one real ticket through for the tenant you changed, and check the internal note appears on the ticket and the document appears in the archive.
+   **Check `status` is `ok` and `tenants.loaded` is the number you expect** — a `degraded` response means a tenant was skipped and is no longer being archived. Then send one real ticket through for the tenant you changed, and check the internal note appears on the ticket and the document appears in the archive.
 
 ### Rollback
 
@@ -104,9 +104,25 @@ Two layers.
 
 The full list with current tenants is [.env.example](.env.example).
 
-The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — the container starts normally. **Some but not all three set is a boot failure** naming the missing variable, so a typo or a half-finished rollout is loud rather than silently leaving the service switched off.
+The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — nothing is reported as broken, because nothing is. **Some but not all three set does count as broken**, and that tenant is skipped as below, so a typo or a half-finished rollout shows up rather than silently leaving the service switched off.
 
-Validation runs at boot. The container refuses to start on a missing required variable, a subdomain with invalid characters, a non-HTTPS or private-address archive URL, a short or repeated-character secret, or a non-integer field ID. The error names the variable.
+Validation runs at boot, per tenant. A tenant with a missing required variable, a subdomain with invalid characters, a non-HTTPS or private-address archive URL, a short or repeated-character secret, or a non-integer field ID is **skipped**: the boot log names the tenant and the variable, every other tenant loads, and the container starts. Requests for a skipped tenant get the same neutral `400 Invalid request` an unknown brand gets.
+
+This is deliberate. One institution's configuration mistake must not stop archiving for the other six. The container still refuses to start if *no* tenant loads, since it would have nothing to serve.
+
+A skipped tenant is a degraded deployment, not a healthy one, and `/v1/health` says so:
+
+```bash
+curl https://milli-mala.tooling.island.is/v1/health
+# {"status":"degraded", ..., "tenants":{"loaded":6,"failed":1}}
+
+# Which tenant, and why — needs the operator token, because the detail names
+# institutions and variables and /v1/health is otherwise open:
+curl -H "Authorization: Bearer $AUDIT_SECRET" https://milli-mala.tooling.island.is/v1/health
+# ... "failures":[{"name":"HMS","error":"Missing required environment variable: HMS_ZENDESK_API_TOKEN"}]
+```
+
+**Alert on `tenants.failed` being greater than zero.** Nothing else will tell you an institution stopped being archived — its requests simply return 400, and the tickets pile up unarchived.
 
 ## 5. Adding a tenant
 
@@ -162,8 +178,9 @@ Start with the ticket. Every attempt leaves an internal note: a tick with the ca
 
 | Symptom | Likely cause | Check |
 |---|---|---|
-| Container will not start | Missing or invalid env var | Boot log names the variable. Compare against `.env.example`. |
-| Every request for one tenant returns `400 Invalid request` | Tenant failed validation at boot, usually subdomain with a dot or a bad archive URL | Boot log. |
+| Container will not start | *No* tenant could be loaded, or a non-tenant variable is bad | Boot log names each tenant and variable. Compare against `.env.example`. |
+| One tenant stopped working after a deploy, others fine | That tenant was skipped at boot | `curl -H "Authorization: Bearer $AUDIT_SECRET" .../v1/health` — the failure names the variable. |
+| Every request for one tenant returns `400 Invalid request` | Tenant was skipped at boot, usually subdomain with a dot or a bad archive URL | `/v1/health` with the operator token, or the boot log. |
 | `401 Invalid webhook signature` | Webhook secret mismatch | Re-copy the signing secret from the Zendesk webhook. |
 | `401 Webhook timestamp expired` | Clock skew or a replayed request | Compare timestamps. Five-minute window. |
 | `401` on `/v1/cases` or `/v1/attachments` | Málaskrá key mismatch | Compare the app's secure setting with Parameter Store. |

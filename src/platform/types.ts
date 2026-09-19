@@ -4,6 +4,17 @@
 
 // ─── Tenant Configuration ────────────────────────────────────────────
 
+/**
+ * A tenant that could not be built at boot: its variables were missing, or
+ * its values failed validation. Reported on /v1/health.
+ */
+export interface TenantLoadFailure {
+  /** The tenant's name, as declared in the builder list in tenants.config.ts. */
+  name: string
+  /** Why it could not be built — a missing variable, or a validation failure. */
+  error: string
+}
+
 export interface TenantConfig {
   brand_id: string
   name: string
