@@ -15,7 +15,8 @@ import { getConfig } from './platform/config.js'
 import { findRoute, type ServiceRoute } from './platform/http/routes.js'
 import { archiveRoutes } from './services/archive/routes.js'
 import { FileTenantStore, resolveTenantConfig, sanitizeAuditParam } from './platform/tenant.js'
-import { loadTenants } from './tenants.config.js'
+import { loadTenantsIsolated, type TenantLoadFailure } from './tenants.config.js'
+import { buildHealthBody } from './platform/health.js'
 import { FileAuditStore } from './platform/fileAuditStore.js'
 import { createLogger } from './platform/logger.js'
 import type { Logger } from './platform/types.js'
@@ -31,17 +32,32 @@ const logger: Logger = createLogger('main')
 const MAX_BODY_SIZE = 1024 * 1024 // 1MB
 
 /**
- * Build the tenant store from `src/tenants.config.ts`. Secrets are read
- * from environment variables; missing variables cause `loadTenants` to
- * throw, which intentionally crashes startup (fail fast).
+ * Build the tenant store from `src/tenants.config.ts`. Secrets are read from
+ * environment variables.
+ *
+ * Tenants are built independently: one tenant whose variables are missing or
+ * whose values fail validation is skipped, loudly, and the rest still serve.
+ * One institution's configuration mistake must not stop archiving for the
+ * other six. Skipped tenants are reported on /v1/health so the degradation is
+ * visible to monitoring rather than only in the boot log.
+ *
+ * Nothing loading at all is still fatal — a container serving no tenant has
+ * nothing to offer, and crashing makes that obvious immediately.
  */
-function loadTenantStore(): FileTenantStore {
-  try {
-    return new FileTenantStore(loadTenants())
-  } catch (err) {
-    logger.error('Failed to load tenant config', { error: (err as Error).message })
-    throw err
+function loadTenantStore(): { store: FileTenantStore; failures: TenantLoadFailure[] } {
+  const { tenants, failures } = loadTenantsIsolated()
+
+  for (const failure of failures) {
+    logger.error('Tenant skipped — configuration invalid', { tenant: failure.name, error: failure.error })
   }
+
+  if (tenants.length === 0) {
+    logger.error('No tenants loaded — refusing to start', { failed: failures.length })
+    throw new Error(`No tenants could be loaded (${failures.length} failed)`)
+  }
+
+  logger.info('Tenants loaded', { loaded: tenants.length, failed: failures.length })
+  return { store: new FileTenantStore(tenants), failures }
 }
 
 function getRequestBody(req: IncomingMessage, maxSize: number): Promise<string> {
@@ -67,8 +83,14 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
   res.end(JSON.stringify(data))
 }
 
-function handleHealth(_req: IncomingMessage, res: ServerResponse): void {
-  sendJson(res, 200, { status: 'ok', service: 'milli-mala', version: '2.0.0', timestamp: new Date().toISOString() })
+function handleHealth(
+  req: IncomingMessage,
+  res: ServerResponse,
+  failures: TenantLoadFailure[],
+  loadedTenants: number,
+  auditSecret: string
+): void {
+  sendJson(res, 200, buildHealthBody(failures, loadedTenants, isAuditAuthorized(req, auditSecret)))
 }
 
 async function dispatchServiceRoute(
@@ -101,6 +123,20 @@ async function dispatchServiceRoute(
   }
 }
 
+/**
+ * Constant-time check of the operator bearer token used by /v1/audit, and by
+ * /v1/health to decide whether the caller may see tenant-failure detail. An
+ * unset AUDIT_SECRET authorizes nobody.
+ */
+function isAuditAuthorized(req: IncomingMessage, auditSecret: string): boolean {
+  if (!auditSecret) return false
+  const authHeader = req.headers['authorization'] as string | undefined
+  if (!authHeader) return false
+  const a = createHash('sha256').update(authHeader).digest()
+  const b = createHash('sha256').update(`Bearer ${auditSecret}`).digest()
+  return timingSafeEqual(a, b)
+}
+
 async function handleAuditHttp(
   req: IncomingMessage,
   res: ServerResponse,
@@ -108,15 +144,7 @@ async function handleAuditHttp(
   auditStore: FileAuditStore,
   auditSecret: string
 ): Promise<void> {
-  const authHeader = req.headers['authorization'] as string | undefined
-  const expectedAuth = `Bearer ${auditSecret}`
-  let authValid = false
-  if (authHeader) {
-    const a = createHash('sha256').update(authHeader).digest()
-    const b = createHash('sha256').update(expectedAuth).digest()
-    authValid = timingSafeEqual(a, b)
-  }
-  if (!auditSecret || !authValid) {
+  if (!isAuditAuthorized(req, auditSecret)) {
     return sendJson(res, 401, { error: 'Unauthorized' })
   }
 
@@ -144,13 +172,15 @@ async function handleAuditHttp(
 function startServer(): void {
   const config = getConfig()
   const port = config.service.port
-  const tenantStore = loadTenantStore()
+  const { store: tenantStore, failures: tenantFailures } = loadTenantStore()
   const auditStore = new FileAuditStore(process.env.AUDIT_DIR || './audit-data')
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url!, `http://localhost:${port}`)
 
-    if (url.pathname === '/v1/health' && req.method === 'GET') return handleHealth(req, res)
+    if (url.pathname === '/v1/health' && req.method === 'GET') {
+      return handleHealth(req, res, tenantFailures, tenantStore.size, config.auditSecret)
+    }
     if (url.pathname === '/v1/audit' && req.method === 'GET') return handleAuditHttp(req, res, url, auditStore, config.auditSecret)
     if (url.pathname === '/v1/tickets/update' && req.method === 'POST') return handleTicketUpdateHttp(req, res, tenantStore)
 

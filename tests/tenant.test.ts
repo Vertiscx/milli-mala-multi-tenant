@@ -68,6 +68,14 @@ describe('FileTenantStore', () => {
     expect((await store.get('brand-b'))!.name).toBe('Tenant B')
   })
 
+  it('should report how many tenants it holds', () => {
+    expect(new FileTenantStore([]).size).toBe(0)
+    expect(new FileTenantStore([
+      makeValidTenant({ brand_id: 'brand-a' }),
+      makeValidTenant({ brand_id: 'brand-b' })
+    ]).size).toBe(2)
+  })
+
   it('should parse from JSON', () => {
     const json = JSON.stringify({ tenants: [makeValidTenant()] })
     const store = FileTenantStore.fromJson(json)

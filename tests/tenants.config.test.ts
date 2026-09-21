@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadTenants } from '../src/tenants.config.js'
+import { loadTenants, loadTenantsIsolated } from '../src/tenants.config.js'
 import { validateTenantConfig } from '../src/platform/tenant.js'
 
 /**
@@ -123,10 +123,13 @@ describe('loadTenants', () => {
     const [kerfisstjorn, vinnueftirlit] = loadTenants(validEnv)
     expect(kerfisstjorn.zendesk.subdomain).toBe('kerfisstjorn-test')
     expect(kerfisstjorn.zendesk.email).toBe('admin@kerfisstjorn.test')
-    expect(kerfisstjorn.services.archive!.endpoints.onesystems?.baseUrl).toBe('https://onesystems.test.example/')
+    // Loading now validates each tenant, and validation normalizes the URL,
+    // so the trailing slash in the env value is already stripped here rather
+    // than on the first request. Idempotent — resolveTenantConfig still runs.
+    expect(kerfisstjorn.services.archive!.endpoints.onesystems?.baseUrl).toBe('https://onesystems.test.example')
     expect(vinnueftirlit.zendesk.subdomain).toBe('vinnueftirlit-test')
     expect(vinnueftirlit.zendesk.email).toBe('admin@vinnueftirlit.test')
-    expect(vinnueftirlit.services.archive!.endpoints.gopro?.baseUrl).toBe('https://gopro.test.example/')
+    expect(vinnueftirlit.services.archive!.endpoints.gopro?.baseUrl).toBe('https://gopro.test.example')
   })
 
   it('configures Kerfisstjórn with a OneSystems endpoint', () => {
@@ -286,5 +289,86 @@ describe('loadTenants', () => {
     const vinnueftirlit = tenants.find(t => t.name === 'Vinnueftirlitið')!
     expect(vinnueftirlit.services.archive!.endpoints.gopro?.templateFieldId).toBeUndefined()
     expect(vinnueftirlit.services.archive!.endpoints.gopro?.kennitalaFieldId).toBeUndefined()
+  })
+})
+
+describe('loadTenantsIsolated', () => {
+  it('loads every tenant with no failures when the environment is complete', () => {
+    const { tenants, failures } = loadTenantsIsolated(validEnv)
+    expect(failures).toEqual([])
+    expect(tenants.length).toBe(loadTenants(validEnv).length)
+  })
+
+  it('labels each builder with the name the tenant actually carries', () => {
+    // The label has to exist outside the builder so a failure can be named
+    // even when the build throws. This is what stops the two drifting apart.
+    const { tenants } = loadTenantsIsolated(validEnv)
+    const names = tenants.map(t => t.name)
+    expect(new Set(names).size).toBe(names.length)
+    for (const tenant of tenants) {
+      expect(tenant.name).toBeTruthy()
+    }
+  })
+
+  it('skips only the tenant whose variable is missing and keeps serving the rest', () => {
+    const env = { ...validEnv }
+    delete env.HMS_ZENDESK_API_TOKEN
+
+    const { tenants, failures } = loadTenantsIsolated(env)
+    expect(failures).toHaveLength(1)
+    expect(failures[0]!.name).toBe('HMS')
+    expect(failures[0]!.error).toContain('HMS_ZENDESK_API_TOKEN')
+    expect(tenants.map(t => t.name)).not.toContain('HMS')
+    // Every other institution still loads — the whole point of the change.
+    expect(tenants.length).toBe(loadTenants(validEnv).length - 1)
+    expect(tenants.map(t => t.name)).toContain('Kerfisstjórn')
+  })
+
+  it('skips a tenant whose values are present but invalid', () => {
+    const env = { ...validEnv, HMS_ONESYSTEMS_BASE_URL: 'http://127.0.0.1/internal' }
+
+    const { tenants, failures } = loadTenantsIsolated(env)
+    expect(failures.map(f => f.name)).toEqual(['HMS'])
+    expect(tenants.map(t => t.name)).not.toContain('HMS')
+  })
+
+  it('skips a tenant whose ticket-update section is only half configured', () => {
+    // Opt-in means all three unset; two of three is a mistake, and it costs
+    // that tenant its place in the store rather than the whole boot.
+    const env = { ...validEnv }
+    delete env.TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_SECRET
+
+    const { tenants, failures } = loadTenantsIsolated(env)
+    expect(failures.map(f => f.name)).toEqual(['Tryggingastofnun'])
+    expect(failures[0]!.error).toContain('TRYGGINGASTOFNUN_ZENDESK_OAUTH_CLIENT_SECRET')
+    expect(tenants.map(t => t.name)).toContain('Tryggingastofnun-internal')
+  })
+
+  it('reports every broken tenant, not just the first', () => {
+    const env = { ...validEnv }
+    delete env.HMS_ZENDESK_API_TOKEN
+    delete env.KERFISSTJORN_ZENDESK_SUBDOMAIN
+
+    const { failures } = loadTenantsIsolated(env)
+    expect(failures.map(f => f.name).sort()).toEqual(['HMS', 'Kerfisstjórn'])
+  })
+
+  it('returns no tenants at all when the environment is empty — the caller decides that is fatal', () => {
+    const { tenants, failures } = loadTenantsIsolated({})
+    expect(tenants).toEqual([])
+    expect(failures.length).toBeGreaterThan(0)
+  })
+})
+
+describe('loadTenants (strict)', () => {
+  it('names every broken tenant and variable in one error', () => {
+    const env = { ...validEnv }
+    delete env.HMS_ZENDESK_API_TOKEN
+    delete env.KERFISSTJORN_ZENDESK_SUBDOMAIN
+
+    // One pass to fix the deployment, rather than one deploy per variable.
+    expect(() => loadTenants(env)).toThrow(/HMS_ZENDESK_API_TOKEN/)
+    expect(() => loadTenants(env)).toThrow(/KERFISSTJORN_ZENDESK_SUBDOMAIN/)
+    expect(() => loadTenants(env)).toThrow(/2 of \d+ tenants/)
   })
 })
