@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHmac } from 'crypto'
-import { handleTicketUpdate } from '../src/services/ticketUpdate/handler.js'
+import { createRequest, createResponse } from 'node-mocks-http'
+import { handleTicketUpdate, handleTicketUpdateHttp } from '../src/services/ticketUpdate/handler.js'
 import type { TenantConfig } from '../src/platform/types.js'
 import type { TenantStore } from '../src/platform/tenant.js'
 
@@ -224,5 +225,122 @@ describe('handleTicketUpdate', () => {
     const result = await handleTicketUpdate(makeRequest({ id: '123', brand_id: '11', recipient: 'a@b.is' }), store)
     expect(result.status).toBe(502)
     expect(result.body.error).toBe('Zendesk authentication failed')
+  })
+
+  it('rejects a request with the signature/timestamp headers missing entirely', async () => {
+    const store = makeStore([makeTenantConfig('12')])
+    const ticket = { id: '123', brand_id: '12', recipient: 'a@b.is' }
+    const body = { ticket }
+    const result = await handleTicketUpdate({ body, rawBody: JSON.stringify(body), headers: {} }, store)
+    expect(result.status).toBe(401)
+    expect(result.body.error).toBe('Invalid webhook signature')
+  })
+
+  it('rejects a malformed signature instead of throwing (timingSafeEqual length mismatch)', async () => {
+    const store = makeStore([makeTenantConfig('13')])
+    const ticket = { id: '123', brand_id: '13', recipient: 'a@b.is' }
+    const body = { ticket }
+    const result = await handleTicketUpdate({
+      body,
+      rawBody: JSON.stringify(body),
+      headers: {
+        'x-zendesk-webhook-signature': 'not-a-real-signature',
+        'x-zendesk-webhook-signature-timestamp': new Date().toISOString()
+      }
+    }, store)
+    expect(result.status).toBe(401)
+    expect(result.body.error).toBe('Invalid webhook signature')
+  })
+
+  it('rejects an unparseable timestamp', async () => {
+    const store = makeStore([makeTenantConfig('14')])
+    const req = makeRequest({ id: '123', brand_id: '14', recipient: 'a@b.is' }, { timestamp: 'not-a-date' })
+    const result = await handleTicketUpdate(req, store)
+    expect(result.status).toBe(401)
+    expect(result.body.error).toBe('Webhook timestamp expired')
+  })
+
+  it('returns 502 when the retry\'s own token refresh fails', async () => {
+    const store = makeStore([makeTenantConfig('15')])
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'unauthorized' })
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'oauth server error' })
+
+    const result = await handleTicketUpdate(makeRequest({ id: '123', brand_id: '15', recipient: 'a@b.is' }), store)
+    expect(result.status).toBe(502)
+    expect(result.body.error).toBe('Zendesk authentication failed')
+  })
+
+  it('still returns a clean 502 if reading the failed response body itself throws', async () => {
+    const store = makeStore([makeTenantConfig('16')])
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => { throw new Error('stream already consumed') } })
+
+    const result = await handleTicketUpdate(makeRequest({ id: '123', brand_id: '16', recipient: 'a@b.is' }), store)
+    expect(result.status).toBe(502)
+    expect(result.body.error).toBe('Zendesk ticket update failed')
+  })
+
+  it('returns a generic 500 if the Zendesk update call itself throws unexpectedly', async () => {
+    const store = makeStore([makeTenantConfig('17')])
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(tokenResponse())
+      .mockRejectedValueOnce(new Error('network blip'))
+
+    const result = await handleTicketUpdate(makeRequest({ id: '123', brand_id: '17', recipient: 'a@b.is' }), store)
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+  })
+})
+
+describe('handleTicketUpdateHttp', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('returns 200 for a valid signed request', async () => {
+    const store = makeStore([makeTenantConfig('20')])
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+
+    const { rawBody, headers } = makeRequest({ id: '123', brand_id: '20', recipient: 'a@b.is' })
+    const req = createRequest({ method: 'POST', url: '/v1/tickets/update', headers })
+    const res = createResponse()
+
+    const promise = handleTicketUpdateHttp(req, res, store)
+    req.send(rawBody)
+    await promise
+
+    expect(res._getStatusCode()).toBe(200)
+    expect(JSON.parse(res._getData())).toMatchObject({ success: true, ticket_id: 123, brand_id: '20' })
+  })
+
+  it('returns 400 for an invalid JSON body', async () => {
+    const store = makeStore([makeTenantConfig('21')])
+    const req = createRequest({ method: 'POST', url: '/v1/tickets/update', headers: {} })
+    const res = createResponse()
+
+    const promise = handleTicketUpdateHttp(req, res, store)
+    req.send('not valid json{')
+    await promise
+
+    expect(res._getStatusCode()).toBe(400)
+    expect(JSON.parse(res._getData())).toEqual({ error: 'Invalid JSON body' })
+  })
+
+  it('returns 500 when the request body exceeds the size cap', async () => {
+    const store = makeStore([makeTenantConfig('22')])
+    const req = createRequest({ method: 'POST', url: '/v1/tickets/update', headers: {} })
+    const res = createResponse()
+
+    const promise = handleTicketUpdateHttp(req, res, store)
+    req.send('x'.repeat(1024 * 1024 + 1))
+    await promise
+
+    expect(res._getStatusCode()).toBe(500)
+    expect(JSON.parse(res._getData())).toEqual({ error: 'Internal server error' })
   })
 })
