@@ -683,3 +683,64 @@ describe('validateTenantConfig — Zendesk credentials are archive-only', () => 
     expect(() => validateTenantConfig(tenant)).toThrow('zendesk.webhookSecret must not be a repeated character')
   })
 })
+
+describe('validateTenantConfig — ticketCreate section', () => {
+  type TicketCreate = NonNullable<TenantConfig['services']['ticketCreate']>
+
+  function makeTicketCreateTenant(overrides: Partial<TicketCreate> = {}): TenantConfig {
+    return {
+      brand_id: '30303665547154',
+      name: 'Þjóðskrá',
+      zendesk: { subdomain: 'digitaliceland' },
+      services: {
+        ticketCreate: {
+          apiKey: 'aK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS',
+          oauth: { clientId: 'client-id', clientSecret: 'cS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD' },
+          allowedGroupIds: [30629764322322],
+          allowedFormIds: [30304658151442],
+          ...overrides
+        }
+      }
+    }
+  }
+
+  it('accepts a valid ticketCreate section on a tenant without archive', () => {
+    expect(() => validateTenantConfig(makeTicketCreateTenant())).not.toThrow()
+  })
+
+  it('accepts empty allowed-ID lists (every group/form ID is then dropped)', () => {
+    expect(() => validateTenantConfig(makeTicketCreateTenant({ allowedGroupIds: [], allowedFormIds: [] }))).not.toThrow()
+  })
+
+  it('lists every missing credential and list', () => {
+    const tenant = makeTicketCreateTenant({
+      apiKey: '',
+      oauth: { clientId: '', clientSecret: '' },
+      allowedGroupIds: undefined as unknown as number[],
+      allowedFormIds: undefined as unknown as number[]
+    })
+    expect(() => validateTenantConfig(tenant)).toThrow(
+      'missing ticketCreate apiKey, oauth.clientId, oauth.clientSecret, allowedGroupIds, allowedFormIds'
+    )
+  })
+
+  it('rejects a weak API key', () => {
+    expect(() => validateTenantConfig(makeTicketCreateTenant({ apiKey: 'short-key' })))
+      .toThrow('ticketCreate.apiKey must be at least 32 characters')
+  })
+
+  it('rejects a weak OAuth client secret', () => {
+    const tenant = makeTicketCreateTenant({ oauth: { clientId: 'client-id', clientSecret: 'z'.repeat(40) } })
+    expect(() => validateTenantConfig(tenant)).toThrow('ticketCreate.oauth.clientSecret must not be a repeated character')
+  })
+
+  it.each([
+    ['allowedGroupIds', 0],
+    ['allowedGroupIds', -5],
+    ['allowedFormIds', 1.5],
+    ['allowedFormIds', '30304658151442']
+  ] as const)('rejects %s containing %j', (key, badId) => {
+    const tenant = makeTicketCreateTenant({ [key]: [badId as unknown as number] })
+    expect(() => validateTenantConfig(tenant)).toThrow(`ticketCreate.${key} must contain positive integers`)
+  })
+})

@@ -147,6 +147,11 @@ export function validateTenantConfig(config: TenantConfig): void {
   if (ticketUpdate) {
     validateTicketUpdateConfig(ticketUpdate, config.name || config.brand_id)
   }
+
+  const ticketCreate = config.services?.ticketCreate
+  if (ticketCreate) {
+    validateTicketCreateConfig(ticketCreate, config.name || config.brand_id)
+  }
 }
 
 /**
@@ -259,6 +264,41 @@ export function validateTicketUpdateConfig(
 
   validateSecretStrength(ticketUpdate.webhookSecret, 'ticketUpdate.webhookSecret', label, MIN_SECRET_LENGTH)
   validateSecretStrength(ticketUpdate.oauth.clientSecret, 'ticketUpdate.oauth.clientSecret', label, MIN_SECRET_LENGTH)
+}
+
+/**
+ * Validate a ticket-create service section (services.ticketCreate): the
+ * caller's API key, the Zendesk OAuth client credentials, and the allowed
+ * group/form ID lists. Throws with a descriptive message on failure.
+ * Only called when the section is present.
+ */
+export function validateTicketCreateConfig(
+  ticketCreate: NonNullable<TenantConfig['services']['ticketCreate']>,
+  label: string
+): void {
+  const missing: string[] = []
+  if (!ticketCreate.apiKey) missing.push('apiKey')
+  if (!ticketCreate.oauth?.clientId) missing.push('oauth.clientId')
+  if (!ticketCreate.oauth?.clientSecret) missing.push('oauth.clientSecret')
+  if (!Array.isArray(ticketCreate.allowedGroupIds)) missing.push('allowedGroupIds')
+  if (!Array.isArray(ticketCreate.allowedFormIds)) missing.push('allowedFormIds')
+
+  if (missing.length > 0) {
+    throw new Error(`Invalid tenant config for "${label}": missing ticketCreate ${missing.join(', ')}`)
+  }
+
+  validateSecretStrength(ticketCreate.apiKey, 'ticketCreate.apiKey', label, MIN_SECRET_LENGTH)
+  validateSecretStrength(ticketCreate.oauth.clientSecret, 'ticketCreate.oauth.clientSecret', label, MIN_SECRET_LENGTH)
+
+  for (const key of ['allowedGroupIds', 'allowedFormIds'] as const) {
+    for (const id of ticketCreate[key]) {
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new Error(
+          `Invalid tenant config for "${label}": ticketCreate.${key} must contain positive integers (got ${JSON.stringify(id)})`
+        )
+      }
+    }
+  }
 }
 
 /**

@@ -8,7 +8,30 @@ export interface TenantConfig {
   brand_id: string
   name: string
   zendesk: ZendeskConfig
-  services: { archive?: ArchiveServiceConfig; ticketUpdate?: TicketUpdateServiceConfig }
+  services: {
+    archive?: ArchiveServiceConfig
+    ticketUpdate?: TicketUpdateServiceConfig
+    ticketCreate?: TicketCreateServiceConfig
+  }
+}
+
+// Config for the ticketCreate service (src/services/ticketCreate/), called
+// by a system outside Zendesk (e.g. a web form's backend), so it is
+// authenticated by a per-tenant API key rather than a Zendesk webhook
+// signature. Its OAuth client is separate from ticketUpdate's.
+//
+// The ID lists bound what a caller can choose on the shared Zendesk
+// account: a group_id or ticket_form_id not listed here is dropped from
+// the ticket rather than sent, so one institution's form can't route
+// tickets into another institution's groups or forms.
+export interface TicketCreateServiceConfig {
+  apiKey: string
+  oauth: {
+    clientId: string
+    clientSecret: string
+  }
+  allowedGroupIds: number[]
+  allowedFormIds: number[]
 }
 
 // Credentials for the ticketUpdate service (src/services/ticketUpdate/):
