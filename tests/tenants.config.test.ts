@@ -77,18 +77,23 @@ const validEnv: Record<string, string> = {
   SYSLUMENN_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example/',
   SYSLUMENN_ONESYSTEMS_APP_KEY: testSecret('syslu-os-appkey', 40),
   SYSLUMENN_MALASKRA_API_KEY: testSecret('syslu-malaskra-key', 40),
+  THJODSKRA_ZENDESK_SUBDOMAIN: 'thjodskra-test',
+  THJODSKRA_TICKET_CREATE_API_KEY: testSecret('thjod-create-api-key', 40),
+  THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_ID: testSecret('thjod-create-client-id', 40),
+  THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET: testSecret('thjod-create-client-secret', 40),
 }
 
 describe('loadTenants', () => {
   it('returns all tenants when all env vars are set', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants).toHaveLength(7)
+    expect(tenants).toHaveLength(8)
     expect(tenants[0].name).toBe('Kerfisstjórn')
     expect(tenants[1].name).toBe('Vinnueftirlitið')
     expect(tenants[2].name).toBe('Samgöngustofa')
     expect(tenants[3].name).toBe('Tryggingastofnun')
     expect(tenants[4].name).toBe('Tryggingastofnun-internal')
     expect(tenants[5].name).toBe('HMS')
+    expect(tenants[7].name).toBe('Þjóðskrá')
   })
 
   it('produces tenants that pass validateTenantConfig', () => {
@@ -148,7 +153,8 @@ describe('loadTenants', () => {
     const tenants = loadTenants(validEnv)
     const samgongustofa = tenants.find(t => t.name === 'Samgöngustofa')!
     expect(samgongustofa.services.archive!.pdf.includeInternalNotes).toBe(true)
-    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa')) {
+    // Only archive tenants have a PDF config (Þjóðskrá has no archive).
+    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa' && t.services.archive)) {
       expect(other.services.archive!.pdf.includeInternalNotes).toBe(false)
     }
   })
@@ -262,7 +268,7 @@ describe('loadTenants', () => {
   })
 
   it('succeeds with the field-ID vars unset — both fields undefined (graceful absence)', () => {
-    const tenants = loadTenants(validEnv)
+    const tenants = loadTenants(validEnv).filter(t => t.services.archive)
     for (const tenant of tenants) {
       for (const ep of Object.values(tenant.services.archive!.endpoints)) {
         expect(ep.templateFieldId).toBeUndefined()
@@ -286,5 +292,72 @@ describe('loadTenants', () => {
     const vinnueftirlit = tenants.find(t => t.name === 'Vinnueftirlitið')!
     expect(vinnueftirlit.services.archive!.endpoints.gopro?.templateFieldId).toBeUndefined()
     expect(vinnueftirlit.services.archive!.endpoints.gopro?.kennitalaFieldId).toBeUndefined()
+  })
+})
+
+describe('loadTenants — Þjóðskrá (ticket creation only)', () => {
+  const THJODSKRA_GROUP_IDS = [
+    30629764322322, 39394427576210, 30630891789586, 30629761264274, 30629691531922,
+    30971725907346, 30971406730898, 30630865208594, 30567942107026, 30304117194130,
+  ]
+
+  function thjodskra(env: Record<string, string | undefined> = validEnv) {
+    return loadTenants(env).find(t => t.brand_id === '30303665547154')!
+  }
+
+  it('configures Þjóðskrá with its brand, name and subdomain, and no archive or Zendesk credentials', () => {
+    const tenant = thjodskra()
+    expect(tenant.name).toBe('Þjóðskrá')
+    expect(tenant.zendesk).toEqual({ subdomain: 'thjodskra-test' })
+    expect(tenant.services.archive).toBeUndefined()
+    expect(tenant.services.ticketUpdate).toBeUndefined()
+  })
+
+  it('wires the ticketCreate API key, OAuth client and allowed ID lists', () => {
+    expect(thjodskra().services.ticketCreate).toEqual({
+      apiKey: testSecret('thjod-create-api-key', 40),
+      oauth: {
+        clientId: testSecret('thjod-create-client-id', 40),
+        clientSecret: testSecret('thjod-create-client-secret', 40),
+      },
+      allowedGroupIds: THJODSKRA_GROUP_IDS,
+      allowedFormIds: [30304658151442],
+    })
+  })
+
+  it('passes validateTenantConfig', () => {
+    expect(() => validateTenantConfig(thjodskra())).not.toThrow()
+  })
+
+  it('is the only tenant with a ticketCreate section', () => {
+    for (const other of loadTenants(validEnv).filter(t => t.name !== 'Þjóðskrá')) {
+      expect(other.services.ticketCreate).toBeUndefined()
+    }
+  })
+
+  it('has no ticketCreate section, and still loads, when none of its three variables are set', () => {
+    const env = { ...validEnv }
+    delete env.THJODSKRA_TICKET_CREATE_API_KEY
+    delete env.THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_ID
+    delete env.THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET
+
+    expect(thjodskra(env).services.ticketCreate).toBeUndefined()
+    expect(loadTenants(env)).toHaveLength(8)
+  })
+
+  it.each([
+    'THJODSKRA_TICKET_CREATE_API_KEY',
+    'THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_ID',
+    'THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET',
+  ])('throws naming %s when only that one of the three is missing', (name) => {
+    const env = { ...validEnv }
+    delete env[name]
+    expect(() => loadTenants(env)).toThrow(name)
+  })
+
+  it('throws when THJODSKRA_ZENDESK_SUBDOMAIN is missing', () => {
+    const env = { ...validEnv }
+    delete env.THJODSKRA_ZENDESK_SUBDOMAIN
+    expect(() => loadTenants(env)).toThrow('THJODSKRA_ZENDESK_SUBDOMAIN')
   })
 })

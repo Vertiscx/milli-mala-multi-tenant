@@ -26,11 +26,11 @@
  * variables) use `optionalNumberEnv` and may be unset — unset means the
  * webhook create inputs are unavailable for that tenant.
  *
- * The ticket-update service is opt-in per tenant the same way: see
- * `ticketUpdateSection` below.
+ * The ticket-update and ticket-create services are opt-in per tenant the
+ * same way: see `ticketUpdateSection` and `ticketCreateSection` below.
  */
 
-import type { TenantConfig, TicketUpdateServiceConfig } from './platform/types.js'
+import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig } from './platform/types.js'
 import { requireEnv, optionalNumberEnv } from './platform/env.js'
 
 /**
@@ -68,6 +68,46 @@ function ticketUpdateSection(
         clientId: requireEnv(names.clientId, env),
         clientSecret: requireEnv(names.clientSecret, env),
       },
+    },
+  }
+}
+
+/**
+ * Build the optional `services.ticketCreate` section for a tenant.
+ *
+ * Opt-in exactly like `ticketUpdateSection`: none of the three variables
+ * set means no section (and a neutral 400 from `/v1/tickets/create` for
+ * the brand); some but not all set is a boot failure naming the missing one.
+ *
+ * The variable names are deliberately distinct from ticketUpdate's
+ * `<T>_ZENDESK_OAUTH_*`: ticket creation uses its own OAuth client.
+ *
+ * The allowed group/form ID lists are passed in from code, not read from
+ * the environment — they are not secret, and they decide which groups and
+ * forms a tenant's tickets may land in, so changes should be reviewed.
+ */
+function ticketCreateSection(
+  prefix: string,
+  env: Record<string, string | undefined>,
+  ids: { allowedGroupIds: number[]; allowedFormIds: number[] }
+): { ticketCreate?: TicketCreateServiceConfig } {
+  const names = {
+    apiKey: `${prefix}_TICKET_CREATE_API_KEY`,
+    clientId: `${prefix}_TICKET_CREATE_OAUTH_CLIENT_ID`,
+    clientSecret: `${prefix}_TICKET_CREATE_OAUTH_CLIENT_SECRET`,
+  }
+
+  if (Object.values(names).every((name) => !env[name])) return {}
+
+  return {
+    ticketCreate: {
+      apiKey: requireEnv(names.apiKey, env),
+      oauth: {
+        clientId: requireEnv(names.clientId, env),
+        clientSecret: requireEnv(names.clientSecret, env),
+      },
+      allowedGroupIds: ids.allowedGroupIds,
+      allowedFormIds: ids.allowedFormIds,
     },
   }
 }
@@ -287,6 +327,24 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
             includeInternalNotes: false,
           },
         },
+      },
+    },
+    {
+      // Ticket creation only — no archive, so no Zendesk email/apiToken/
+      // webhookSecret (those are archive-only).
+      brand_id: '30303665547154',
+      name: 'Þjóðskrá',
+      zendesk: {
+        subdomain: requireEnv('THJODSKRA_ZENDESK_SUBDOMAIN', env),
+      },
+      services: {
+        ...ticketCreateSection('THJODSKRA', env, {
+          allowedGroupIds: [
+            30629764322322, 39394427576210, 30630891789586, 30629761264274, 30629691531922,
+            30971725907346, 30971406730898, 30630865208594, 30567942107026, 30304117194130,
+          ],
+          allowedFormIds: [30304658151442],
+        }),
       },
     },
   ]

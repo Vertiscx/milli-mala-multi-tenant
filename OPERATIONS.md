@@ -92,19 +92,23 @@ Two layers.
 | Variable | Required | Notes |
 |---|---|---|
 | `<T>_ZENDESK_SUBDOMAIN` | yes | **Bare subdomain only**, for example `digitaliceland`. Not the hostname. A value with a dot fails validation and the tenant returns 400 on every request. |
-| `<T>_ZENDESK_EMAIL` | yes | The API user. Needs ticket-write scope for the case-number stamp and the result note. |
-| `<T>_ZENDESK_API_TOKEN` | yes | 32+ characters. Zendesk tokens are 40. |
-| `<T>_ZENDESK_WEBHOOK_SECRET` | yes | Shown once by Zendesk when the webhook is created. 32+ characters. |
+| `<T>_ZENDESK_EMAIL` | archive tenants | The API user. Needs ticket-write scope for the case-number stamp and the result note. |
+| `<T>_ZENDESK_API_TOKEN` | archive tenants | 32+ characters. Zendesk tokens are 40. |
+| `<T>_ZENDESK_WEBHOOK_SECRET` | archive tenants | Shown once by Zendesk when the webhook is created. 32+ characters. |
 | `<T>_ONESYSTEMS_BASE_URL` and `<T>_ONESYSTEMS_APP_KEY` | OneSystems tenants | HTTPS, public hostname, **no trailing slash**. |
 | `<T>_GOPRO_BASE_URL`, `<T>_GOPRO_USERNAME`, `<T>_GOPRO_PASSWORD` | GoPro tenants | Password 16+ characters. |
 | `<T>_MALASKRA_API_KEY` | yes | Generate fresh: `openssl rand -hex 24`. Must be unique across tenants. The same value goes into the Málaskrá app's secure setting for that brand. |
 | `<T>_TICKET_UPDATE_WEBHOOK_SECRET` | opt-in | Shown once by Zendesk when that webhook is created. 32+ characters. **Not the same value as `<T>_ZENDESK_WEBHOOK_SECRET`** — Zendesk generates one signing secret per webhook target and never lets it be chosen. |
 | `<T>_ZENDESK_OAUTH_CLIENT_ID`, `<T>_ZENDESK_OAUTH_CLIENT_SECRET` | opt-in | Credentials of a Zendesk OAuth client (Client Credentials grant) on that tenant's account, scoped `tickets:write`. Secret 32+ characters. |
+| `<T>_TICKET_CREATE_API_KEY` | opt-in | The key the tenant's ticket-create caller (e.g. a web form's backend) sends in `X-Api-Key`. Generate fresh: `openssl rand -hex 24`. **Unique per tenant**: whoever holds it can create tickets in that brand. The same value goes to the team running the caller. |
+| `<T>_TICKET_CREATE_OAUTH_CLIENT_ID`, `<T>_TICKET_CREATE_OAUTH_CLIENT_SECRET` | opt-in | A Zendesk OAuth client used only for ticket creation, separate from the ticket-update one. Secret 32+ characters. |
 | `<T>_TEMPLATE_FIELD_ID`, `<T>_KENNITALA_FIELD_ID`, `<T>_CASE_NUMBER_FIELD_ID` | optional | Numeric Zendesk custom-field IDs. Not secrets. Account-level, so every brand on the same Zendesk account uses the same three numbers. Without `CASE_NUMBER_FIELD_ID` the webhook will not create cases. |
 
 The full list with current tenants is [.env.example](.env.example).
 
-The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — the container starts normally. **Some but not all three set is a boot failure** naming the missing variable, so a typo or a half-finished rollout is loud rather than silently leaving the service switched off.
+The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — the container starts normally. **Some but not all three set is a boot failure** naming the missing variable, so a typo or a half-finished rollout is loud rather than silently leaving the service switched off. The three ticket-create variables work the same way.
+
+A tenant without the archive service (Þjóðskrá, for example) needs only `<T>_ZENDESK_SUBDOMAIN` plus the variables of the services it uses. `<T>_ZENDESK_SUBDOMAIN` itself is always required, so adding such a tenant still means provisioning it before deploying.
 
 Validation runs at boot. The container refuses to start on a missing required variable, a subdomain with invalid characters, a non-HTTPS or private-address archive URL, a short or repeated-character secret, or a non-integer field ID. The error names the variable.
 
@@ -139,6 +143,17 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 2. **Code:** add the `services.ticketUpdate` section to the tenant block in `src/tenants.config.ts` and the three variable names to `.env.example`.
 3. **Secrets:** send all three values to DevOps as in section 5 step 4 and confirm they are in Parameter Store before deploying. Provision the three together: a deployment carrying only one or two of them fails to boot.
 4. **Deploy**, then verify with one real ticket.
+
+## 5b. Enabling ticket creation for a tenant
+
+`/v1/tickets/create` lets a system outside Zendesk — a web form's backend server, typically — create tickets in one brand. It is enabled per tenant.
+
+1. **Zendesk side:** create an OAuth client (Admin Center, Apps and integrations, APIs, OAuth clients) on the tenant's account, used only for ticket creation. Note the client ID and secret.
+2. **API key:** generate one with `openssl rand -hex 24`. It must be unique to this tenant.
+3. **Code:** in the tenant's block in `src/tenants.config.ts`, add `ticketCreateSection('<T>', env, { allowedGroupIds, allowedFormIds })` with the Zendesk group and ticket-form IDs the caller may use. A `group_id` or `ticket_form_id` not on these lists is dropped from the ticket (it is still created). Add the three variable names to `.env.example`. If the tenant is new and has no archive, its block needs only `zendesk.subdomain` besides this section.
+4. **Secrets:** send the three values to DevOps as in section 5 step 4, and the API key also to the team running the caller. Confirm they are in Parameter Store before deploying.
+5. **The caller** sends `X-Api-Key` and its own submission ID in `Idempotency-Key` with every request, and escapes citizens' input before putting it in `html_body`. A retry with the same `Idempotency-Key` within two hours returns the original ticket instead of creating another.
+6. **Deploy**, check that `POST /v1/tickets/create` answers 400 or 401 (not 404), then make one real submission: confirm the ticket lands in the right brand and group, a requester new to Zendesk is created, and re-sending the same `Idempotency-Key` does not create a second ticket.
 
 ## 6. Rotating a secret
 

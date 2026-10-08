@@ -14,7 +14,7 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 |---|---|
 | Services | Archive and ticket update (production), ticket create. Others are added under `src/services/` without touching the platform. |
 | Archive backends | OneSystems, GoPro |
-| Tenants | One per Zendesk brand. Seven configured. |
+| Tenants | One per Zendesk brand. Eight configured. |
 | Production | One Node.js container on AWS ECS, run by Digital Iceland |
 | Runtime dependency | jsPDF, and nothing else |
 | Licence | Apache-2.0 |
@@ -88,7 +88,7 @@ Requires Node.js 20 or later.
 
 ```bash
 npm ci
-npm test              # 501 tests, under a second
+npm test              # 510 tests, under a second
 npm run typecheck
 ```
 

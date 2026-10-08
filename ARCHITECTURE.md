@@ -14,7 +14,7 @@ Read [README.md](README.md) first for the short version and local setup. Read [O
 
 **The archive service** is the integration in production. An institution handles citizen correspondence in Zendesk and is obliged to file it in its official archive. The service receives a signed request naming a ticket, fetches the ticket from Zendesk, renders it to PDF, and uploads the PDF and any attachments into the institution's archive case. If the ticket has no case yet, it can ask the archive to create one and write the new case number back onto the ticket. Zendesk never sees archive credentials. Archive systems never see Zendesk credentials.
 
-Two archive products are supported: **OneSystems** and **GoPro**. Seven institutions are configured today.
+Two archive products are supported: **OneSystems** and **GoPro**. Eight institutions are configured today; seven of them use archiving.
 
 **The ticket-update service** is the platform's second service. It lets a Zendesk trigger update a ticket through the Zendesk API using a per-tenant OAuth client (Client Credentials grant) instead of a Basic-auth API token, which is the direction Zendesk is moving. The gateway makes the API call itself, so the access token never travels back through Zendesk's trigger machinery or its logs. It shares nothing with the archive service but the platform underneath it.
 
@@ -272,7 +272,7 @@ In priority order.
 
 ## 12. Tests
 
-24 files, 501 tests, `npm test`. Highlights:
+24 files, 510 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
