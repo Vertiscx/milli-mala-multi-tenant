@@ -5,7 +5,7 @@
  * Docker / K8s      → config in code (src/tenants.config.ts) + env vars
  */
 
-import type { TenantConfig, EndpointConfig } from './types.js'
+import type { TenantConfig, EndpointConfig, ZendeskConfig } from './types.js'
 import { createLogger } from './logger.js'
 
 const logger = createLogger('tenant')
@@ -130,16 +130,17 @@ export async function resolveTenantConfig(
  * Validate that a TenantConfig has all required fields.
  * Throws with a descriptive message on failure.
  *
- * Core identity + Zendesk credentials are always required. The archive
- * section (services.archive) is validated only when present — a tenant
- * with no archive service configured is otherwise valid.
+ * Core identity + Zendesk subdomain are always required. The archive
+ * section (services.archive) is validated only when present, and brings
+ * the Zendesk email/apiToken/webhookSecret requirement with it — a tenant
+ * with no archive service configured is otherwise valid without them.
  */
 export function validateTenantConfig(config: TenantConfig): void {
   validateTenantCore(config)
 
   const archive = config.services?.archive
   if (archive) {
-    validateArchiveConfig(archive, config.name || config.brand_id)
+    validateArchiveConfig(archive, config.name || config.brand_id, config.zendesk)
   }
 
   const ticketUpdate = config.services?.ticketUpdate
@@ -150,7 +151,9 @@ export function validateTenantConfig(config: TenantConfig): void {
 
 /**
  * Validate the core (always-required) fields of a TenantConfig: identity
- * and Zendesk credentials. Throws with a descriptive message on failure.
+ * and Zendesk subdomain. Zendesk credentials are checked for strength
+ * when present; whether they are required is the archive section's call.
+ * Throws with a descriptive message on failure.
  */
 export function validateTenantCore(config: TenantConfig): void {
   const missing: string[] = []
@@ -160,9 +163,6 @@ export function validateTenantCore(config: TenantConfig): void {
 
   // Zendesk section
   if (!config.zendesk?.subdomain) missing.push('zendesk.subdomain')
-  if (!config.zendesk?.email) missing.push('zendesk.email')
-  if (!config.zendesk?.apiToken) missing.push('zendesk.apiToken')
-  if (!config.zendesk?.webhookSecret) missing.push('zendesk.webhookSecret')
 
   // Validate subdomain format (prevents URL injection via crafted subdomains)
   if (config.zendesk?.subdomain && !SUBDOMAIN_PATTERN.test(config.zendesk.subdomain)) {
@@ -187,13 +187,23 @@ export function validateTenantCore(config: TenantConfig): void {
 }
 
 /**
- * Validate an archive service section (services.archive): malaskra key,
- * pdf fields, and endpoints (including per-endpoint checks). Throws with
- * a descriptive message on failure. Only called when the archive section
- * is present.
+ * Validate an archive service section (services.archive): the Zendesk
+ * credentials archive uses, malaskra key, pdf fields, and endpoints
+ * (including per-endpoint checks). Throws with a descriptive message on
+ * failure. Only called when the archive section is present.
  */
-export function validateArchiveConfig(archive: NonNullable<TenantConfig['services']['archive']>, label: string): void {
+export function validateArchiveConfig(
+  archive: NonNullable<TenantConfig['services']['archive']>,
+  label: string,
+  zendesk: ZendeskConfig
+): void {
   const missing: string[] = []
+
+  // Zendesk credentials — the archive service's Basic-auth client and its
+  // webhook signature check need them; no other service does.
+  if (!zendesk?.email) missing.push('zendesk.email')
+  if (!zendesk?.apiToken) missing.push('zendesk.apiToken')
+  if (!zendesk?.webhookSecret) missing.push('zendesk.webhookSecret')
 
   // Malaskra section
   if (!archive.malaskra?.apiKey) missing.push('malaskra.apiKey')

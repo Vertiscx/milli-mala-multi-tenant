@@ -35,10 +35,11 @@ export async function fetchTicketInfo(
   const brandId = tenantConfig.brand_id
 
   // 1. Fetch ticket from Zendesk
+  // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
   const zendesk = new ZendeskClient(
     tenantConfig.zendesk.subdomain,
-    tenantConfig.zendesk.apiToken,
-    tenantConfig.zendesk.email
+    tenantConfig.zendesk.apiToken!,
+    tenantConfig.zendesk.email!
   )
   const ticket = await zendesk.getTicket(ticketId)
 

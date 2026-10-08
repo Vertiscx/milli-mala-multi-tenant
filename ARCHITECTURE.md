@@ -174,6 +174,8 @@ Tenants are declared in `src/tenants.config.ts` with every secret read from an e
 - two tenants sharing a Málaskrá key (**only when loaded from JSON; the production path in `src/index.ts` bypasses this check**, so uniqueness is an operational rule until the guard moves into the store constructor),
 - a field ID that is not a positive integer.
 
+The Zendesk `email`, `apiToken` and `webhookSecret` are required only for a tenant with `services.archive`: the archive service's Zendesk client and webhook signature check are the only things that use them. A tenant without archive needs just the subdomain, and if it does set either secret anyway, the strength rule above still applies.
+
 A request for one tenant can only ever read that tenant's Zendesk and write to that tenant's archive. There is no cross-tenant code path.
 
 ---
@@ -249,7 +251,7 @@ In priority order.
 
 ## 12. Tests
 
-23 files, 439 tests, `npm test`. Highlights:
+23 files, 458 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.

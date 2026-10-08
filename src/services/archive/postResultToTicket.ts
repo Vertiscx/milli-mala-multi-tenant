@@ -171,10 +171,11 @@ export async function postResultToTicket(
       ticketBody.custom_fields = customFields
     }
 
+    // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
     const zendesk = new ZendeskClient(
       tenantConfig.zendesk.subdomain,
-      tenantConfig.zendesk.apiToken,
-      tenantConfig.zendesk.email
+      tenantConfig.zendesk.apiToken!,
+      tenantConfig.zendesk.email!
     )
     await zendesk.requestWrite(
       `/tickets/${o.ticketId}.json`,

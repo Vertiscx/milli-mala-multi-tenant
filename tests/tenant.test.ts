@@ -629,3 +629,57 @@ describe('validateCaseNumber', () => {
     expect(validateCaseNumber('case.number')).toBeNull()
   })
 })
+
+describe('validateTenantConfig — Zendesk credentials are archive-only', () => {
+  function makeTenantWithoutArchive(zendesk: Partial<TenantConfig['zendesk']> = {}): TenantConfig {
+    return {
+      brand_id: '30303665547154',
+      name: 'Þjóðskrá',
+      zendesk: { subdomain: 'test', ...zendesk },
+      services: {}
+    }
+  }
+
+  it('accepts a tenant without archive that has no email, apiToken or webhookSecret', () => {
+    expect(() => validateTenantConfig(makeTenantWithoutArchive())).not.toThrow()
+  })
+
+  it('still requires the subdomain for a tenant without archive', () => {
+    expect(() => validateTenantConfig(makeTenantWithoutArchive({ subdomain: '' })))
+      .toThrow('missing zendesk.subdomain')
+  })
+
+  it('resolves a tenant without archive through resolveTenantConfig', async () => {
+    const tenant = makeTenantWithoutArchive()
+    const store = new FileTenantStore([tenant])
+    const config = await resolveTenantConfig(tenant.brand_id, store)
+    expect(config).not.toBeNull()
+    expect(config!.name).toBe('Þjóðskrá')
+  })
+
+  it.each(['email', 'apiToken', 'webhookSecret'] as const)(
+    'still requires zendesk.%s for a tenant with archive',
+    (field) => {
+      const tenant = makeValidTenant()
+      delete tenant.zendesk[field]
+      expect(() => validateTenantConfig(tenant)).toThrow(`missing zendesk.${field}`)
+    }
+  )
+
+  it('lists all missing Zendesk credentials for a tenant with archive', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk = { subdomain: 'test' }
+    expect(() => validateTenantConfig(tenant))
+      .toThrow('missing zendesk.email, zendesk.apiToken, zendesk.webhookSecret')
+  })
+
+  it('still rejects a weak apiToken on a tenant without archive, if one is given', () => {
+    const tenant = makeTenantWithoutArchive({ apiToken: 'short-token' })
+    expect(() => validateTenantConfig(tenant)).toThrow('zendesk.apiToken must be at least 32 characters')
+  })
+
+  it('still rejects a weak webhookSecret on a tenant without archive, if one is given', () => {
+    const tenant = makeTenantWithoutArchive({ webhookSecret: 'x'.repeat(40) })
+    expect(() => validateTenantConfig(tenant)).toThrow('zendesk.webhookSecret must not be a repeated character')
+  })
+})
