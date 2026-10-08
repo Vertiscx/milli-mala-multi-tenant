@@ -684,6 +684,43 @@ describe('validateTenantConfig — Zendesk credentials are archive-only', () => 
   })
 })
 
+describe('validateTenantConfig — ticketUpdate section', () => {
+  type TicketUpdate = NonNullable<TenantConfig['services']['ticketUpdate']>
+
+  function makeTicketUpdateTenant(ticketUpdate: TicketUpdate): TenantConfig {
+    return {
+      brand_id: '11204917066386',
+      name: 'Tryggingastofnun',
+      zendesk: { subdomain: 'digitaliceland' },
+      services: { ticketUpdate }
+    }
+  }
+
+  const valid: TicketUpdate = {
+    webhookSecret: 'wS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD',
+    oauth: { clientId: 'client-id', clientSecret: 'cS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD' }
+  }
+
+  it('accepts a valid ticketUpdate section', () => {
+    expect(() => validateTenantConfig(makeTicketUpdateTenant(valid))).not.toThrow()
+  })
+
+  it.each([
+    ['webhookSecret', { ...valid, webhookSecret: '' }],
+    ['oauth.clientId', { ...valid, oauth: { ...valid.oauth, clientId: '' } }],
+    ['oauth.clientSecret', { ...valid, oauth: { ...valid.oauth, clientSecret: '' } }]
+  ])('rejects a section missing %s', (field, ticketUpdate) => {
+    expect(() => validateTenantConfig(makeTicketUpdateTenant(ticketUpdate)))
+      .toThrow(`Invalid tenant config for "Tryggingastofnun": missing ${field}`)
+  })
+
+  it('lists every missing value at once', () => {
+    const ticketUpdate = { webhookSecret: '', oauth: { clientId: '', clientSecret: '' } }
+    expect(() => validateTenantConfig(makeTicketUpdateTenant(ticketUpdate)))
+      .toThrow('missing webhookSecret, oauth.clientId, oauth.clientSecret')
+  })
+})
+
 describe('validateTenantConfig — ticketCreate section', () => {
   type TicketCreate = NonNullable<TenantConfig['services']['ticketCreate']>
 
