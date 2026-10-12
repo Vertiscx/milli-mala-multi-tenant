@@ -52,7 +52,9 @@ export async function handleWebhook(req: WebhookRequest): Promise<HandlerResult>
     // Verify Zendesk webhook signature
     const signature = headers['x-zendesk-webhook-signature']
     const timestamp = headers['x-zendesk-webhook-signature-timestamp']
-    if (!verifyWebhookSignature(rawBody, timestamp, signature, tenantConfig.zendesk.webhookSecret)) {
+    // Runs before the archive guard below, so webhookSecret can be absent here
+    // for a tenant without archive; an empty secret never verifies (→ 401).
+    if (!verifyWebhookSignature(rawBody, timestamp, signature, tenantConfig.zendesk.webhookSecret ?? '')) {
       logger.warn('Webhook signature verification failed', { brand_id: brandId })
       return { status: 401, body: { error: 'Invalid webhook signature' } }
     }
