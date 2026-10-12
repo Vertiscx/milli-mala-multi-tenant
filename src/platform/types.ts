@@ -8,7 +8,23 @@ export interface TenantConfig {
   brand_id: string
   name: string
   zendesk: ZendeskConfig
-  services: { archive?: ArchiveServiceConfig; ticketUpdate?: TicketUpdateServiceConfig }
+  services: {
+    archive?: ArchiveServiceConfig
+    ticketUpdate?: TicketUpdateServiceConfig
+    ticketCreate?: TicketCreateServiceConfig
+  }
+}
+
+// Config for the ticketCreate service (src/services/ticketCreate/), called
+// by a system outside Zendesk (e.g. a web form's backend), so it is
+// authenticated by a per-tenant API key rather than a Zendesk webhook
+// signature. Its OAuth client is separate from ticketUpdate's.
+export interface TicketCreateServiceConfig {
+  apiKey: string
+  oauth: {
+    clientId: string
+    clientSecret: string
+  }
 }
 
 // Credentials for the ticketUpdate service (src/services/ticketUpdate/):
@@ -42,11 +58,14 @@ export interface ArchiveServiceConfig {
   pdf: PdfConfig
 }
 
+// email, apiToken and webhookSecret are used only by the archive service
+// (Basic-auth Zendesk client, archive webhook signature), so they are
+// required only for tenants with services.archive — see validateArchiveConfig.
 export interface ZendeskConfig {
   subdomain: string
-  email: string
-  apiToken: string
-  webhookSecret: string
+  email?: string
+  apiToken?: string
+  webhookSecret?: string
 }
 
 export interface EndpointConfig {

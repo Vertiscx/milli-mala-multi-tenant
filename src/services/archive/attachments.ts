@@ -118,10 +118,11 @@ export async function handleAttachments({ body, headers, tenantConfig, docEndpoi
     }
 
     // 1. Fetch ticket and verify brand ownership
+    // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
     const zendesk = new ZendeskClient(
       tenantConfig.zendesk.subdomain,
-      tenantConfig.zendesk.apiToken,
-      tenantConfig.zendesk.email
+      tenantConfig.zendesk.apiToken!,
+      tenantConfig.zendesk.email!
     )
 
     const ticket = await zendesk.getTicket(ticketId)

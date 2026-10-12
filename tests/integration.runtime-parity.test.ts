@@ -128,7 +128,8 @@ const TENANT_ENV: Record<string, string> = {
   SYSLUMENN_ZENDESK_WEBHOOK_SECRET: 'syslumenn-zendesk-webhook-secret-012',
   SYSLUMENN_ONESYSTEMS_BASE_URL: ONESYS_BASE,
   SYSLUMENN_ONESYSTEMS_APP_KEY: 'syslumenn-onesystems-app-key-0123456',
-  SYSLUMENN_MALASKRA_API_KEY: MALASKRA_KEY
+  SYSLUMENN_MALASKRA_API_KEY: MALASKRA_KEY,
+  THJODSKRA_ZENDESK_SUBDOMAIN: 'digitaliceland'
 }
 
 const savedEnv: Record<string, string | undefined> = {}

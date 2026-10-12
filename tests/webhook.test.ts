@@ -139,6 +139,18 @@ describe('handleWebhook', () => {
     expect(result.body.error).toBe('Invalid webhook signature')
   })
 
+  it('should reject with 401 for a tenant without archive (no webhookSecret configured)', async () => {
+    const req = makeRequest({ ticket_id: 123 })
+    const result = await handleWebhook({
+      ...req,
+      tenantConfig: { ...makeTenantConfig(), zendesk: { subdomain: 'test' }, services: {} }
+    })
+
+    expect(result.status).toBe(401)
+    expect(result.body.error).toBe('Invalid webhook signature')
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
   it('should reject webhook with expired timestamp', async () => {
     const oldTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString()
     const req = makeRequest({ ticket_id: 123 }, { timestamp: oldTimestamp })
