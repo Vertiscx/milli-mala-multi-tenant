@@ -237,10 +237,11 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
       // 4. Stamp the new case number onto the ticket (create path only)
       if (createdCaseNumber !== undefined && ep.caseNumberFieldId != null) {
         const { ZendeskClient } = await import('../../platform/zendesk.js')
+        // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
         const zendesk = new ZendeskClient(
           tenantConfig.zendesk.subdomain,
-          tenantConfig.zendesk.apiToken,
-          tenantConfig.zendesk.email
+          tenantConfig.zendesk.apiToken!,
+          tenantConfig.zendesk.email!
         )
         await zendesk.setTicketCustomField(ticketId, ep.caseNumberFieldId, createdCaseNumber)
         // last_status: AUDIT/LOG ONLY — no Zendesk field, no EndpointConfig change

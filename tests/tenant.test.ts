@@ -629,3 +629,135 @@ describe('validateCaseNumber', () => {
     expect(validateCaseNumber('case.number')).toBeNull()
   })
 })
+
+describe('validateTenantConfig — Zendesk credentials are archive-only', () => {
+  function makeTenantWithoutArchive(zendesk: Partial<TenantConfig['zendesk']> = {}): TenantConfig {
+    return {
+      brand_id: '30303665547154',
+      name: 'Þjóðskrá',
+      zendesk: { subdomain: 'test', ...zendesk },
+      services: {}
+    }
+  }
+
+  it('accepts a tenant without archive that has no email, apiToken or webhookSecret', () => {
+    expect(() => validateTenantConfig(makeTenantWithoutArchive())).not.toThrow()
+  })
+
+  it('still requires the subdomain for a tenant without archive', () => {
+    expect(() => validateTenantConfig(makeTenantWithoutArchive({ subdomain: '' })))
+      .toThrow('missing zendesk.subdomain')
+  })
+
+  it('resolves a tenant without archive through resolveTenantConfig', async () => {
+    const tenant = makeTenantWithoutArchive()
+    const store = new FileTenantStore([tenant])
+    const config = await resolveTenantConfig(tenant.brand_id, store)
+    expect(config).not.toBeNull()
+    expect(config!.name).toBe('Þjóðskrá')
+  })
+
+  it.each(['email', 'apiToken', 'webhookSecret'] as const)(
+    'still requires zendesk.%s for a tenant with archive',
+    (field) => {
+      const tenant = makeValidTenant()
+      delete tenant.zendesk[field]
+      expect(() => validateTenantConfig(tenant)).toThrow(`missing zendesk.${field}`)
+    }
+  )
+
+  it('lists all missing Zendesk credentials for a tenant with archive', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk = { subdomain: 'test' }
+    expect(() => validateTenantConfig(tenant))
+      .toThrow('missing zendesk.email, zendesk.apiToken, zendesk.webhookSecret')
+  })
+
+  it('still rejects a weak apiToken on a tenant without archive, if one is given', () => {
+    const tenant = makeTenantWithoutArchive({ apiToken: 'short-token' })
+    expect(() => validateTenantConfig(tenant)).toThrow('zendesk.apiToken must be at least 32 characters')
+  })
+
+  it('still rejects a weak webhookSecret on a tenant without archive, if one is given', () => {
+    const tenant = makeTenantWithoutArchive({ webhookSecret: 'x'.repeat(40) })
+    expect(() => validateTenantConfig(tenant)).toThrow('zendesk.webhookSecret must not be a repeated character')
+  })
+})
+
+describe('validateTenantConfig — ticketUpdate section', () => {
+  type TicketUpdate = NonNullable<TenantConfig['services']['ticketUpdate']>
+
+  function makeTicketUpdateTenant(ticketUpdate: TicketUpdate): TenantConfig {
+    return {
+      brand_id: '11204917066386',
+      name: 'Tryggingastofnun',
+      zendesk: { subdomain: 'digitaliceland' },
+      services: { ticketUpdate }
+    }
+  }
+
+  const valid: TicketUpdate = {
+    webhookSecret: 'wS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD',
+    oauth: { clientId: 'client-id', clientSecret: 'cS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD' }
+  }
+
+  it('accepts a valid ticketUpdate section', () => {
+    expect(() => validateTenantConfig(makeTicketUpdateTenant(valid))).not.toThrow()
+  })
+
+  it.each([
+    ['webhookSecret', { ...valid, webhookSecret: '' }],
+    ['oauth.clientId', { ...valid, oauth: { ...valid.oauth, clientId: '' } }],
+    ['oauth.clientSecret', { ...valid, oauth: { ...valid.oauth, clientSecret: '' } }]
+  ])('rejects a section missing %s', (field, ticketUpdate) => {
+    expect(() => validateTenantConfig(makeTicketUpdateTenant(ticketUpdate)))
+      .toThrow(`Invalid tenant config for "Tryggingastofnun": missing ${field}`)
+  })
+
+  it('lists every missing value at once', () => {
+    const ticketUpdate = { webhookSecret: '', oauth: { clientId: '', clientSecret: '' } }
+    expect(() => validateTenantConfig(makeTicketUpdateTenant(ticketUpdate)))
+      .toThrow('missing webhookSecret, oauth.clientId, oauth.clientSecret')
+  })
+})
+
+describe('validateTenantConfig — ticketCreate section', () => {
+  type TicketCreate = NonNullable<TenantConfig['services']['ticketCreate']>
+
+  function makeTicketCreateTenant(overrides: Partial<TicketCreate> = {}): TenantConfig {
+    return {
+      brand_id: '30303665547154',
+      name: 'Þjóðskrá',
+      zendesk: { subdomain: 'digitaliceland' },
+      services: {
+        ticketCreate: {
+          apiKey: 'aK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS',
+          oauth: { clientId: 'client-id', clientSecret: 'cS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD' },
+          ...overrides
+        }
+      }
+    }
+  }
+
+  it('accepts a valid ticketCreate section on a tenant without archive', () => {
+    expect(() => validateTenantConfig(makeTicketCreateTenant())).not.toThrow()
+  })
+
+  it('lists every missing credential', () => {
+    const tenant = makeTicketCreateTenant({ apiKey: '', oauth: { clientId: '', clientSecret: '' } })
+    expect(() => validateTenantConfig(tenant)).toThrow(
+      'missing ticketCreate apiKey, oauth.clientId, oauth.clientSecret'
+    )
+  })
+
+  it('rejects a weak API key', () => {
+    expect(() => validateTenantConfig(makeTicketCreateTenant({ apiKey: 'short-key' })))
+      .toThrow('ticketCreate.apiKey must be at least 32 characters')
+  })
+
+  it('rejects a weak OAuth client secret', () => {
+    const tenant = makeTicketCreateTenant({ oauth: { clientId: 'client-id', clientSecret: 'z'.repeat(40) } })
+    expect(() => validateTenantConfig(tenant)).toThrow('ticketCreate.oauth.clientSecret must not be a repeated character')
+  })
+
+})
