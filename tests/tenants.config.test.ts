@@ -81,12 +81,19 @@ const validEnv: Record<string, string> = {
   THJODSKRA_TICKET_CREATE_API_KEY: testSecret('thjod-create-api-key', 40),
   THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_ID: testSecret('thjod-create-client-id', 40),
   THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET: testSecret('thjod-create-client-secret', 40),
+  THSK_ZENDESK_SUBDOMAIN: 'thsk-test',
+  THSK_ZENDESK_EMAIL: 'admin@thsk.test',
+  THSK_ZENDESK_API_TOKEN: testSecret('thsk-zd-token', 40),
+  THSK_ZENDESK_WEBHOOK_SECRET: testSecret('thsk-zd-webhook', 40),
+  THSK_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example',
+  THSK_ONESYSTEMS_APP_KEY: testSecret('thsk-os-appkey', 40),
+  THSK_MALASKRA_API_KEY: testSecret('thsk-malaskra-key', 40),
 }
 
 describe('loadTenants', () => {
   it('returns all tenants when all env vars are set', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants).toHaveLength(8)
+    expect(tenants).toHaveLength(9)
     expect(tenants[0].name).toBe('Kerfisstjórn')
     expect(tenants[1].name).toBe('Vinnueftirlitið')
     expect(tenants[2].name).toBe('Samgöngustofa')
@@ -94,6 +101,7 @@ describe('loadTenants', () => {
     expect(tenants[4].name).toBe('Tryggingastofnun-internal')
     expect(tenants[5].name).toBe('HMS')
     expect(tenants[7].name).toBe('Þjóðskrá')
+    expect(tenants[8].name).toBe('Þjóðskjalasafn Íslands')
   })
 
   it('produces tenants that pass validateTenantConfig', () => {
@@ -111,6 +119,7 @@ describe('loadTenants', () => {
     expect(tenants[3].services.archive!.pdf.companyName).toBe('Tryggingastofnun')
     expect(tenants[4].services.archive!.pdf.companyName).toBe('Tryggingastofnun')
     expect(tenants[5].services.archive!.pdf.companyName).toBe('HMS')
+    expect(tenants[8].services.archive!.pdf.companyName).toBe('Þjóðskjalasafn Íslands')
   })
 
   it('uses per-tenant Zendesk credentials (no shared secrets across tenants)', () => {
@@ -210,6 +219,21 @@ describe('loadTenants', () => {
     expect(hms.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
     expect(hms.brand_id).toBe('25782179205266')
     expect(hms.services.archive!.pdf.includeInternalNotes).toBe(false)
+  })
+
+  it('configures Þjóðskjalasafn Íslands with a OneSystems endpoint and the expected brand_id', () => {
+    const tenants = loadTenants(validEnv)
+    const thsk = tenants.find(t => t.brand_id === '35200806133010')!
+    expect(thsk.name).toBe('Þjóðskjalasafn Íslands')
+    expect(thsk.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
+    expect(thsk.services.archive!.pdf.includeInternalNotes).toBe(false)
+    expect(thsk.services.ticketUpdate).toBeUndefined()
+  })
+
+  it('throws with a clear error when THSK_ONESYSTEMS_APP_KEY is missing', () => {
+    const env = { ...validEnv }
+    delete env.THSK_ONESYSTEMS_APP_KEY
+    expect(() => loadTenants(env)).toThrow('THSK_ONESYSTEMS_APP_KEY')
   })
 
   it('throws with a clear error when HMS_ZENDESK_API_TOKEN is missing', () => {
@@ -335,7 +359,7 @@ describe('loadTenants — Þjóðskrá (ticket creation only)', () => {
     delete env.THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET
 
     expect(thjodskra(env).services.ticketCreate).toBeUndefined()
-    expect(loadTenants(env)).toHaveLength(8)
+    expect(loadTenants(env)).toHaveLength(9)
   })
 
   it.each([
