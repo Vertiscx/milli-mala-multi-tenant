@@ -334,5 +334,37 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         ...ticketCreateSection('THJODSKRA', env),
       },
     },
+    {
+      brand_id: '35200806133010',
+      name: 'Þjóðskjalasafn Íslands',
+      zendesk: {
+        subdomain: requireEnv('THSK_ZENDESK_SUBDOMAIN', env),
+        email: requireEnv('THSK_ZENDESK_EMAIL', env),
+        apiToken: requireEnv('THSK_ZENDESK_API_TOKEN', env),
+        webhookSecret: requireEnv('THSK_ZENDESK_WEBHOOK_SECRET', env),
+      },
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('THSK_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('THSK_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('THSK_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('THSK_KENNITALA_FIELD_ID', env),
+              // MD-02 invariant: the webhook create path refuses to mint
+              // without a case-number field to stamp (duplicate-mint guard).
+              caseNumberFieldId: optionalNumberEnv('THSK_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('THSK_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Þjóðskjalasafn Íslands',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
+        },
+      },
+    },
   ]
 }
