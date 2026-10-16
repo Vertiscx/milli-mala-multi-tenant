@@ -41,7 +41,7 @@ const ALWAYS_DROPPED_FIELDS = ['assignee_id', 'requester_id', 'submitter_id', 'o
 // Same check as the archive service's Málaskrá key (SHA-256, then a
 // constant-time compare), duplicated rather than imported: services
 // don't import each other.
-function verifyApiKey(provided: string | undefined, expected: string): boolean {
+export function verifyApiKey(provided: string | undefined, expected: string): boolean {
   if (!provided) return false
   const a = createHash('sha256').update(provided).digest()
   const b = createHash('sha256').update(expected).digest()
@@ -91,7 +91,7 @@ function prepareTicket(
 // Zendesk's validation messages can echo submitted values (e.g. a
 // requester's email), so only the error code and the names of the
 // offending fields are logged — never the descriptions.
-function summarizeZendeskError(text: string): { zendesk_error?: string; zendesk_error_fields?: string[] } {
+export function summarizeZendeskError(text: string): { zendesk_error?: string; zendesk_error_fields?: string[] } {
   try {
     const parsed = JSON.parse(text) as { error?: unknown; details?: unknown }
     return {
