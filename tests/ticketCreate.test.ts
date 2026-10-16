@@ -293,7 +293,7 @@ describe('handleTicketCreate — failures', () => {
     expect(result).toEqual({ status: 409, body: { error: 'Idempotency-Key already used with a different request' } })
   })
 
-  it('returns 502 on a Zendesk validation error and logs the field names but never the submitted values', async () => {
+  it('returns 422 on a Zendesk validation error and logs the field names but never the submitted values', async () => {
     const store = makeStore([makeTenantConfig('303')])
     fetchMock
       .mockResolvedValueOnce(tokenResponse())
@@ -308,12 +308,43 @@ describe('handleTicketCreate — failures', () => {
 
     const result = await handleTicketCreate(makeRequest(baseTicket('303')), store)
 
-    expect(result).toEqual({ status: 502, body: { error: 'Zendesk ticket creation failed' } })
+    expect(result).toEqual({ status: 422, body: { error: 'Ticket rejected by Zendesk validation' } })
     const logs = loggedLines()
     expect(logs).toContain('"zendesk_error":"RecordInvalid"')
     expect(logs).toContain('"zendesk_error_fields":["requester"]')
     expect(logs).not.toContain('jon@example.is')
     expect(logs).not.toContain('Jón Jónsson')
+  })
+
+  // What d3v returned (2026-10-15) for a create carrying an expired upload token.
+  it('returns 422 when Zendesk rejects an expired upload token', async () => {
+    const store = makeStore([makeTenantConfig('309')])
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        text: async () => JSON.stringify({
+          error: 'RecordInvalid',
+          description: 'Record validation errors',
+          details: { base: [{ description: 'Attachment upload token expired' }] }
+        })
+      })
+
+    const result = await handleTicketCreate(makeRequest(baseTicket('309', {
+      comment: { html_body: '<p>Halló</p>', uploads: ['expired-token'] }
+    })), store)
+    expect(result).toEqual({ status: 422, body: { error: 'Ticket rejected by Zendesk validation' } })
+  })
+
+  it.each([400, 403, 404, 429])('still returns 502 for any other Zendesk %i', async (status) => {
+    const store = makeStore([makeTenantConfig(`31${status}`)])
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({ ok: false, status, text: async () => JSON.stringify({ error: 'SomethingElse' }) })
+
+    const result = await handleTicketCreate(makeRequest(baseTicket(`31${status}`)), store)
+    expect(result).toEqual({ status: 502, body: { error: 'Zendesk ticket creation failed' } })
   })
 
   it('returns 502 for a non-JSON Zendesk error body', async () => {

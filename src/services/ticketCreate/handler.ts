@@ -199,6 +199,12 @@ export async function handleTicketCreate(req: TicketCreateHttpRequest, tenantSto
       logger.error('Zendesk ticket creation failed', {
         brand_id: brandId, idempotency_key: idempotencyKey, status: response.status, ...summarizeZendeskError(text)
       })
+      // A 422 is Zendesk refusing the ticket itself (e.g. an invalid field or
+      // an expired upload token). Retrying it unchanged can never succeed, so
+      // it must not look like the retryable 502 below.
+      if (response.status === 422) {
+        return { status: 422, body: { error: 'Ticket rejected by Zendesk validation' } }
+      }
       return { status: 502, body: { error: 'Zendesk ticket creation failed' } }
     }
 
