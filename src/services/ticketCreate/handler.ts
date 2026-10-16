@@ -36,6 +36,9 @@ const logger: Logger = createLogger('ticketCreate')
 const MAX_BODY_SIZE = 1024 * 1024 // 1MB — matches every other route in this repo
 const MAX_IDEMPOTENCY_KEY_LENGTH = 255
 
+// Upload tokens from /v1/tickets/uploads that one ticket may carry.
+export const MAX_UPLOADS_PER_TICKET = 10
+
 const ALWAYS_DROPPED_FIELDS = ['assignee_id', 'requester_id', 'submitter_id', 'organization_id'] as const
 
 // Same check as the archive service's Málaskrá key (SHA-256, then a
@@ -57,6 +60,22 @@ function isValidIdempotencyKey(key: unknown): key is string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Zendesk upload tokens are alphanumeric.
+export function isValidUploadToken(token: unknown): token is string {
+  return typeof token === 'string' && /^[A-Za-z0-9_-]{1,255}$/.test(token)
+}
+
+// comment.uploads, when present, must be a short list of upload tokens.
+// A malformed list is refused rather than dropped: dropping it would
+// create the ticket without the citizen's attachments and nobody would know.
+function isValidUploadsList(comment: unknown): boolean {
+  if (!isPlainObject(comment) || !('uploads' in comment)) return true
+  const uploads = comment.uploads
+  return Array.isArray(uploads) &&
+    uploads.length <= MAX_UPLOADS_PER_TICKET &&
+    uploads.every(isValidUploadToken)
 }
 
 /**
@@ -153,6 +172,10 @@ export async function handleTicketCreate(req: TicketCreateHttpRequest, tenantSto
   const idempotencyKey = headers['idempotency-key']
   if (!isValidIdempotencyKey(idempotencyKey)) {
     return { status: 400, body: { error: 'Invalid or missing Idempotency-Key header' } }
+  }
+
+  if (!isValidUploadsList(ticket.comment)) {
+    return { status: 400, body: { error: 'Invalid comment.uploads' } }
   }
 
   const { fields, dropped } = prepareTicket(ticket, tenantConfig.brand_id)

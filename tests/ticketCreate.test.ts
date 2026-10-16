@@ -126,6 +126,21 @@ describe('handleTicketCreate — request checks', () => {
     expect(result).toEqual({ status: 400, body: { error: 'Invalid or missing Idempotency-Key header' } })
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it.each([
+    ['not a list', 'token1'],
+    ['a list with a non-string', ['token1', 42]],
+    ['a list with an empty string', ['token1', '']],
+    ['a list with a malformed token', ['token1', 'bad token']],
+    ['longer than 10 tokens', Array.from({ length: 11 }, (_, i) => `token${i}`)]
+  ])('rejects comment.uploads that is %s, without calling Zendesk', async (_label, uploads) => {
+    const store = makeStore([makeTenantConfig('106')])
+    const result = await handleTicketCreate(makeRequest(baseTicket('106', {
+      comment: { html_body: '<p>Halló</p>', uploads }
+    })), store)
+    expect(result).toEqual({ status: 400, body: { error: 'Invalid comment.uploads' } })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })
 
 describe('handleTicketCreate — creating the ticket', () => {
@@ -208,6 +223,29 @@ describe('handleTicketCreate — creating the ticket', () => {
       expect(sent).not.toHaveProperty(name)
     }
     expect(sent.comment).toEqual({ html_body: '<p>Halló</p>' })
+  })
+
+  it('passes comment.uploads through to Zendesk unchanged', async () => {
+    const store = makeStore([makeTenantConfig('208')])
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(createdResponse(10))
+    const uploads = Array.from({ length: 10 }, (_, i) => `token${i}`)
+
+    const result = await handleTicketCreate(makeRequest(baseTicket('208', {
+      comment: { html_body: '<p>Halló</p>', uploads }
+    })), store)
+
+    expect(result.status).toBe(201)
+    expect(sentTicket(1).comment).toEqual({ html_body: '<p>Halló</p>', uploads })
+  })
+
+  it('accepts an empty comment.uploads list', async () => {
+    const store = makeStore([makeTenantConfig('209')])
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(createdResponse(11))
+
+    const result = await handleTicketCreate(makeRequest(baseTicket('209', {
+      comment: { html_body: '<p>Halló</p>', uploads: [] }
+    })), store)
+    expect(result.status).toBe(201)
   })
 
   it('reuses a cached token on a second request', async () => {

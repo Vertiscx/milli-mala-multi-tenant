@@ -22,7 +22,7 @@ import { createLogger } from '../../platform/logger.js'
 import { fetchWithTimeout } from '../../platform/http.js'
 import { resolveTenantConfig, type TenantStore } from '../../platform/tenant.js'
 import { getAccessToken, refreshAccessToken } from './oauthClient.js'
-import { verifyApiKey, summarizeZendeskError } from './handler.js'
+import { verifyApiKey, summarizeZendeskError, isValidUploadToken } from './handler.js'
 import type { HandlerResult, Logger } from '../../platform/types.js'
 import type { TicketUploadHttpRequest } from './types.js'
 
@@ -54,11 +54,6 @@ function isValidContentType(value: string | undefined): value is string {
     value.length <= MAX_CONTENT_TYPE_LENGTH &&
     !/[\x00-\x1f\x7f]/.test(value) &&
     /^[\w.+-]+\/[\w.+-]+(\s*;.*)?$/.test(value)
-}
-
-// Zendesk upload tokens are alphanumeric.
-function isValidUploadToken(token: string): boolean {
-  return /^[A-Za-z0-9_-]{1,255}$/.test(token)
 }
 
 async function callZendeskUpload(
