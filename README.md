@@ -35,6 +35,7 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 | `POST` | `/v1/attachments` | Málaskrá sidebar app | `X-Api-Key` |
 | `POST` | `/v1/tickets/update` | Zendesk trigger | Zendesk HMAC-SHA256 signature |
 | `POST` | `/v1/tickets/create` | A system outside Zendesk (e.g. a web form's backend) | `X-Api-Key`, plus a required `Idempotency-Key` |
+| `POST` | `/v1/tickets/uploads` | The same caller, for files to attach to the ticket it creates | `X-Api-Key` |
 | `GET` | `/v1/audit` | Operator | `Authorization: Bearer <AUDIT_SECRET>` |
 | `GET` | `/v1/health` | Load balancer | none |
 
@@ -78,7 +79,17 @@ It updates the ticket through the Zendesk API using a per-tenant OAuth client (C
 }
 ```
 
-The caller sends the tenant's API key in `X-Api-Key` and its own submission ID in `Idempotency-Key`; Zendesk ignores a repeat of the same key within two hours, so a retried request returns the original ticket rather than creating a second one. Because all brands share one Zendesk account, a few fields are always dropped: `assignee_id`, `requester_id`, `submitter_id`, `organization_id` and `comment.author_id`. Everything else, `group_id` and `ticket_form_id` included, is passed to Zendesk as sent. A dropped field never stops the ticket being created. The response is `201` with `{ success, ticket_id, brand_id, dropped_fields }`.
+The caller sends the tenant's API key in `X-Api-Key` and its own submission ID in `Idempotency-Key`; Zendesk ignores a repeat of the same key within two hours, so a retried request returns the original ticket rather than creating a second one. Because all brands share one Zendesk account, a few fields are always dropped: `assignee_id`, `requester_id`, `submitter_id`, `organization_id` and `comment.author_id`. Everything else, `group_id` and `ticket_form_id` included, is passed to Zendesk as sent. A dropped field never stops the ticket being created. The response is `201` with `{ success, ticket_id, brand_id, dropped_fields }`. A ticket Zendesk refuses as invalid returns `422` and must not be retried unchanged; a `502` or `500` can be retried with the same `Idempotency-Key`.
+
+To attach files, the caller first uploads each one to `/v1/tickets/uploads` and then lists the returned tokens in `comment.uploads` (at most 10). The upload body is the raw file, not JSON, so everything else goes in the query string and headers:
+
+```bash
+curl -X POST "https://milli-mala.tooling.island.is/v1/tickets/uploads?brand_id=30303665547154&filename=ums%C3%B3kn.pdf" \
+  -H "X-Api-Key: $KEY" -H "Content-Type: application/pdf" --data-binary @umsókn.pdf
+# 201 { "success": true, "token": "6bk3gql82em5nmf" }
+```
+
+Files are capped at 20 MB. A token is valid for 60 minutes, so upload just before creating the ticket. If the create has to be retried, retry it with the same key and the same tokens; never upload again for a retry.
 
 After every documentation attempt the gateway posts an internal note on the ticket with the result, and stamps custom fields if the tenant has them configured.
 
@@ -88,7 +99,7 @@ Requires Node.js 20 or later.
 
 ```bash
 npm ci
-npm test              # 509 tests, under a second
+npm test              # 560 tests, about a second
 npm run typecheck
 ```
 

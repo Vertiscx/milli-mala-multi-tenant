@@ -18,7 +18,7 @@ Two archive products are supported: **OneSystems** and **GoPro**. Eight institut
 
 **The ticket-update service** is the platform's second service. It lets a Zendesk trigger update a ticket through the Zendesk API using a per-tenant OAuth client (Client Credentials grant) instead of a Basic-auth API token, which is the direction Zendesk is moving. The gateway makes the API call itself, so the access token never travels back through Zendesk's trigger machinery or its logs. It shares nothing with the archive service but the platform underneath it.
 
-**The ticket-create service** is the third. It lets a system outside Zendesk — at first a web form's backend server — create a ticket in a tenant's brand, again through a per-tenant OAuth client of its own. The caller never holds Zendesk credentials: it holds only a milli-mála API key that can create tickets in one brand.
+**The ticket-create service** is the third. It lets a system outside Zendesk — at first a web form's backend server — create a ticket in a tenant's brand, again through a per-tenant OAuth client of its own. The caller never holds Zendesk credentials: it holds only a milli-mála API key that can create tickets in one brand. Files are attached the same way: the caller uploads them through the gateway first and sends the returned tokens with the ticket.
 
 Another service, email inspection, was built in mid-2026 and is not merged. The rest of this document describes the platform and the archive service as they run today.
 
@@ -34,7 +34,8 @@ Another service, email inspection, was built in mid-2026 and is not merged. The 
   (agent sidebar)        │  POST /v1/attachments  (X-Api-Key)   │       GoPro
                          │                                      │
   Zendesk trigger ──────▶│  POST /v1/tickets/update (HMAC)      │──┐
-  Web form backend ─────▶│  POST /v1/tickets/create (X-Api-Key) │  │ Zendesk API
+  Web form backend ─┬───▶│  POST /v1/tickets/create (X-Api-Key) │  │ Zendesk API
+                    └───▶│  POST /v1/tickets/uploads (X-Api-Key)│  │
                          │                                      │◀─┘ (OAuth token)
   Operator ─────────────▶│  GET  /v1/audit        (Bearer)      │
   Load balancer ────────▶│  GET  /v1/health       (none)        │
@@ -94,6 +95,7 @@ src/
 
   services/ticketCreate/    The ticket-create capability. Independent of archive and ticketUpdate.
     handler.ts              /v1/tickets/create: verify API key + Idempotency-Key, restrict fields, create via the Zendesk API
+    uploads.ts              /v1/tickets/uploads: verify API key, upload one file to Zendesk, return its upload token
     oauthClient.ts          Zendesk OAuth token fetch + its own per-tenant cache (separate client from ticketUpdate's)
     types.ts                The Zendesk OAuth token response, request shape
 ```
@@ -139,7 +141,18 @@ Like ticket update, it resolves the tenant from `ticket.brand_id` itself. Then:
 3. Prepare the ticket: drop `assignee_id`, `requester_id`, `submitter_id`, `organization_id` and `comment.author_id`, and set `brand_id` to the tenant's own brand. Every other field passes through as the caller sends it, `group_id` and `ticket_form_id` included. The tenants share one Zendesk account, so the dropped fields are the ones that could attach a ticket to another institution's agents or users. Dropped fields are logged and listed in the response; they never stop the ticket being created.
 4. `POST` to `tickets.json` with the tenant's OAuth token, passing the caller's `Idempotency-Key` through. On 401, retry once with a fresh token and the same key — nothing was created.
 
-Responses: 201 with `{ success, ticket_id, brand_id, dropped_fields }`; 409 if Zendesk reports the key was already used with a different body; 502 for any other Zendesk error; 500 if the call itself fails (e.g. a timeout after sending). Creating twice is not harmless the way updating twice is, so the idempotency key is what makes a 5xx safe here: the caller retries with the same key, and within two hours Zendesk returns the original ticket instead of creating another. Zendesk's validation messages can repeat submitted values, so only its error code and the names of the offending fields are logged, never the messages.
+Responses: 201 with `{ success, ticket_id, brand_id, dropped_fields }`; 409 if Zendesk reports the key was already used with a different body; 422 if Zendesk refuses the ticket as invalid (an invalid field, or an expired upload token), which can never succeed unchanged; 502 for any other Zendesk error; 500 if the call itself fails (e.g. a timeout after sending). Creating twice is not harmless the way updating twice is, so the idempotency key is what makes a 5xx safe here: the caller retries with the same key, and within two hours Zendesk returns the original ticket instead of creating another. Zendesk's validation messages can repeat submitted values, so only its error code and the names of the offending fields are logged, never the messages.
+
+`comment.uploads`, if sent, must be a list of at most 10 upload tokens. Anything else is a 400 before Zendesk is called, not a dropped field: dropping it would create the ticket without the citizen's attachments.
+
+**`/v1/tickets/uploads`** (the same caller, ticket-create service)
+Uploads one file for a ticket the caller is about to create, because getting a Zendesk upload token needs Zendesk credentials the caller does not hold. The body is the raw file, so `brand_id`, `filename` and an optional `token` (to add the file to an earlier upload) come in the query string.
+1. Resolve the tenant from `brand_id` and check `X-Api-Key` against `services.ticketCreate.apiKey`, as for create.
+2. Check the filename (an extension, no path separators or control characters), the `Content-Type` and the optional token — all **before** the body is read, so an unauthenticated caller never gets a file read. A declared `Content-Length` over 20 MB is refused at once; a body that turns out larger is refused as it is read. Either way the answer is 413.
+3. `POST` the bytes to Zendesk's `/api/v2/uploads` with the ticket-create OAuth token, retrying once with a fresh token on 401.
+4. Return only `{ success, token }` — never Zendesk's attachment details.
+
+Responses: 201; 413 for a file over 20 MB; 422 if Zendesk refuses the file; 502 for any other Zendesk error; 500 if the call itself fails. Nothing is attached to anything until a ticket uses the token, so a failed upload is simply repeated. The token lasts 60 minutes. A create retried with the same `Idempotency-Key` and the same tokens returns the original ticket even after the tokens have expired (Zendesk replays its stored response), while expired tokens in a new request are refused with 422. The filename is never logged: it can carry a citizen's name or kennitala.
 
 ---
 
@@ -240,6 +253,9 @@ Entries hold ticket ID, brand, outcome, case number and source, duration, PDF si
 | Request to create a ticket is really from the tenant's own system | Per-tenant API key (`services.ticketCreate.apiKey`), SHA-256 then constant-time compare |
 | A created ticket stays in its own brand and isn't attached to other institutions' people | Brand forced to the tenant's own; assignee, requester, submitter, organization and comment-author IDs dropped. `group_id` and `ticket_form_id` are not restricted — they are passed as the caller sends them |
 | A retried create does not duplicate the ticket | `Idempotency-Key` required and passed to Zendesk |
+| Uploads are only accepted from the tenant's own system | Same per-tenant ticket-create API key, checked before the file is read |
+| An upload cannot exhaust memory | 20 MB per file, enforced from `Content-Length` and while reading |
+| Uploaded files never travel back out | Only the upload token is returned, never Zendesk's attachment URL |
 | Ticket belongs to this tenant | Brand cross-check, 403 on mismatch, 403 if brand absent |
 | Outbound to archive only where configured | HTTPS only, private ranges blocked, at config validation |
 | Outbound to Zendesk only | Attachment URLs must be on `zendesk.com` or `zdassets.com` |
@@ -272,13 +288,14 @@ In priority order.
 
 ## 12. Tests
 
-24 files, 509 tests, `npm test`. Highlights:
+25 files, 560 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
 - `tests/pipeline.guards.test.ts` covers the case-number rules in section 5.
 - `tests/tenants.config.test.ts` checks the real tenant list loads with placeholder secrets.
 - `tests/ticketUpdate.test.ts` covers the ticket-update route: signature and freshness rejection, the OAuth token cache, and the 401 retry.
-- `tests/ticketCreate.test.ts` covers the ticket-create route: API key and Idempotency-Key checks, the restricted fields, the 401 retry, the 409 and 502 mappings, and that no submitted values reach the logs.
+- `tests/ticketCreate.test.ts` covers the ticket-create route: API key and Idempotency-Key checks, the restricted fields, the 401 retry, the 409, 422 and 502 mappings, the `comment.uploads` check, and that no submitted values reach the logs.
+- `tests/ticketCreate.uploads.test.ts` covers the upload route: every check runs before the body is read, the bytes reach Zendesk unchanged, the 20 MB cap, the token chaining, the error mappings, and that the filename is never logged.
 
 CI runs tests on Node 20 and 22 on every PR, plus CodeQL.
