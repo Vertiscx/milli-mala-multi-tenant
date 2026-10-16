@@ -3,10 +3,14 @@
  * Standalone HTTP server for non-Cloudflare deployments (Docker, K8s).
  *
  * Routes:
- *   POST /v1/webhook      — Zendesk webhook (ticket close → PDF → archive)
- *   POST /v1/attachments   — Malaskrá attachment forwarding
- *   GET  /v1/health        — Health check
- *   GET  /v1/audit         — Audit log query (requires AUDIT_SECRET)
+ *   POST /v1/webhook         — Zendesk webhook (ticket close → PDF → archive)
+ *   POST /v1/cases           — Málaskrá manual documentation / case creation
+ *   POST /v1/attachments     — Málaskrá attachment forwarding
+ *   POST /v1/tickets/update  — Zendesk-trigger ticket update (OAuth)
+ *   POST /v1/tickets/create  — Ticket creation for a system outside Zendesk
+ *   POST /v1/tickets/uploads — File upload for a ticket about to be created
+ *   GET  /v1/health          — Health check
+ *   GET  /v1/audit           — Audit log query (requires AUDIT_SECRET)
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'

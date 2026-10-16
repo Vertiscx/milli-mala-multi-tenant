@@ -288,7 +288,7 @@ In priority order.
 
 ## 12. Tests
 
-25 files, 560 tests, `npm test`. Highlights:
+25 files, 561 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.

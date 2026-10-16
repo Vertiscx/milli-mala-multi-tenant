@@ -217,8 +217,10 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
  * gate cannot read brand_id from it.
  */
 export async function handleTicketUploadHttp(req: IncomingMessage, res: ServerResponse, tenantStore: TenantStore): Promise<void> {
+  // Read up front so even the catch-all log line carries brand_id.
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  const brandId = url.searchParams.get('brand_id') || undefined
   try {
-    const url = new URL(req.url ?? '/', 'http://localhost')
     const headers = req.headers as Record<string, string>
     const result = await handleTicketUpload(
       { query: url.searchParams, headers, readBody: () => readFileBody(req, MAX_UPLOAD_BYTES) },
@@ -238,7 +240,7 @@ export async function handleTicketUploadHttp(req: IncomingMessage, res: ServerRe
     }
     sendJson(res, result.status, result.body)
   } catch (error) {
-    logger.error('HTTP handler error', { error: (error as Error).message })
+    logger.error('HTTP handler error', { brand_id: brandId, error: (error as Error).message })
     sendJson(res, 500, { error: 'Internal server error' })
   }
 }

@@ -334,6 +334,25 @@ describe('handleTicketUploadHttp', () => {
     expect(Buffer.compare(fetchMock.mock.calls[1][1].body, FILE)).toBe(0)
   })
 
+  it('returns 500 with brand_id in the log line when something unexpected throws', async () => {
+    const logSpy = vi.spyOn(console, 'log')
+    const failingStore: TenantStore = { get: async () => { throw new Error('store down') } }
+    const req = createRequest({
+      method: 'POST',
+      url: '/v1/tickets/uploads?brand_id=402&filename=a.pdf',
+      headers: { 'x-api-key': API_KEY, 'content-type': 'application/pdf' }
+    })
+    const res = createResponse()
+
+    await handleTicketUploadHttp(req, res, failingStore)
+
+    expect(res._getStatusCode()).toBe(500)
+    expect(JSON.parse(res._getData())).toEqual({ error: 'Internal server error' })
+    const line = logSpy.mock.calls.map(c => String(c[0])).find(l => l.includes('HTTP handler error'))
+    logSpy.mockRestore()
+    expect(line).toContain('"brand_id":"402"')
+  })
+
   it('returns 413 when the body is over the limit', async () => {
     const req = createRequest({
       method: 'POST',
