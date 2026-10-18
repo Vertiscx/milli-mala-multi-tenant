@@ -7,6 +7,7 @@
  *   POST /v1/attachments   — Malaskrá attachment forwarding
  *   GET  /v1/health        — Health check
  *   GET  /v1/audit         — Audit log query (requires AUDIT_SECRET)
+ *   POST /v1/tr/...        — TR's services (Node only; see services/tr/)
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
@@ -14,6 +15,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { getConfig } from './platform/config.js'
 import { findRoute, type ServiceRoute } from './platform/http/routes.js'
 import { archiveRoutes } from './services/archive/routes.js'
+import { trRoutes } from './services/tr/routes.js'
 import { FileTenantStore, resolveTenantConfig, sanitizeAuditParam } from './platform/tenant.js'
 import { loadTenants } from './tenants.config.js'
 import { FileAuditStore } from './platform/fileAuditStore.js'
@@ -31,6 +33,10 @@ export { handleTicketCreate } from './services/ticketCreate/handler.js'
 const logger: Logger = createLogger('main')
 
 const MAX_BODY_SIZE = 1024 * 1024 // 1MB
+
+// TR routes are served by this Node entry point only, which is what
+// production runs; the Worker entry point doesn't register them.
+const serviceRoutes = [...archiveRoutes, ...trRoutes]
 
 /**
  * Build the tenant store from `src/tenants.config.ts`. Secrets are read
@@ -157,7 +163,7 @@ function startServer(): void {
     if (url.pathname === '/v1/tickets/update' && req.method === 'POST') return handleTicketUpdateHttp(req, res, tenantStore)
     if (url.pathname === '/v1/tickets/create' && req.method === 'POST') return handleTicketCreateHttp(req, res, tenantStore)
 
-    const route = req.method === 'POST' ? findRoute(archiveRoutes, req.method, url.pathname) : undefined
+    const route = req.method === 'POST' ? findRoute(serviceRoutes, req.method, url.pathname) : undefined
     if (route) return dispatchServiceRoute(req, res, route, tenantStore, auditStore)
 
     sendJson(res, 404, { error: 'Not found' })

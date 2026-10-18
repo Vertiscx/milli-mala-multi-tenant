@@ -81,12 +81,16 @@ export class FileTenantStore implements TenantStore {
     // KvTenantStore loads tenants one at a time, so this check only applies to file-based stores.
     const seenApiKeys = new Map<string, string>()
     for (const tenant of data.tenants) {
-      const key = tenant.services?.archive?.malaskra?.apiKey
-      if (key) {
+      const keys: [string, string | undefined][] = [
+        ['malaskra.apiKey', tenant.services?.archive?.malaskra?.apiKey],
+        ['tr.apiKey', tenant.services?.tr?.apiKey]
+      ]
+      for (const [field, key] of keys) {
+        if (!key) continue
         const existingTenant = seenApiKeys.get(key)
         if (existingTenant) {
           throw new Error(
-            `Duplicate malaskra.apiKey: tenants "${existingTenant}" and "${tenant.name || tenant.brand_id}" share the same key`
+            `Duplicate ${field}: tenants "${existingTenant}" and "${tenant.name || tenant.brand_id}" share the same key`
           )
         }
         seenApiKeys.set(key, tenant.name || tenant.brand_id)
@@ -151,6 +155,11 @@ export function validateTenantConfig(config: TenantConfig): void {
   const ticketCreate = config.services?.ticketCreate
   if (ticketCreate) {
     validateTicketCreateConfig(ticketCreate, config.name || config.brand_id)
+  }
+
+  const tr = config.services?.tr
+  if (tr) {
+    validateTrConfig(tr, config.name || config.brand_id, config.services?.archive?.malaskra?.apiKey)
   }
 }
 
@@ -286,6 +295,83 @@ export function validateTicketCreateConfig(
 
   validateSecretStrength(ticketCreate.apiKey, 'ticketCreate.apiKey', label, MIN_SECRET_LENGTH)
   validateSecretStrength(ticketCreate.oauth.clientSecret, 'ticketCreate.oauth.clientSecret', label, MIN_SECRET_LENGTH)
+}
+
+/** Auth0 tenant domains: hostname only, no scheme or path. */
+const AUTH0_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i
+
+/**
+ * Validate the TR section (services.tr): shared Huld + Auth0 + agent-login
+ * settings, then each switched-on sub-service. Throws with a descriptive
+ * message on failure. Only called when the section is present.
+ * `malaskraApiKey` is the same tenant's archive key, which the TR key must
+ * not reuse (the sidebar apps are different trust boundaries).
+ */
+export function validateTrConfig(
+  tr: NonNullable<TenantConfig['services']['tr']>,
+  label: string,
+  malaskraApiKey?: string
+): void {
+  const missing: string[] = []
+  if (!tr.apiKey) missing.push('apiKey')
+  if (!tr.huld?.baseUrl) missing.push('huld.baseUrl')
+  if (!tr.auth0?.domain) missing.push('auth0.domain')
+  if (!tr.auth0?.audience) missing.push('auth0.audience')
+  if (!tr.auth0?.clientId) missing.push('auth0.clientId')
+  if (!tr.auth0?.clientSecret) missing.push('auth0.clientSecret')
+  if (!tr.agentAuth?.domain) missing.push('agentAuth.domain')
+  if (!tr.agentAuth?.audience) missing.push('agentAuth.audience')
+  if (!tr.agentAuth?.clientId) missing.push('agentAuth.clientId')
+  if (!tr.agentAuth?.emailClaim) missing.push('agentAuth.emailClaim')
+  if (!tr.agentAuth?.emailVerifiedClaim) missing.push('agentAuth.emailVerifiedClaim')
+  if (missing.length > 0) {
+    throw new Error(`Invalid tenant config for "${label}": missing tr ${missing.join(', ')}`)
+  }
+
+  if (!tr.smari) {
+    throw new Error(`Invalid tenant config for "${label}": tr section has no service switched on`)
+  }
+
+  validateSecretStrength(tr.apiKey, 'tr.apiKey', label, MIN_SECRET_LENGTH)
+  if (malaskraApiKey && tr.apiKey === malaskraApiKey) {
+    throw new Error(`Invalid tenant config for "${label}": tr.apiKey must differ from malaskra.apiKey`)
+  }
+  // TR issues the Auth0 client secret, so its length is TR's call.
+  validateSecretStrength(tr.auth0.clientSecret, 'tr.auth0.clientSecret', label, MIN_PASSWORD_LENGTH)
+
+  for (const [field, domain] of [['tr.auth0.domain', tr.auth0.domain], ['tr.agentAuth.domain', tr.agentAuth.domain]]) {
+    if (!AUTH0_DOMAIN_PATTERN.test(domain)) {
+      throw new Error(`Invalid tenant config for "${label}": ${field} must be a bare hostname (got "${domain}")`)
+    }
+  }
+
+  // The agent-login audience must be its own Auth0 API. If it equalled the
+  // Huld machine audience, any TR user token for Huld would pass as an
+  // agent login.
+  if (tr.agentAuth.audience === tr.auth0.audience) {
+    throw new Error(`Invalid tenant config for "${label}": tr.agentAuth.audience must differ from tr.auth0.audience`)
+  }
+
+  // Same HTTPS + no-private-address rule as archive endpoints (SSRF via config).
+  validateHttpsBaseUrl(tr.huld.baseUrl, 'tr.huld.baseUrl', label)
+  tr.huld.baseUrl = tr.huld.baseUrl.replace(/\/+$/, '')
+}
+
+function validateHttpsBaseUrl(value: string, field: string, tenantLabel: string): void {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(`Invalid tenant config for "${tenantLabel}": ${field} is not a valid URL`)
+  }
+  if (url.protocol !== 'https:') {
+    throw new Error(`Invalid tenant config for "${tenantLabel}": ${field} must use HTTPS (got "${url.protocol}")`)
+  }
+  for (const pattern of PRIVATE_IP_PATTERNS) {
+    if (pattern.test(url.hostname)) {
+      throw new Error(`Invalid tenant config for "${tenantLabel}": ${field} must not point to a private/reserved address`)
+    }
+  }
 }
 
 /**

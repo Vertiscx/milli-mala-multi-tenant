@@ -12,7 +12,32 @@ export interface TenantConfig {
     archive?: ArchiveServiceConfig
     ticketUpdate?: TicketUpdateServiceConfig
     ticketCreate?: TicketCreateServiceConfig
+    tr?: TrServiceConfig
   }
+}
+
+// Config for TR's services (src/services/tr/), starting with the Smári
+// customer lookup. TR's services call TR's Huld API with one Auth0
+// machine client and authenticate the agent through TR's own Auth0 login
+// (agentAuth), so those parts are shared; each service is switched on by
+// the presence of its own sub-section.
+export interface TrServiceConfig {
+  apiKey: string                       // TR's sidebar app → gateway (X-Api-Key)
+  huld: { baseUrl: string }            // TR's Huld API (TEST or PROD)
+  auth0: {                             // Client Credentials token for Huld
+    domain: string
+    audience: string
+    clientId: string
+    clientSecret: string
+  }
+  agentAuth: {                         // verifies the agent's own Auth0 access token
+    domain: string
+    audience: string
+    clientId: string                   // the TR Smári app's Auth0 client; tokens must carry it as azp
+    emailClaim: string
+    emailVerifiedClaim: string         // claim TR's Auth0 Action sets to true for a verified email
+  }
+  smari?: { enabled: true }
 }
 
 // Config for the ticketCreate service (src/services/ticketCreate/), called
