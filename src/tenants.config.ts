@@ -27,10 +27,11 @@
  * webhook create inputs are unavailable for that tenant.
  *
  * The ticket-update and ticket-create services are opt-in per tenant the
- * same way: see `ticketUpdateSection` and `ticketCreateSection` below.
+ * same way: see `ticketUpdateSection`, `ticketCreateSection` and
+ * `trSection` (TR's Smári lookup) below.
  */
 
-import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig } from './platform/types.js'
+import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig, TrServiceConfig } from './platform/types.js'
 import { requireEnv, optionalNumberEnv } from './platform/env.js'
 
 /**
@@ -101,6 +102,45 @@ function ticketCreateSection(
         clientId: requireEnv(names.clientId, env),
         clientSecret: requireEnv(names.clientSecret, env),
       },
+    },
+  }
+}
+
+/**
+ * Build the optional `services.tr` section (TR's Smári lookup).
+ *
+ * The shared variables (API key, Huld, TR's Auth0 machine client, agent
+ * login) only matter once a service is switched on, so the section exists
+ * only when `<PREFIX>_TR_SMARI_ENABLED` is "true". From then on every
+ * shared variable is required (boot failure naming the missing one), like
+ * ticketUpdate's partly-set rule.
+ */
+function trSection(
+  prefix: string,
+  env: Record<string, string | undefined>
+): { tr?: TrServiceConfig } {
+  if (env[`${prefix}_TR_SMARI_ENABLED`] !== 'true') return {}
+
+  const n = (name: string) => `${prefix}_TR_${name}`
+
+  return {
+    tr: {
+      apiKey: requireEnv(n('API_KEY'), env),
+      huld: { baseUrl: requireEnv(n('HULD_BASE_URL'), env) },
+      auth0: {
+        domain: requireEnv(n('AUTH0_DOMAIN'), env),
+        audience: requireEnv(n('AUTH0_AUDIENCE'), env),
+        clientId: requireEnv(n('AUTH0_CLIENT_ID'), env),
+        clientSecret: requireEnv(n('AUTH0_CLIENT_SECRET'), env),
+      },
+      agentAuth: {
+        domain: requireEnv(n('AGENT_AUTH_DOMAIN'), env),
+        audience: requireEnv(n('AGENT_AUTH_AUDIENCE'), env),
+        clientId: requireEnv(n('AGENT_AUTH_CLIENT_ID'), env),
+        emailClaim: requireEnv(n('AGENT_AUTH_EMAIL_CLAIM'), env),
+        emailVerifiedClaim: requireEnv(n('AGENT_AUTH_EMAIL_VERIFIED_CLAIM'), env),
+      },
+      smari: { enabled: true },
     },
   }
 }
@@ -231,6 +271,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
         ...ticketUpdateSection('TRYGGINGASTOFNUN', env),
+        // TR's Smári lookup: main brand only, not the internal one.
+        ...trSection('TRYGGINGASTOFNUN', env),
       },
     },
     {
