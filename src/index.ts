@@ -7,6 +7,8 @@
  *   POST /v1/attachments   — Malaskrá attachment forwarding
  *   GET  /v1/health        — Health check
  *   GET  /v1/audit         — Audit log query (requires AUDIT_SECRET)
+ *   POST /v1/4-random-digits/codes, GET /v1/4-random-digits/health
+ *                          — random 4-digit codes (when RANDOM_DIGITS_API_KEYS is set)
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
@@ -21,6 +23,9 @@ import { createLogger } from './platform/logger.js'
 import type { Logger } from './platform/types.js'
 import { handleTicketUpdateHttp } from './services/ticketUpdate/handler.js'
 import { handleTicketCreateHttp } from './services/ticketCreate/handler.js'
+import { loadFourRandomDigitsConfig } from './services/fourRandomDigits/config.js'
+import { createFourRandomDigitsHandler, isFourRandomDigitsPath } from './services/fourRandomDigits/handler.js'
+import { handleFourRandomDigitsHttp } from './services/fourRandomDigits/nodeAdapter.js'
 
 export { handleWebhook, verifyWebhookSignature, isTimestampFresh } from './services/archive/webhook.js'
 export { handleAttachments } from './services/archive/attachments.js'
@@ -148,10 +153,19 @@ function startServer(): void {
   const port = config.service.port
   const tenantStore = loadTenantStore()
   const auditStore = new FileAuditStore(process.env.AUDIT_DIR || './audit-data')
+  // Malformed RANDOM_DIGITS_* settings throw here, failing startup (fail fast)
+  const fourRandomDigitsConfig = loadFourRandomDigitsConfig()
+  const fourRandomDigits = fourRandomDigitsConfig ? createFourRandomDigitsHandler({ config: fourRandomDigitsConfig }) : null
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url!, `http://localhost:${port}`)
 
+    if (fourRandomDigits && isFourRandomDigitsPath(url.pathname)) {
+      return handleFourRandomDigitsHttp(fourRandomDigits, req, res).catch((error: Error) => {
+        logger.error('4-random-digits adapter error', { error: error.message })
+        if (!res.headersSent) sendJson(res, 500, { error: 'Internal server error' })
+      })
+    }
     if (url.pathname === '/v1/health' && req.method === 'GET') return handleHealth(req, res)
     if (url.pathname === '/v1/audit' && req.method === 'GET') return handleAuditHttp(req, res, url, auditStore, config.auditSecret)
     if (url.pathname === '/v1/tickets/update' && req.method === 'POST') return handleTicketUpdateHttp(req, res, tenantStore)

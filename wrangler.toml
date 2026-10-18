@@ -18,6 +18,9 @@ id = "your-audit-log-namespace-id"
 
 # Secrets (set these with: wrangler secret put <NAME>)
 # wrangler secret put AUDIT_SECRET
+# wrangler secret put RANDOM_DIGITS_API_KEYS   (keyId:key,keyId:key — enables 4-random-digits)
+# Optional vars: RANDOM_DIGITS_CORS_ORIGINS (comma-separated origins),
+#                RANDOM_DIGITS_RATE_LIMIT_PER_MINUTE (default 60)
 
 # ============================================
 # STAGING ENVIRONMENT

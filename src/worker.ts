@@ -7,6 +7,8 @@
  *   POST /v1/attachments   — Malaskrá attachment forwarding
  *   GET  /v1/health        — Health check
  *   GET  /v1/audit         — Audit log query (requires AUDIT_SECRET)
+ *   POST /v1/4-random-digits/codes, GET /v1/4-random-digits/health
+ *                          — random 4-digit codes (when RANDOM_DIGITS_API_KEYS is set)
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
@@ -14,14 +16,42 @@ import { findRoute, type ServiceRoute } from './platform/http/routes.js'
 import { archiveRoutes } from './services/archive/routes.js'
 import { KvTenantStore, resolveTenantConfig, sanitizeAuditParam } from './platform/tenant.js'
 import type { AuditStore } from './platform/types.js'
+import { loadFourRandomDigitsConfig } from './services/fourRandomDigits/config.js'
+import {
+  createFourRandomDigitsHandler,
+  isFourRandomDigitsPath,
+  type FourRandomDigitsHandler
+} from './services/fourRandomDigits/handler.js'
 
 interface CfEnv {
   TENANT_KV?: { get(key: string, format?: string): Promise<string | null> }
   AUDIT_LOG?: AuditStore
   AUDIT_SECRET?: string
+  RANDOM_DIGITS_API_KEYS?: string
+  RANDOM_DIGITS_CORS_ORIGINS?: string
+  RANDOM_DIGITS_RATE_LIMIT_PER_MINUTE?: string
 }
 
 const MAX_BODY_SIZE = 1024 * 1024 // 1MB
+
+// Worker bindings arrive per request, but the handler (and its in-memory
+// rate limiter) must live for the whole isolate. Rebuild only if the
+// configuration itself changes.
+let fourRandomDigits: { settings: string; handler: FourRandomDigitsHandler | null } | undefined
+
+function getFourRandomDigitsHandler(env: CfEnv): FourRandomDigitsHandler | null {
+  const raw = {
+    RANDOM_DIGITS_API_KEYS: env.RANDOM_DIGITS_API_KEYS,
+    RANDOM_DIGITS_CORS_ORIGINS: env.RANDOM_DIGITS_CORS_ORIGINS,
+    RANDOM_DIGITS_RATE_LIMIT_PER_MINUTE: env.RANDOM_DIGITS_RATE_LIMIT_PER_MINUTE
+  }
+  const settings = JSON.stringify(raw)
+  if (fourRandomDigits?.settings !== settings) {
+    const config = loadFourRandomDigitsConfig(raw)
+    fourRandomDigits = { settings, handler: config ? createFourRandomDigitsHandler({ config }) : null }
+  }
+  return fourRandomDigits.handler
+}
 
 async function dispatchServiceRoute(request: Request, route: ServiceRoute, env: CfEnv): Promise<Response> {
   try {
@@ -68,6 +98,11 @@ async function dispatchServiceRoute(request: Request, route: ServiceRoute, env: 
 export default {
   async fetch(request: Request, env: CfEnv, _ctx: unknown): Promise<Response> {
     const url = new URL(request.url)
+
+    if (isFourRandomDigitsPath(url.pathname)) {
+      const handler = getFourRandomDigitsHandler(env)
+      if (handler) return handler(request)
+    }
 
     // Health check
     if (url.pathname === '/v1/health' && request.method === 'GET') {

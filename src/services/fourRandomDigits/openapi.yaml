@@ -1,0 +1,152 @@
+openapi: 3.0.3
+info:
+  title: 4-random-digits
+  description: >-
+    Generates random 4-digit security codes (0000–9999), e.g. for
+    e-authentication. Codes come from a cryptographically secure generator,
+    every code is equally likely, and codes are never stored, logged or
+    cached.
+  version: 1.0.0
+  # TODO before registering in the API Catalogue: real owner contact and
+  # responsible-party page.
+  contact:
+    name: TODO owner name
+    email: TODO@example.is
+  x-category:
+    - official
+  x-pricing:
+    - free
+  x-links:
+    responsibleParty: https://TODO.example.is
+servers:
+  - url: /v1/4-random-digits
+security:
+  - apiKey: []
+paths:
+  /codes:
+    post:
+      operationId: createCode
+      summary: Create a new random code
+      description: Returns a new random 4-digit code. Takes no request body.
+      responses:
+        '201':
+          description: A new code.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Code'
+              example:
+                code: '0427'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      description: Reports that the service is running. Requires no API key.
+      security: []
+      responses:
+        '200':
+          description: The service is running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: ok
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: An API key issued per caller, sent as `Authorization: Bearer <key>`.
+  schemas:
+    Code:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Exactly four digits, zero-padded.
+          pattern: '^[0-9]{4}$'
+          example: '0427'
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: Always `ok`.
+          enum: [ok]
+    Problem:
+      type: object
+      description: RFC 7807 Problem Details.
+      required: [type]
+      properties:
+        type:
+          type: string
+          description: Problem type URI; `about:blank` for plain HTTP errors.
+          example: about:blank
+        title:
+          type: string
+          description: Short summary of the problem type.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Explanation of this occurrence.
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key.
+      headers:
+        WWW-Authenticate:
+          description: Always `Bearer`.
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            detail: A valid API key is required.
+    TooManyRequests:
+      description: The API key has exceeded its per-minute rate limit.
+      headers:
+        Retry-After:
+          description: Seconds until the limit resets.
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Too Many Requests
+            status: 429
+            detail: Rate limit exceeded for this API key.
+    InternalServerError:
+      description: Unexpected error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Internal Server Error
+            status: 500
+            detail: An unexpected error occurred.
