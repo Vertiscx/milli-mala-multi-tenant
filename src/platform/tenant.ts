@@ -324,12 +324,16 @@ export function validateTrConfig(
   if (!tr.agentAuth?.clientId) missing.push('agentAuth.clientId')
   if (!tr.agentAuth?.emailClaim) missing.push('agentAuth.emailClaim')
   if (!tr.agentAuth?.emailVerifiedClaim) missing.push('agentAuth.emailVerifiedClaim')
+  if (tr.eauth) {
+    if (!tr.eauth.zendeskOAuth?.clientId) missing.push('eauth.zendeskOAuth.clientId')
+    if (!tr.eauth.zendeskOAuth?.clientSecret) missing.push('eauth.zendeskOAuth.clientSecret')
+  }
   if (missing.length > 0) {
     throw new Error(`Invalid tenant config for "${label}": missing tr ${missing.join(', ')}`)
   }
 
-  if (!tr.smari) {
-    throw new Error(`Invalid tenant config for "${label}": tr section has no service switched on`)
+  if (!tr.smari && !tr.eauth) {
+    throw new Error(`Invalid tenant config for "${label}": tr section has neither smari nor eauth switched on`)
   }
 
   validateSecretStrength(tr.apiKey, 'tr.apiKey', label, MIN_SECRET_LENGTH)
@@ -355,6 +359,31 @@ export function validateTrConfig(
   // Same HTTPS + no-private-address rule as archive endpoints (SSRF via config).
   validateHttpsBaseUrl(tr.huld.baseUrl, 'tr.huld.baseUrl', label)
   tr.huld.baseUrl = tr.huld.baseUrl.replace(/\/+$/, '')
+
+  if (tr.eauth) {
+    const e = tr.eauth
+    if (e.hashValueMode !== 'code' && e.hashValueMode !== 'sha256') {
+      throw new Error(`Invalid tenant config for "${label}": tr.eauth.hashValueMode must be "code" or "sha256"`)
+    }
+    const positive: [string, number][] = [
+      ['timeoutSeconds', e.timeoutSeconds],
+      ['attemptTtlSeconds', e.attemptTtlSeconds],
+      ['rateLimits.perAgent.max', e.rateLimits?.perAgent?.max],
+      ['rateLimits.perAgent.windowSeconds', e.rateLimits?.perAgent?.windowSeconds],
+      ['rateLimits.perTarget.max', e.rateLimits?.perTarget?.max],
+      ['rateLimits.perTarget.windowSeconds', e.rateLimits?.perTarget?.windowSeconds]
+    ]
+    for (const [field, value] of positive) {
+      if (!Number.isSafeInteger(value) || value <= 0) {
+        throw new Error(`Invalid tenant config for "${label}": tr.eauth.${field} must be a positive integer`)
+      }
+    }
+    // The attempt must outlive TR's own timeout, or a slow "verified" would land on an expired attempt.
+    if (e.attemptTtlSeconds <= e.timeoutSeconds) {
+      throw new Error(`Invalid tenant config for "${label}": tr.eauth.attemptTtlSeconds must be greater than timeoutSeconds`)
+    }
+    validateSecretStrength(e.zendeskOAuth.clientSecret, 'tr.eauth.zendeskOAuth.clientSecret', label, MIN_SECRET_LENGTH)
+  }
 }
 
 function validateHttpsBaseUrl(value: string, field: string, tenantLabel: string): void {

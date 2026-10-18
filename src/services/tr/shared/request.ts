@@ -3,8 +3,8 @@
  * sidebar app's X-Api-Key matches, and the agent is identified.
  *
  * resolveAgent is the one place agent identity comes from, so another
- * way of identifying the agent can replace it without changes in the
- * services.
+ * way of identifying the agent can replace it without changes in smari/
+ * or eauth/.
  */
 
 import { createHash, timingSafeEqual } from 'node:crypto'
@@ -44,7 +44,7 @@ const UNAUTHORIZED: HandlerResult = { status: 401, body: { error: 'Unauthorized'
  */
 export async function authenticateTrRequest(
   req: GatewayRequest,
-  service: 'smari'
+  service: 'smari' | 'eauth'
 ): Promise<TrContext | HandlerResult> {
   const tr = req.tenantConfig.services.tr
   if (!tr || !tr[service]) return INVALID

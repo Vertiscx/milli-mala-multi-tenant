@@ -7,7 +7,7 @@
  *   POST /v1/attachments   — Malaskrá attachment forwarding
  *   GET  /v1/health        — Health check
  *   GET  /v1/audit         — Audit log query (requires AUDIT_SECRET)
- *   POST /v1/tr/...        — TR's services (Node only; see services/tr/)
+ *   POST /v1/tr/...        — TR's Smári lookup and e-auth (Node only; see services/tr/)
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
@@ -34,8 +34,8 @@ const logger: Logger = createLogger('main')
 
 const MAX_BODY_SIZE = 1024 * 1024 // 1MB
 
-// TR routes are served by this Node entry point only, which is what
-// production runs; the Worker entry point doesn't register them.
+// TR routes are Node-only: e-auth keeps attempts in memory and finishes
+// TR's call in the background, which a stateless Worker can't do.
 const serviceRoutes = [...archiveRoutes, ...trRoutes]
 
 /**
