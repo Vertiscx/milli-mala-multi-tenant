@@ -13,13 +13,15 @@ const logger: Logger = createLogger('tr.audit')
 const AUDIT_TTL_SECONDS = 90 * 24 * 60 * 60
 
 export interface TrAuditEntry {
-  service: 'tr.smari'
+  service: 'tr.smari' | 'tr.eauth'
   brand_id: string
   ticket_id: string | null
   agent_email: string
   target_masked: string
   outcome: string
   duration_ms: number
+  attempt_id?: string
+  note_written?: boolean
 }
 
 export async function writeTrAudit(auditStore: AuditStore | undefined, entry: TrAuditEntry): Promise<void> {

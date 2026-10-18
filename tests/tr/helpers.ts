@@ -60,6 +60,13 @@ export function makeTrConfig(overrides: Partial<TrServiceConfig> = {}): TrServic
     auth0: { domain: TR_AUTH0_DOMAIN, audience: 'https://zendesk.dev.tr.is', clientId: 'tr-m2m-client', clientSecret: 'tr-m2m-secret-long-enough' },
     agentAuth: { domain: AGENT_DOMAIN, audience: AGENT_AUDIENCE, clientId: SPA_CLIENT_ID, emailClaim: EMAIL_CLAIM, emailVerifiedClaim: VERIFIED_CLAIM },
     smari: { enabled: true },
+    eauth: {
+      hashValueMode: 'code',
+      timeoutSeconds: 120,
+      attemptTtlSeconds: 180,
+      rateLimits: { perAgent: { max: 10, windowSeconds: 600 }, perTarget: { max: 3, windowSeconds: 600 } },
+      zendeskOAuth: { clientId: 'zd-oauth-client', clientSecret: 'zd-oauth-secret-that-is-long-enough-123' }
+    },
     ...overrides
   }
 }

@@ -28,7 +28,7 @@
  *
  * The ticket-update and ticket-create services are opt-in per tenant the
  * same way: see `ticketUpdateSection`, `ticketCreateSection` and
- * `trSection` (TR's Smári lookup) below.
+ * `trSection` (TR's Smári lookup and e-auth) below.
  */
 
 import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig, TrServiceConfig } from './platform/types.js'
@@ -106,22 +106,41 @@ function ticketCreateSection(
   }
 }
 
+// e-auth defaults. Each can be overridden per tenant with
+// the matching <PREFIX>_TR_EAUTH_* variable.
+const TR_EAUTH_DEFAULTS = {
+  timeoutSeconds: 120,
+  attemptTtlSeconds: 180,
+  perAgentMax: 10,
+  perAgentWindowSeconds: 600,
+  perTargetMax: 3,
+  perTargetWindowSeconds: 600,
+}
+
 /**
- * Build the optional `services.tr` section (TR's Smári lookup).
+ * Build the optional `services.tr` section (TR's Smári lookup and e-auth).
  *
  * The shared variables (API key, Huld, TR's Auth0 machine client, agent
  * login) only matter once a service is switched on, so the section exists
- * only when `<PREFIX>_TR_SMARI_ENABLED` is "true". From then on every
- * shared variable is required (boot failure naming the missing one), like
- * ticketUpdate's partly-set rule.
+ * only when `<PREFIX>_TR_SMARI_ENABLED` or `<PREFIX>_TR_EAUTH_ENABLED` is
+ * "true". From then on every shared variable is required (boot failure
+ * naming the missing one), like ticketUpdate's partly-set rule.
+ *
+ * e-auth's Zendesk OAuth client has its own variables rather than reading
+ * ticketUpdate's, so DevOps may point them at the same client without the
+ * two services' config depending on each other.
  */
 function trSection(
   prefix: string,
   env: Record<string, string | undefined>
 ): { tr?: TrServiceConfig } {
-  if (env[`${prefix}_TR_SMARI_ENABLED`] !== 'true') return {}
+  const smari = env[`${prefix}_TR_SMARI_ENABLED`] === 'true'
+  const eauth = env[`${prefix}_TR_EAUTH_ENABLED`] === 'true'
+  if (!smari && !eauth) return {}
 
   const n = (name: string) => `${prefix}_TR_${name}`
+  const num = (name: string, fallback: number) => optionalNumberEnv(n(name), env) ?? fallback
+  const d = TR_EAUTH_DEFAULTS
 
   return {
     tr: {
@@ -140,7 +159,30 @@ function trSection(
         emailClaim: requireEnv(n('AGENT_AUTH_EMAIL_CLAIM'), env),
         emailVerifiedClaim: requireEnv(n('AGENT_AUTH_EMAIL_VERIFIED_CLAIM'), env),
       },
-      smari: { enabled: true },
+      ...(smari ? { smari: { enabled: true as const } } : {}),
+      ...(eauth
+        ? {
+            eauth: {
+              hashValueMode: env[n('EAUTH_HASH_VALUE_MODE')] === 'sha256' ? 'sha256' as const : 'code' as const,
+              timeoutSeconds: num('EAUTH_TIMEOUT_SECONDS', d.timeoutSeconds),
+              attemptTtlSeconds: num('EAUTH_ATTEMPT_TTL_SECONDS', d.attemptTtlSeconds),
+              rateLimits: {
+                perAgent: {
+                  max: num('EAUTH_RATE_PER_AGENT_MAX', d.perAgentMax),
+                  windowSeconds: num('EAUTH_RATE_PER_AGENT_WINDOW_SECONDS', d.perAgentWindowSeconds),
+                },
+                perTarget: {
+                  max: num('EAUTH_RATE_PER_TARGET_MAX', d.perTargetMax),
+                  windowSeconds: num('EAUTH_RATE_PER_TARGET_WINDOW_SECONDS', d.perTargetWindowSeconds),
+                },
+              },
+              zendeskOAuth: {
+                clientId: requireEnv(n('EAUTH_ZENDESK_OAUTH_CLIENT_ID'), env),
+                clientSecret: requireEnv(n('EAUTH_ZENDESK_OAUTH_CLIENT_SECRET'), env),
+              },
+            },
+          }
+        : {}),
     },
   }
 }
@@ -271,7 +313,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
         ...ticketUpdateSection('TRYGGINGASTOFNUN', env),
-        // TR's Smári lookup: main brand only, not the internal one.
+        // TR's Smári lookup and e-auth: main brand only, not the internal one.
         ...trSection('TRYGGINGASTOFNUN', env),
       },
     },
