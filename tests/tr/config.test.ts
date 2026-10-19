@@ -16,7 +16,7 @@ describe('validateTrConfig', () => {
   })
 
   it('requires at least one sub-service', () => {
-    expect(() => validateTrConfig(makeTrConfig({ smari: undefined }), 'TR')).toThrow('no service switched on')
+    expect(() => validateTrConfig(makeTrConfig({ smari: undefined, eauth: undefined }), 'TR')).toThrow('neither smari nor eauth')
   })
 
   it('rejects a weak API key and one reused from Málaskrá', () => {
@@ -39,6 +39,20 @@ describe('validateTrConfig', () => {
     const base = makeTrConfig()
     const tr = makeTrConfig({ agentAuth: { ...base.agentAuth, audience: base.auth0.audience } })
     expect(() => validateTrConfig(tr, 'TR')).toThrow('tr.agentAuth.audience must differ from tr.auth0.audience')
+  })
+
+  it('checks e-auth numbers and requires the attempt to outlive the TR timeout', () => {
+    const base = makeTrConfig().eauth!
+    expect(() => validateTrConfig(makeTrConfig({ eauth: { ...base, timeoutSeconds: 0 } }), 'TR')).toThrow('timeoutSeconds must be a positive integer')
+    expect(() => validateTrConfig(makeTrConfig({ eauth: { ...base, attemptTtlSeconds: 120 } }), 'TR')).toThrow('attemptTtlSeconds must be greater than timeoutSeconds')
+    expect(() => validateTrConfig(makeTrConfig({ eauth: { ...base, hashValueMode: 'md5' as 'code' } }), 'TR')).toThrow('hashValueMode')
+  })
+
+  it('requires the e-auth Zendesk OAuth client only when e-auth is on', () => {
+    const base = makeTrConfig().eauth!
+    expect(() => validateTrConfig(makeTrConfig({ eauth: { ...base, zendeskOAuth: { clientId: '', clientSecret: '' } } }), 'TR'))
+      .toThrow('eauth.zendeskOAuth.clientId, eauth.zendeskOAuth.clientSecret')
+    expect(() => validateTrConfig(makeTrConfig({ eauth: undefined }), 'TR')).not.toThrow()
   })
 
   it('is run by validateTenantConfig when the section is present', () => {

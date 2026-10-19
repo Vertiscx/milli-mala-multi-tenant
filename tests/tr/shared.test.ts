@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { verifyAgentToken, clearJwksCache } from '../../src/services/tr/shared/agentAuth.js'
-import { isValidKennitala, maskKennitala } from '../../src/services/tr/shared/kennitala.js'
+import { isValidKennitala, parseEidTarget, maskKennitala, maskPhone } from '../../src/services/tr/shared/kennitala.js'
 import { postHuld } from '../../src/services/tr/shared/huldClient.js'
 import { clearAllTrTokens } from '../../src/services/tr/shared/trAuth0.js'
 import { authenticateTrRequest, isTrContext } from '../../src/services/tr/shared/request.js'
@@ -27,8 +27,15 @@ describe('kennitala helpers', () => {
     expect(isValidKennitala('12038945')).toBe(false)
   })
 
-  it('masks a kennitala for logs and audit', () => {
+  it('parses e-ID targets as kennitala or 7-digit phone', () => {
+    expect(parseEidTarget('120389-4599')).toEqual({ kind: 'kennitala', value: '1203894599' })
+    expect(parseEidTarget('+354 891 2345')).toEqual({ kind: 'phone', value: '8912345' })
+    expect(parseEidTarget('12345')).toBeNull()
+  })
+
+  it('masks targets for logs and notes', () => {
     expect(maskKennitala('1203894569')).toBe('120389-****')
+    expect(maskPhone('8912345')).toBe('***-**45')
   })
 })
 

@@ -16,11 +16,11 @@ export interface TenantConfig {
   }
 }
 
-// Config for TR's services (src/services/tr/), starting with the Smári
-// customer lookup. TR's services call TR's Huld API with one Auth0
-// machine client and authenticate the agent through TR's own Auth0 login
-// (agentAuth), so those parts are shared; each service is switched on by
-// the presence of its own sub-section.
+// Config for TR's two services (src/services/tr/): Smári customer lookup
+// and TR's e-ID check (e-auth). Both call TR's Huld API with one Auth0
+// machine client, and both authenticate the agent through TR's own Auth0
+// login (agentAuth), so those parts are shared; each service is switched
+// on separately by the presence of its own sub-section.
 export interface TrServiceConfig {
   apiKey: string                       // TR's sidebar app → gateway (X-Api-Key)
   huld: { baseUrl: string }            // TR's Huld API (TEST or PROD)
@@ -38,6 +38,19 @@ export interface TrServiceConfig {
     emailVerifiedClaim: string         // claim TR's Auth0 Action sets to true for a verified email
   }
   smari?: { enabled: true }
+  eauth?: TrEauthConfig
+}
+
+export interface TrEauthConfig {
+  hashValueMode: 'code' | 'sha256'
+  timeoutSeconds: number
+  attemptTtlSeconds: number
+  rateLimits: {
+    perAgent: { max: number; windowSeconds: number }
+    perTarget: { max: number; windowSeconds: number }
+  }
+  // Zendesk OAuth client for the ticket brand check and the internal note.
+  zendeskOAuth: { clientId: string; clientSecret: string }
 }
 
 // Config for the ticketCreate service (src/services/ticketCreate/), called
