@@ -15,6 +15,20 @@ describe('validateTrConfig', () => {
     expect(() => validateTrConfig(tr, 'TR')).toThrow('missing tr apiKey, agentAuth.domain, agentAuth.clientId, agentAuth.emailClaim, agentAuth.emailVerifiedClaim')
   })
 
+  it('names missing Huld and TR Auth0 machine fields', () => {
+    const tr = makeTrConfig({
+      huld: { baseUrl: '' },
+      auth0: { domain: '', audience: '', clientId: '', clientSecret: '' },
+      agentAuth: { ...makeTrConfig().agentAuth, audience: '' }
+    })
+    expect(() => validateTrConfig(tr, 'TR')).toThrow(
+      'missing tr huld.baseUrl, auth0.domain, auth0.audience, auth0.clientId, auth0.clientSecret, agentAuth.audience')
+  })
+
+  it('rejects a Huld URL that is not a URL', () => {
+    expect(() => validateTrConfig(makeTrConfig({ huld: { baseUrl: 'not a url' } }), 'TR')).toThrow('tr.huld.baseUrl is not a valid URL')
+  })
+
   it('requires at least one sub-service', () => {
     expect(() => validateTrConfig(makeTrConfig({ smari: undefined, eauth: undefined }), 'TR')).toThrow('neither smari nor eauth')
   })
