@@ -42,6 +42,19 @@ describe('mapClientLookup', () => {
     })
   })
 
+  it('accepts numbers, drops invalid links and skips unusable applications', () => {
+    expect(mapClientLookup({
+      kennitala: 1203894599,
+      nafn: 'Jón',
+      simi: 8912345,
+      slod: 'not a url',
+      umsoknir: [null, 'x', {}, { tegund: 'Ellilífeyrir' }]
+    })).toEqual({
+      name: 'Jón', nationalId: '1203894599', phone: '8912345', email: null, url: null,
+      applications: [{ type: 'Ellilífeyrir', status: '—', submittedDate: null, url: null }]
+    })
+  })
+
   it('returns null for an empty or unrecognizable body', () => {
     expect(mapClientLookup(null)).toBeNull()
     expect(mapClientLookup({ foo: 'bar' })).toBeNull()

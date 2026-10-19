@@ -1,12 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { verifyAgentToken, clearJwksCache } from '../../src/services/tr/shared/agentAuth.js'
 import { isValidKennitala, maskKennitala } from '../../src/services/tr/shared/kennitala.js'
 import { postHuld } from '../../src/services/tr/shared/huldClient.js'
 import { clearAllTrTokens } from '../../src/services/tr/shared/trAuth0.js'
+import { writeTrAudit } from '../../src/services/tr/shared/audit.js'
 import { authenticateTrRequest, isTrContext } from '../../src/services/tr/shared/request.js'
 import {
   AGENT_AUDIENCE, AGENT_DOMAIN, BRAND, EMAIL_CLAIM, HULD, SPA_CLIENT_ID, TR_AUTH0_DOMAIN, VERIFIED_CLAIM,
-  callsTo, installFetch, json, makeReq, makeTenant, makeTrConfig, signToken
+  JWKS, callsTo, installFetch, json, makeReq, makeTenant, makeTrConfig, memoryAudit, signToken
 } from './helpers.js'
 
 const agentAuth = { domain: AGENT_DOMAIN, audience: AGENT_AUDIENCE, clientId: SPA_CLIENT_ID, emailClaim: EMAIL_CLAIM, emailVerifiedClaim: VERIFIED_CLAIM }
@@ -210,5 +211,59 @@ describe('postHuld', () => {
     expect(await postHuld(BRAND, tr, '/x', {}, { timeoutMs: 1000, retryOn401: false, signal: controller.signal }))
       .toEqual({ ok: false, kind: 'aborted' })
     expect(callsTo(mock, HULD)).toHaveLength(0)
+  })
+})
+
+describe('edge cases', () => {
+  it('rejects a kennitala whose check digit would be 10', () => {
+    expect(isValidKennitala('1203890509')).toBe(false)
+  })
+
+  it('rejects a token whose header or payload is not JSON', async () => {
+    installFetch(() => json(404, {}))
+    expect(await verifyAgentToken('bm90LWpzb24.bm90LWpzb24.c2ln', agentAuth)).toBeNull()
+  })
+
+  it('skips non-RSA and encryption keys in the JWKS', async () => {
+    const mock = vi.fn(async () => json(200, {
+      keys: [{ kty: 'EC', kid: 'test-kid-1' }, { ...JWKS.keys[0], use: 'enc' }]
+    }))
+    global.fetch = mock as unknown as typeof fetch
+    expect(await verifyAgentToken(signToken(), agentAuth)).toBeNull()
+  })
+
+  it('reports a network failure from Huld as network', async () => {
+    installFetch(() => { throw new TypeError('fetch failed') })
+    expect(await postHuld(BRAND, makeTrConfig(), '/x', {}, { timeoutMs: 1000, retryOn401: false })).toEqual({ ok: false, kind: 'network' })
+  })
+
+  it('treats a non-JSON Huld body as null data', async () => {
+    installFetch(() => new Response('not json', { status: 200 }))
+    expect(await postHuld(BRAND, makeTrConfig(), '/x', {}, { timeoutMs: 1000, retryOn401: false })).toEqual({ ok: true, status: 200, data: null })
+  })
+
+  it('reports auth failure when the TR Auth0 reply has no access token', async () => {
+    const mock = installFetch(() => json(200, {}))
+    mock.mockImplementation(async (input: string | URL | Request) =>
+      String(input) === `https://${TR_AUTH0_DOMAIN}/oauth/token` ? json(200, { token_type: 'Bearer' }) : json(200, {}))
+    expect(await postHuld(BRAND, makeTrConfig(), '/x', {}, { timeoutMs: 1000, retryOn401: false })).toEqual({ ok: false, kind: 'auth' })
+  })
+
+  it('reports auth failure when the TR Auth0 error body cannot be read', async () => {
+    const mock = installFetch(() => json(200, {}))
+    mock.mockImplementation(async (input: string | URL | Request) =>
+      String(input) === `https://${TR_AUTH0_DOMAIN}/oauth/token`
+        ? ({ ok: false, status: 500, text: () => Promise.reject(new Error('stream broke')) } as unknown as Response)
+        : json(200, {}))
+    expect(await postHuld(BRAND, makeTrConfig(), '/x', {}, { timeoutMs: 1000, retryOn401: false })).toEqual({ ok: false, kind: 'auth' })
+  })
+
+  it('keeps going when the audit store fails', async () => {
+    const audit = memoryAudit()
+    audit.put = async () => { throw new Error('disk full') }
+    await expect(writeTrAudit(audit, {
+      service: 'tr.smari', brand_id: BRAND, ticket_id: '1', agent_email: 'a@tr.is',
+      target_masked: '120389-****', outcome: 'found', duration_ms: 1
+    })).resolves.toBeUndefined()
   })
 })
