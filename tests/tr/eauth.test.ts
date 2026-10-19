@@ -7,6 +7,7 @@ import { generateSecurityCode, deriveHashValue } from '../../src/services/tr/eau
 import { buildNote } from '../../src/services/tr/eauth/note.js'
 import { AttemptStore, MAX_ATTEMPTS } from '../../src/services/tr/eauth/attempts.js'
 import { clearEauthZendeskTokens } from '../../src/services/tr/eauth/zendesk.js'
+import { SlidingWindowLimiter } from '../../src/services/tr/eauth/rateLimit.js'
 import { clearJwksCache } from '../../src/services/tr/shared/agentAuth.js'
 import { clearAllTrTokens } from '../../src/services/tr/shared/trAuth0.js'
 import { BRAND, HULD, callsTo, installFetch, json, makeReq, makeTenant, makeTrConfig, memoryAudit, signToken } from './helpers.js'
@@ -373,5 +374,66 @@ describe('AttemptStore', () => {
     for (let i = 0; i < MAX_ATTEMPTS; i++) expect(s.create(input, 60_000)).not.toBeNull()
     expect(s.create(input, 60_000)).toBeNull()
     s.clear()
+  })
+})
+
+describe('e-auth failure paths', () => {
+  const ticketUrl = `${ZD}/api/v2/tickets/${TICKET}.json`
+
+  it('refuses unauthenticated status and cancel calls', async () => {
+    setup(never)
+    expect((await status('x', { token: null })).status).toBe(401)
+    expect((await handleCancelAttempt(makeReq({ attemptId: 'x' }, { apiKey: 'nope' }))).status).toBe(401)
+  })
+
+  it('answers 502 when the Zendesk token can\'t be fetched, or has no access token', async () => {
+    let mock = installFetch(url => (url === `${ZD}/oauth/tokens` ? json(401, { error: 'invalid_client' }) : json(404, {})))
+    expect(await start()).toEqual({ status: 502, body: { outcome: 'error' } })
+    expect(callsTo(mock, HULD)).toHaveLength(0)
+    resetEauthState()
+    mock = installFetch(url => (url === `${ZD}/oauth/tokens` ? json(200, { token_type: 'bearer' }) : json(404, {})))
+    expect(await start()).toEqual({ status: 502, body: { outcome: 'error' } })
+    expect(callsTo(mock, HULD)).toHaveLength(0)
+  })
+
+  it('retries the ticket lookup once with a fresh Zendesk token after a 401', async () => {
+    let lookups = 0
+    const mock = installFetch((url, init) => {
+      if (url === `${ZD}/oauth/tokens`) return json(200, { access_token: 'zd-token', expires_in: 7200 })
+      if (url === ticketUrl && init.method === 'GET') {
+        return ++lookups === 1 ? json(401, {}) : json(200, { ticket: { id: TICKET, brand_id: Number(BRAND) } })
+      }
+      return new Promise<Response>(() => {})
+    })
+    expect((await start()).status).toBe(200)
+    expect(callsTo(mock, `${ZD}/oauth/tokens`)).toHaveLength(2)
+  })
+
+  it('records note "failed" when writing the note throws', async () => {
+    installFetch((url, init) => {
+      if (url === `${ZD}/oauth/tokens`) return json(200, { access_token: 'zd-token', expires_in: 7200 })
+      if (url === ticketUrl && init.method === 'GET') return json(200, { ticket: { id: TICKET, brand_id: Number(BRAND) } })
+      if (url === ticketUrl && init.method === 'PUT') throw new TypeError('fetch failed')
+      return json(422, {})
+    })
+    const { attemptId } = (await start()).body as { attemptId: string }
+    await settleEauth()
+    expect((await status(attemptId)).body).toMatchObject({ status: 'failed', note: 'failed' })
+  })
+
+  it('answers 503 when the attempt store is full', async () => {
+    setup(never)
+    const spy = vi.spyOn(AttemptStore.prototype, 'create').mockReturnValueOnce(null)
+    expect(await start()).toEqual({ status: 503, body: { outcome: 'error' } })
+    spy.mockRestore()
+  })
+
+  it('limiter prune drops keys with no recent hits', () => {
+    const limiter = new SlidingWindowLimiter()
+    limiter.record('a', 0)
+    limiter.record('b', 9_000)
+    limiter.prune(5_000, 10_000)
+    expect(limiter.allows('a', 1, 5_000, 10_000)).toBe(true)
+    expect(limiter.allows('b', 1, 5_000, 10_000)).toBe(false)
   })
 })
