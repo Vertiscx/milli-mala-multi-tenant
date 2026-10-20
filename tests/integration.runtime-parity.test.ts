@@ -136,7 +136,14 @@ const TENANT_ENV: Record<string, string> = {
   THSK_ZENDESK_WEBHOOK_SECRET: 'thsk-zendesk-webhook-secret-0123456',
   THSK_ONESYSTEMS_BASE_URL: ONESYS_BASE,
   THSK_ONESYSTEMS_APP_KEY: 'thsk-onesystems-app-key-0123456789ab',
-  THSK_MALASKRA_API_KEY: MALASKRA_KEY
+  THSK_MALASKRA_API_KEY: MALASKRA_KEY,
+  SJUKRA_ZENDESK_SUBDOMAIN: 'digitaliceland',
+  SJUKRA_ZENDESK_EMAIL: 'sjukra@example.com',
+  SJUKRA_ZENDESK_API_TOKEN: 'sjukra-zendesk-api-token-0123456789a',
+  SJUKRA_ZENDESK_WEBHOOK_SECRET: 'sjukra-zendesk-webhook-secret-01234',
+  SJUKRA_ONESYSTEMS_BASE_URL: ONESYS_BASE,
+  SJUKRA_ONESYSTEMS_APP_KEY: 'sjukra-onesystems-app-key-0123456789',
+  SJUKRA_MALASKRA_API_KEY: MALASKRA_KEY
 }
 
 const savedEnv: Record<string, string | undefined> = {}
