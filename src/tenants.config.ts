@@ -366,5 +366,37 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         },
       },
     },
+    {
+      brand_id: '20999349002258',
+      name: 'Sjúkratryggingar Íslands',
+      zendesk: {
+        subdomain: requireEnv('SJUKRA_ZENDESK_SUBDOMAIN', env),
+        email: requireEnv('SJUKRA_ZENDESK_EMAIL', env),
+        apiToken: requireEnv('SJUKRA_ZENDESK_API_TOKEN', env),
+        webhookSecret: requireEnv('SJUKRA_ZENDESK_WEBHOOK_SECRET', env),
+      },
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('SJUKRA_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('SJUKRA_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('SJUKRA_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('SJUKRA_KENNITALA_FIELD_ID', env),
+              // MD-02 invariant: the webhook create path refuses to mint
+              // without a case-number field to stamp (duplicate-mint guard).
+              caseNumberFieldId: optionalNumberEnv('SJUKRA_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('SJUKRA_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Sjúkratryggingar Íslands',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
+        },
+      },
+    },
   ]
 }
