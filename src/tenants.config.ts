@@ -398,5 +398,37 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
         },
       },
     },
+    {
+      brand_id: '38723008064914',
+      name: 'Embætti landlæknis',
+      zendesk: {
+        subdomain: requireEnv('LANDLAEKNIR_ZENDESK_SUBDOMAIN', env),
+        email: requireEnv('LANDLAEKNIR_ZENDESK_EMAIL', env),
+        apiToken: requireEnv('LANDLAEKNIR_ZENDESK_API_TOKEN', env),
+        webhookSecret: requireEnv('LANDLAEKNIR_ZENDESK_WEBHOOK_SECRET', env),
+      },
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('LANDLAEKNIR_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('LANDLAEKNIR_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('LANDLAEKNIR_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('LANDLAEKNIR_KENNITALA_FIELD_ID', env),
+              // MD-02 invariant: the webhook create path refuses to mint
+              // without a case-number field to stamp (duplicate-mint guard).
+              caseNumberFieldId: optionalNumberEnv('LANDLAEKNIR_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('LANDLAEKNIR_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Embætti landlæknis',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
+        },
+      },
+    },
   ]
 }

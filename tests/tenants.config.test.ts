@@ -95,12 +95,19 @@ const validEnv: Record<string, string> = {
   SJUKRA_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example',
   SJUKRA_ONESYSTEMS_APP_KEY: testSecret('sjukra-os-appkey', 40),
   SJUKRA_MALASKRA_API_KEY: testSecret('sjukra-malaskra-key', 40),
+  LANDLAEKNIR_ZENDESK_SUBDOMAIN: 'landlaeknir-test',
+  LANDLAEKNIR_ZENDESK_EMAIL: 'admin@landlaeknir.test',
+  LANDLAEKNIR_ZENDESK_API_TOKEN: testSecret('landlaeknir-zd-token', 40),
+  LANDLAEKNIR_ZENDESK_WEBHOOK_SECRET: testSecret('landlaeknir-zd-webhook', 40),
+  LANDLAEKNIR_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example',
+  LANDLAEKNIR_ONESYSTEMS_APP_KEY: testSecret('landlaeknir-os-appkey', 40),
+  LANDLAEKNIR_MALASKRA_API_KEY: testSecret('landlaeknir-malaskra-key', 40),
 }
 
 describe('loadTenants', () => {
   it('returns all tenants when all env vars are set', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants).toHaveLength(10)
+    expect(tenants).toHaveLength(11)
     expect(tenants[0].name).toBe('Kerfisstjórn')
     expect(tenants[1].name).toBe('Vinnueftirlitið')
     expect(tenants[2].name).toBe('Samgöngustofa')
@@ -110,6 +117,7 @@ describe('loadTenants', () => {
     expect(tenants[7].name).toBe('Þjóðskrá')
     expect(tenants[8].name).toBe('Þjóðskjalasafn Íslands')
     expect(tenants[9].name).toBe('Sjúkratryggingar Íslands')
+    expect(tenants[10].name).toBe('Embætti landlæknis')
   })
 
   it('produces tenants that pass validateTenantConfig', () => {
@@ -129,6 +137,7 @@ describe('loadTenants', () => {
     expect(tenants[5].services.archive!.pdf.companyName).toBe('HMS')
     expect(tenants[8].services.archive!.pdf.companyName).toBe('Þjóðskjalasafn Íslands')
     expect(tenants[9].services.archive!.pdf.companyName).toBe('Sjúkratryggingar Íslands')
+    expect(tenants[10].services.archive!.pdf.companyName).toBe('Embætti landlæknis')
   })
 
   it('uses per-tenant Zendesk credentials (no shared secrets across tenants)', () => {
@@ -260,6 +269,21 @@ describe('loadTenants', () => {
     expect(() => loadTenants(env)).toThrow('SJUKRA_ONESYSTEMS_APP_KEY')
   })
 
+  it('configures Embætti landlæknis with a OneSystems endpoint and the expected brand_id', () => {
+    const tenants = loadTenants(validEnv)
+    const landlaeknir = tenants.find(t => t.brand_id === '38723008064914')!
+    expect(landlaeknir.name).toBe('Embætti landlæknis')
+    expect(landlaeknir.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
+    expect(landlaeknir.services.archive!.pdf.includeInternalNotes).toBe(false)
+    expect(landlaeknir.services.ticketUpdate).toBeUndefined()
+  })
+
+  it('throws with a clear error when LANDLAEKNIR_ONESYSTEMS_APP_KEY is missing', () => {
+    const env = { ...validEnv }
+    delete env.LANDLAEKNIR_ONESYSTEMS_APP_KEY
+    expect(() => loadTenants(env)).toThrow('LANDLAEKNIR_ONESYSTEMS_APP_KEY')
+  })
+
   it('throws with a clear error when HMS_ZENDESK_API_TOKEN is missing', () => {
     const env = { ...validEnv }
     delete env.HMS_ZENDESK_API_TOKEN
@@ -383,7 +407,7 @@ describe('loadTenants — Þjóðskrá (ticket creation only)', () => {
     delete env.THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET
 
     expect(thjodskra(env).services.ticketCreate).toBeUndefined()
-    expect(loadTenants(env)).toHaveLength(10)
+    expect(loadTenants(env)).toHaveLength(11)
   })
 
   it.each([
