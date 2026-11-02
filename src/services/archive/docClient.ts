@@ -14,11 +14,12 @@ import type { DocClient } from './types.js'
  */
 export function createDocClient(ep: EndpointConfig, user?: string): DocClient {
   if (ep.type === 'gopro') {
-    if (!ep.username || !ep.password) {
-      throw new Error('GoPro endpoint missing username or password')
+    if (!ep.apiKey) {
+      throw new Error('GoPro endpoint missing apiKey')
     }
-    return new GoProClient(ep.baseUrl, ep.username, ep.password, {
-      tokenTtlMs: ep.tokenTtlMs
+    return new GoProClient(ep.baseUrl, ep.apiKey, {
+      tokenTtlMs: ep.tokenTtlMs,
+      origin: ep.origin
     })
   }
   if (!ep.appKey) {

@@ -76,7 +76,7 @@ function makeTenantConfig(overrides: Partial<Omit<TenantConfig, 'services'>> & {
 function goproTenantConfig(): TenantConfig {
   return makeTenantConfig({
     endpoints: {
-      gopro: { type: 'gopro', baseUrl: 'https://api.gopro.test', username: 'g', password: 'p' }
+      gopro: { type: 'gopro', baseUrl: 'https://api.gopro.test', apiKey: 'gopro-webkey-0123456789' }
     }
   })
 }

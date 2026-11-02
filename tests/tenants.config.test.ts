@@ -36,8 +36,7 @@ const validEnv: Record<string, string> = {
   VINNUEFTIRLIT_ZENDESK_API_TOKEN: testSecret('vinn-zd-token', 40),
   VINNUEFTIRLIT_ZENDESK_WEBHOOK_SECRET: testSecret('vinn-zd-webhook', 40),
   VINNUEFTIRLIT_GOPRO_BASE_URL: 'https://gopro.test.example/',
-  VINNUEFTIRLIT_GOPRO_USERNAME: 'verjandi',
-  VINNUEFTIRLIT_GOPRO_PASSWORD: testSecret('vinn-gopro-pass', 24),
+  VINNUEFTIRLIT_GOPRO_API_KEY: testSecret('vinn-gopro-webkey', 24),
   VINNUEFTIRLIT_MALASKRA_API_KEY: testSecret('vinn-malaskra-key', 40),
   SAMGONGUSTOFA_ZENDESK_SUBDOMAIN: 'samgongustofa-test',
   SAMGONGUSTOFA_ZENDESK_EMAIL: 'admin@samgongustofa.test',
@@ -322,10 +321,10 @@ describe('loadTenants', () => {
     expect(() => loadTenants(env)).toThrow('KERFISSTJORN_ONESYSTEMS_BASE_URL')
   })
 
-  it('throws when VINNUEFTIRLIT_GOPRO_PASSWORD is missing', () => {
+  it('throws when VINNUEFTIRLIT_GOPRO_API_KEY is missing', () => {
     const env = { ...validEnv }
-    delete env.VINNUEFTIRLIT_GOPRO_PASSWORD
-    expect(() => loadTenants(env)).toThrow('VINNUEFTIRLIT_GOPRO_PASSWORD')
+    delete env.VINNUEFTIRLIT_GOPRO_API_KEY
+    expect(() => loadTenants(env)).toThrow('VINNUEFTIRLIT_GOPRO_API_KEY')
   })
 
   it('throws when an env var is the empty string', () => {

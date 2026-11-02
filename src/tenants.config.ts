@@ -275,8 +275,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
             gopro: {
               type: 'gopro',
               baseUrl: requireEnv('VINNUEFTIRLIT_GOPRO_BASE_URL', env),
-              username: requireEnv('VINNUEFTIRLIT_GOPRO_USERNAME', env),
-              password: requireEnv('VINNUEFTIRLIT_GOPRO_PASSWORD', env),
+              apiKey: requireEnv('VINNUEFTIRLIT_GOPRO_API_KEY', env),
+              origin: env.VINNUEFTIRLIT_GOPRO_ORIGIN || undefined,
             },
           },
           malaskra: { apiKey: requireEnv('VINNUEFTIRLIT_MALASKRA_API_KEY', env) },

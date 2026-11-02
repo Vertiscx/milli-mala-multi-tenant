@@ -4,12 +4,16 @@ import { GoProClient } from '../src/services/archive/gopro.js'
 // Mock fetch globally
 global.fetch = vi.fn() as unknown as typeof fetch
 
+const fetchMock = () => global.fetch as ReturnType<typeof vi.fn>
+const authOk = (token = 'gopro-test-token') => ({ ok: true, status: 200, headers: new Headers({ 'X-GoProToken': token }) })
+const uploadOk = (id = 'doc-1') => ({ ok: true, status: 200, text: async () => JSON.stringify(id) })
+
 describe('GoProClient', () => {
   let client: GoProClient
 
   beforeEach(() => {
     vi.clearAllMocks()
-    client = new GoProClient('https://api.gopro.test', 'testuser', 'testpass', {
+    client = new GoProClient('https://api.gopro.test', 'test-webkey', {
       tokenTtlMs: 25 * 60 * 1000
     })
   })
@@ -17,45 +21,67 @@ describe('GoProClient', () => {
   describe('constructor', () => {
     it('should initialize with correct properties', () => {
       expect(client.baseUrl).toBe('https://api.gopro.test')
-      expect(client.username).toBe('testuser')
-      expect(client.password).toBe('testpass')
+      expect(client.apiKey).toBe('test-webkey')
       expect(client.tokenTtlMs).toBe(25 * 60 * 1000)
       expect(client.token).toBeNull()
       expect(client.tokenExpiry).toBeNull()
     })
 
     it('should use defaults when no options provided', () => {
-      const basic = new GoProClient('https://api.test.com', 'user', 'pass')
+      const basic = new GoProClient('https://api.test.com', 'key')
       expect(basic.tokenTtlMs).toBe(25 * 60 * 1000)
+      expect(basic.origin).toBe('Zendesk')
+    })
+
+    it('should accept a custom origin', () => {
+      const custom = new GoProClient('https://api.test.com', 'key', { origin: 'Þjónustuborð' })
+      expect(custom.origin).toBe('Þjónustuborð')
     })
   })
 
   describe('authenticate', () => {
-    it('should call authenticate endpoint and store token', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        text: async () => '"gopro-test-token"'
-      })
+    it('should send the WebKey in X-Api-Key and store the X-GoProToken header', async () => {
+      fetchMock().mockResolvedValueOnce(authOk())
 
       await client.authenticate()
 
       expect(client.token).toBe('gopro-test-token')
       expect(client.tokenExpiry).toBeGreaterThan(Date.now())
       expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.gopro.test/v2/Authenticate',
+        'https://api.gopro.test/Tickets/v1/Authenticate',
         expect.objectContaining({
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'testuser', password: 'testpass' })
+          headers: { 'X-Api-Key': 'test-webkey' }
         })
       )
     })
 
-    it('should throw on auth failure', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: false,
-        status: 401
+    it('should fall back to the token field in the body when the header is absent', async () => {
+      fetchMock().mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({ token: 'body-token' })
       })
+
+      await client.authenticate()
+      expect(client.token).toBe('body-token')
+    })
+
+    it('should throw when the response carries no token', async () => {
+      fetchMock().mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => { throw new SyntaxError('not json') }
+      })
+
+      await expect(client.authenticate()).rejects.toThrow('GoPro auth failed: no token in response')
+      expect(client.token).toBeNull()
+    })
+
+    it('should throw on auth failure', async () => {
+      fetchMock().mockResolvedValueOnce({ ok: false, status: 401 })
 
       await expect(client.authenticate()).rejects.toThrow('GoPro auth failed: 401')
     })
@@ -63,10 +89,7 @@ describe('GoProClient', () => {
 
   describe('ensureAuthenticated', () => {
     it('should authenticate when no token exists', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        text: async () => '"fresh-token"'
-      })
+      fetchMock().mockResolvedValueOnce(authOk('fresh-token'))
 
       await client.ensureAuthenticated()
       expect(client.token).toBe('fresh-token')
@@ -84,10 +107,7 @@ describe('GoProClient', () => {
       client.token = 'old-token'
       client.tokenExpiry = Date.now() - 1000
 
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        text: async () => 'new-token'
-      })
+      fetchMock().mockResolvedValueOnce(authOk('new-token'))
 
       await client.ensureAuthenticated()
       expect(client.token).toBe('new-token')
@@ -100,11 +120,8 @@ describe('GoProClient', () => {
       client.tokenExpiry = Date.now() + 60 * 1000
     })
 
-    it('should upload with JSON body and Authorization header', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ succeeded: true, identifier: 'doc-1' })
-      })
+    it('should upload with Token and Gopro-Origin headers and the guide body', async () => {
+      fetchMock().mockResolvedValueOnce(uploadOk())
 
       const pdfBuffer = Buffer.from('fake pdf content')
       await client.uploadDocument({
@@ -115,30 +132,51 @@ describe('GoProClient', () => {
       })
 
       expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.gopro.test/v2/Documents/Create',
+        'https://api.gopro.test/Tickets/v1/Documents/Create',
         expect.objectContaining({
           method: 'POST',
-          headers: expect.objectContaining({
+          headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer valid-token'
-          })
+            'Token': 'valid-token',
+            'Gopro-Origin': 'foris'
+          }
         })
       )
 
-      const callBody = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body)
-      expect(callBody.caseNumber).toBe('CASE-123')
-      expect(callBody.subject).toBe('Test ticket')
-      expect(callBody.fileName).toBe('ticket-456.pdf')
-      expect(callBody.content).toBe(pdfBuffer.toString('base64'))
+      const callBody = JSON.parse(fetchMock().mock.calls[0][1].body)
+      expect(callBody).toEqual({
+        caseNumber: 'CASE-123',
+        subject: 'Test ticket',
+        origin: 'Zendesk',
+        fileName: 'ticket-456.pdf',
+        content: pdfBuffer.toString('base64')
+      })
+    })
+
+    it('should never send the WebKey on upload', async () => {
+      fetchMock().mockResolvedValueOnce(uploadOk())
+
+      await client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x') })
+
+      const headers = fetchMock().mock.calls[0][1].headers as Record<string, string>
+      expect(headers['X-Api-Key']).toBeUndefined()
+      expect(JSON.stringify(fetchMock().mock.calls[0][1])).not.toContain('test-webkey')
+    })
+
+    it('should fall back to the file name as subject', async () => {
+      fetchMock().mockResolvedValueOnce(uploadOk())
+
+      await client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x') })
+      expect(JSON.parse(fetchMock().mock.calls[0][1].body).subject).toBe('f.pdf')
     })
 
     it('should upload each file separately when attachments provided', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ succeeded: true, identifier: 'doc-1' }) })
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ succeeded: true, identifier: 'doc-2' }) })
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ succeeded: true, identifier: 'doc-3' }) })
+      fetchMock()
+        .mockResolvedValueOnce(uploadOk('doc-1'))
+        .mockResolvedValueOnce(uploadOk('doc-2'))
+        .mockResolvedValueOnce(uploadOk('doc-3'))
 
-      await client.uploadDocument({
+      const result = await client.uploadDocument({
         caseNumber: 'CASE-1',
         filename: 'ticket.pdf',
         pdfBuffer: Buffer.from('pdf'),
@@ -150,24 +188,19 @@ describe('GoProClient', () => {
       })
 
       expect(global.fetch).toHaveBeenCalledTimes(3)
-      expect(JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body).fileName).toBe('ticket.pdf')
-      expect(JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[1][1].body).fileName).toBe('doc.docx')
-      expect(JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[2][1].body).fileName).toBe('img.png')
+      expect(JSON.parse(fetchMock().mock.calls[0][1].body).fileName).toBe('ticket.pdf')
+      expect(JSON.parse(fetchMock().mock.calls[1][1].body).fileName).toBe('doc.docx')
+      expect(JSON.parse(fetchMock().mock.calls[2][1].body).fileName).toBe('img.png')
+      expect(result).toEqual(['doc-1', 'doc-2', 'doc-3'])
     })
 
     it('should authenticate before uploading if token is missing', async () => {
       client.token = null
       client.tokenExpiry = null
 
-      ;(global.fetch as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({
-          ok: true,
-          text: async () => 'new-token'
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ succeeded: true, identifier: 'doc-1' })
-        })
+      fetchMock()
+        .mockResolvedValueOnce(authOk('new-token'))
+        .mockResolvedValueOnce(uploadOk())
 
       await client.uploadDocument({
         caseNumber: 'CASE-1',
@@ -176,12 +209,52 @@ describe('GoProClient', () => {
       })
 
       expect(global.fetch).toHaveBeenCalledTimes(2)
-      expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('https://api.gopro.test/v2/Authenticate')
-      expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe('https://api.gopro.test/v2/Documents/Create')
+      expect(fetchMock().mock.calls[0][0]).toBe('https://api.gopro.test/Tickets/v1/Authenticate')
+      expect(fetchMock().mock.calls[1][0]).toBe('https://api.gopro.test/Tickets/v1/Documents/Create')
+      expect(fetchMock().mock.calls[1][1].headers.Token).toBe('new-token')
+    })
+
+    it('should re-authenticate once and retry when the token is rejected with 401', async () => {
+      fetchMock()
+        .mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'Unauthorized' })
+        .mockResolvedValueOnce(authOk('refreshed-token'))
+        .mockResolvedValueOnce(uploadOk('doc-7'))
+
+      const result = await client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x') })
+
+      expect(global.fetch).toHaveBeenCalledTimes(3)
+      expect(fetchMock().mock.calls[1][0]).toBe('https://api.gopro.test/Tickets/v1/Authenticate')
+      expect(fetchMock().mock.calls[2][1].headers.Token).toBe('refreshed-token')
+      expect(result).toBe('doc-7')
+    })
+
+    it('should fail when the retry after re-auth is still 401', async () => {
+      fetchMock()
+        .mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'Unauthorized' })
+        .mockResolvedValueOnce(authOk('refreshed-token'))
+        .mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'Unauthorized' })
+
+      await expect(client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x') }))
+        .rejects.toThrow('GoPro upload failed: 401 - Unauthorized')
+      expect(global.fetch).toHaveBeenCalledTimes(3)
+    })
+
+    it('should surface the 400 error message (e.g. unknown case number)', async () => {
+      fetchMock().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => '{"Message":"Case BAD-CASE does not exist"}'
+      })
+
+      await expect(client.uploadDocument({
+        caseNumber: 'BAD-CASE',
+        filename: 'test.pdf',
+        pdfBuffer: Buffer.from('pdf')
+      })).rejects.toThrow('GoPro upload failed: 400 - {"Message":"Case BAD-CASE does not exist"}')
     })
 
     it('should throw error on failed upload', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fetchMock().mockResolvedValueOnce({
         ok: false,
         status: 500,
         text: async () => 'Server error'
@@ -195,7 +268,7 @@ describe('GoProClient', () => {
     })
 
     it('should truncate huge upstream error bodies in thrown errors', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      fetchMock().mockResolvedValueOnce({
         ok: false,
         status: 500,
         text: async () => 'x'.repeat(50_000)
@@ -211,32 +284,23 @@ describe('GoProClient', () => {
       expect(err.message.length).toBeLessThan(3000)
     })
 
-    it('should throw when succeeded is false', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ succeeded: false, message: 'Invalid case number' })
-      })
-
-      await expect(client.uploadDocument({
-        caseNumber: 'BAD-CASE',
-        filename: 'test.pdf',
-        pdfBuffer: Buffer.from('pdf')
-      })).rejects.toThrow('GoPro upload rejected: Invalid case number')
-    })
-
-    it('should return single result for single file', async () => {
-      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ succeeded: true, identifier: 'doc-99' })
-      })
+    it('should return the document ID for a single file', async () => {
+      fetchMock().mockResolvedValueOnce(uploadOk('doc-99'))
 
       const result = await client.uploadDocument({
         caseNumber: 'CASE-1',
         filename: 'test.pdf',
         pdfBuffer: Buffer.from('pdf')
-      }) as Record<string, unknown>
+      })
 
-      expect(result.identifier).toBe('doc-99')
+      expect(result).toBe('doc-99')
+    })
+
+    it('should keep a non-JSON 200 body as plain text', async () => {
+      fetchMock().mockResolvedValueOnce({ ok: true, status: 200, text: async () => 'doc-plain' })
+
+      const result = await client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x') })
+      expect(result).toBe('doc-plain')
     })
   })
 })

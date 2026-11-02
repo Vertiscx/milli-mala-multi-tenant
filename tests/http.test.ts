@@ -62,9 +62,9 @@ describe('all HTTP clients pass a timeout signal', () => {
   it('GoProClient.authenticate uses a timeout signal', async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
-      text: async () => 'gp-token'
+      headers: new Headers({ 'X-GoProToken': 'gp-token' })
     })
-    const client = new GoProClient('https://api.test', 'u', 'p')
+    const client = new GoProClient('https://api.test', 'webkey')
     await client.authenticate()
     const init = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]
     expect(init.signal).toBeInstanceOf(AbortSignal)

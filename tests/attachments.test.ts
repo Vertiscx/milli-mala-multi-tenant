@@ -221,8 +221,7 @@ describe('handleAttachments', () => {
         gopro: {
           type: 'gopro',
           baseUrl: 'https://api.gopro.test',
-          username: 'guser',
-          password: 'gpass'
+          apiKey: 'gopro-webkey-0123456789'
         }
       }
     })
@@ -259,12 +258,13 @@ describe('handleAttachments', () => {
       // GoPro auth
       .mockResolvedValueOnce({
         ok: true,
-        text: async () => 'gopro-token'
+        headers: new Headers({ 'X-GoProToken': 'gopro-token' })
       })
       // GoPro upload
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ succeeded: true, identifier: 'doc-1' })
+        status: 200,
+        text: async () => JSON.stringify({ identifier: 'doc-1' })
       })
 
     const result = await handleAttachments({
@@ -524,8 +524,7 @@ describe('handleAttachments', () => {
           gopro: {
             type: 'gopro',
             baseUrl: 'https://api.gopro.test',
-            username: 'guser',
-            password: 'gpass',
+            apiKey: 'gopro-webkey-0123456789',
             caseNumberFieldId: 42,
             lastStatusFieldId: 33,
             lastExportFieldId: 44
@@ -547,8 +546,8 @@ describe('handleAttachments', () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: { id: 500, brand_id: 360001234567 } }) })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ comments: [{ id: 1, public: true, attachments: [{ file_name: 'a.pdf', content_type: 'application/pdf', size: 9, content_url: 'https://test.zendesk.com/att/a' }] }] }) })
         .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => fakeFile.buffer })
-        .mockResolvedValueOnce({ ok: true, text: async () => 'gopro-token' })
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ succeeded: true, identifier: 'doc-1' }) })
+        .mockResolvedValueOnce({ ok: true, headers: new Headers({ 'X-GoProToken': 'gopro-token' }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ identifier: 'doc-1' }) })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) }) // post-back PUT
 
       const result = await handleAttachments({
@@ -578,7 +577,7 @@ describe('handleAttachments', () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: { id: 501, brand_id: 360001234567 } }) })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ comments: [{ id: 1, public: true, attachments: [{ file_name: 'a.pdf', content_type: 'application/pdf', size: 9, content_url: 'https://test.zendesk.com/att/a' }] }] }) })
         .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => fakeFile.buffer })
-        .mockResolvedValueOnce({ ok: true, text: async () => 'gopro-token' })
+        .mockResolvedValueOnce({ ok: true, headers: new Headers({ 'X-GoProToken': 'gopro-token' }) })
         .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' }) // gopro upload fails
         .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: {} }) }) // post-back PUT
 

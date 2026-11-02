@@ -644,14 +644,14 @@ describe('documentTicket webhook create path', () => {
         return { ok: true, json: async () => ({ success: true }) }
       }
       // GoPro routes (WHCC-07 scenario)
-      if (url.includes('/v2/Authenticate')) {
+      if (url.includes('/Tickets/v1/Authenticate')) {
         record('goproAuth')
-        return { ok: true, text: async () => '"gopro-token"' }
+        return { ok: true, headers: new Headers({ 'X-GoProToken': 'gopro-token' }) }
       }
-      if (url.includes('/v2/Documents/Create')) {
+      if (url.includes('/Tickets/v1/Documents/Create')) {
         record('goproUpload')
         if (opts.goproUploadFails) return { ok: false, status: 500, text: async () => 'gopro boom' }
-        return { ok: true, json: async () => ({ succeeded: true, identifier: 'doc-1' }) }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ identifier: 'doc-1' }) }
       }
       throw new Error(`unexpected fetch: ${method} ${url}`)
     })
@@ -899,8 +899,7 @@ describe('documentTicket webhook create path', () => {
         gopro: {
           type: 'gopro',
           baseUrl: 'https://api.gopro.test',
-          username: 'guser',
-          password: 'gpass',
+          apiKey: 'gopro-webkey-0123456789',
           caseNumberFieldId: 7777,
           templateFieldId: 100,
           kennitalaFieldId: 200
@@ -1011,8 +1010,7 @@ describe('documentTicket webhook create path', () => {
         gopro: {
           type: 'gopro',
           baseUrl: 'https://api.gopro.test',
-          username: 'guser',
-          password: 'gpass',
+          apiKey: 'gopro-webkey-0123456789',
           caseNumberFieldId: 7777
         }
       }
@@ -1146,8 +1144,7 @@ describe('documentTicket webhook create path', () => {
         gopro: {
           type: 'gopro',
           baseUrl: 'https://api.gopro.test',
-          username: 'guser',
-          password: 'gpass'
+          apiKey: 'gopro-webkey-0123456789'
         }
       }
     })
@@ -1172,13 +1169,13 @@ describe('documentTicket webhook create path', () => {
   // WR-03: a CONSTRUCTION throw (missing credentials) must not flip the
   // catch-side capability re-derivation — GoPro keeps ZD- + 'fallback'
   // byte-identical, OneSystems keeps null + 'none'.
-  it('WR-03 outer-catch GoPro construction-throw: missing username/password → failure audit keeps ZD-123 + source fallback (byte-identical)', async () => {
+  it('WR-03 outer-catch GoPro construction-throw: missing apiKey → failure audit keeps ZD-123 + source fallback (byte-identical)', async () => {
     const goproTenant = makeTenantConfig({
       endpoints: {
         gopro: {
           type: 'gopro',
           baseUrl: 'https://api.gopro.test'
-          // username/password MISSING → createDocClient throws at construction
+          // apiKey MISSING → createDocClient throws at construction
         } as unknown as EndpointConfig
       }
     })

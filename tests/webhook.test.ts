@@ -322,8 +322,7 @@ describe('handleWebhook', () => {
         gopro: {
           type: 'gopro',
           baseUrl: 'https://api.gopro.test',
-          username: 'guser',
-          password: 'gpass',
+          apiKey: 'gopro-webkey-0123456789',
           caseNumberFieldId: 8888
         }
       }
@@ -357,12 +356,13 @@ describe('handleWebhook', () => {
       // GoPro auth
       .mockResolvedValueOnce({
         ok: true,
-        text: async () => 'gopro-token'
+        headers: new Headers({ 'X-GoProToken': 'gopro-token' })
       })
       // GoPro upload
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ succeeded: true, identifier: 'doc-1' })
+        status: 200,
+        text: async () => JSON.stringify('doc-1')
       })
 
     const rawBody = JSON.stringify({ ticket_id: 200 })
@@ -389,9 +389,9 @@ describe('handleWebhook', () => {
     expect(calledUrls.some(u => u.includes('gopro.test'))).toBe(true)
     expect(calledUrls.some(u => u.includes('onesystems.test'))).toBe(false)
 
-    // Verify Authorization header on upload
-    const uploadCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(c => c[0].includes('Documents/Create'))
-    expect(uploadCall[1].headers['Authorization']).toBe('Bearer gopro-token')
+    // Verify Token header on upload
+    const uploadCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(c => c[0].includes('Tickets/v1/Documents/Create'))
+    expect(uploadCall[1].headers['Token']).toBe('gopro-token')
   })
 
   it('should not leak internal error messages', async () => {

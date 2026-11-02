@@ -170,12 +170,12 @@ describe('validateTenantConfig', () => {
     }))).toThrow('appKey')
   })
 
-  it('should throw for gopro endpoint missing username', () => {
+  it('should throw for gopro endpoint missing apiKey', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
         gopro: { type: 'gopro', baseUrl: 'https://test.com' }
       }
-    }))).toThrow('username')
+    }))).toThrow('apiKey')
   })
 
   it('should throw for unknown endpoint type', () => {
@@ -189,7 +189,7 @@ describe('validateTenantConfig', () => {
   it('should validate gopro endpoint with all required fields', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'gopro-user', password: 'gP4xR7mT9nQ2vL5j' }
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', apiKey: 'gP4xR7mT9nQ2vL5j' }
       }
     }))).not.toThrow()
   })
@@ -328,7 +328,7 @@ describe('resolveEndpoint', () => {
     const tenant = makeValidTenant({
       endpoints: {
         onesystems: { type: 'onesystems', baseUrl: 'https://a.test', appKey: 'oK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS' },
-        gopro: { type: 'gopro', baseUrl: 'https://b.test', username: 'gopro-user', password: 'gP4xR7mT9nQ2vL5j' }
+        gopro: { type: 'gopro', baseUrl: 'https://b.test', apiKey: 'gP4xR7mT9nQ2vL5j' }
       }
     })
     try {
@@ -447,18 +447,18 @@ describe('validateTenantConfig — secret strength', () => {
     }))).toThrow('endpoints.onesystems.appKey must be at least 32 characters')
   })
 
-  it('should reject gopro password shorter than 16 characters', () => {
+  it('should reject gopro apiKey shorter than 16 characters', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'user', password: 'short' }
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', apiKey: 'short' }
       }
-    }))).toThrow('endpoints.gopro.password must be at least 16 characters')
+    }))).toThrow('endpoints.gopro.apiKey must be at least 16 characters')
   })
 
-  it('should accept gopro password at exactly 16 characters', () => {
+  it('should accept gopro apiKey at exactly 16 characters', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'user', password: 'gP4xR7mT9nQ2vL5j' }
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', apiKey: 'gP4xR7mT9nQ2vL5j' }
       }
     }))).not.toThrow()
   })
@@ -469,14 +469,12 @@ describe('validateTenantConfig — secret strength', () => {
     expect(() => validateTenantConfig(tenant)).toThrow('must not be a repeated character')
   })
 
-  it('should accept gopro password that is a single repeated character (length-only)', () => {
-    // GoPro passwords are user-set on the upstream system and may legitimately
-    // use a narrow character set; only the length floor applies.
+  it('should reject gopro apiKey that is a single repeated character', () => {
     expect(() => validateTenantConfig(makeValidTenant({
       endpoints: {
-        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', username: 'user', password: 'a'.repeat(16) }
+        gopro: { type: 'gopro', baseUrl: 'https://gopro.test', apiKey: 'a'.repeat(16) }
       }
-    }))).not.toThrow()
+    }))).toThrow('endpoints.gopro.apiKey must not be a repeated character')
   })
 
   it('should accept a valid 32+ character random secret', () => {

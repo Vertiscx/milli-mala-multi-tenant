@@ -45,8 +45,7 @@ function goproTenantConfig(): TenantConfig {
       gopro: {
         type: 'gopro',
         baseUrl: 'https://api.gopro.test',
-        username: 'guser',
-        password: 'gpass'
+        apiKey: 'gopro-webkey-0123456789'
       }
     }
   })

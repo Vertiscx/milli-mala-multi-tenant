@@ -74,8 +74,7 @@ export async function finalizeWebhookFailure(args: {
           clientCanCreate = typeof (createDocClient(
             {
               ...ep,
-              username: ep.username || 'unused',
-              password: ep.password || 'unused',
+              apiKey: ep.apiKey || 'unused',
               appKey: ep.appKey || 'unused'
             },
             ''

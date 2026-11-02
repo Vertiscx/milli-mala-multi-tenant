@@ -131,8 +131,8 @@ export interface EndpointConfig {
   type: 'onesystems' | 'gopro'
   baseUrl: string
   appKey?: string           // OneSystems
-  username?: string         // GoPro
-  password?: string         // GoPro
+  apiKey?: string           // GoPro (WebKey)
+  origin?: string           // GoPro (Documents/Create `origin`; default 'Zendesk')
   caseNumberFieldId?: number | null
   lastStatusFieldId?: number | null   // GW-01/GW-02 — status custom field
   lastExportFieldId?: number | null   // GW-01/GW-02 — last-export timestamp

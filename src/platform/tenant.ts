@@ -510,8 +510,7 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
   if (ep.type === 'onesystems') {
     if (!ep.appKey) missing.push('appKey')
   } else if (ep.type === 'gopro') {
-    if (!ep.username) missing.push('username')
-    if (!ep.password) missing.push('password')
+    if (!ep.apiKey) missing.push('apiKey')
   } else if (ep.type) {
     throw new Error(`Endpoint "${name}": unknown type "${ep.type}". Must be "onesystems" or "gopro".`)
   }
@@ -524,11 +523,10 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
   if (ep.type === 'onesystems' && ep.appKey) {
     validateSecretStrength(ep.appKey, `endpoints.${name}.appKey`, tenantLabel, MIN_SECRET_LENGTH)
   }
-  if (ep.type === 'gopro' && ep.password) {
-    // GoPro passwords are user-set by the institution and may legitimately
-    // use a narrow character set; enforce length but skip the repeated-char
-    // rule. SYN-MUT-28-1 length check still catches accidental placeholders.
-    validateSecretStrength(ep.password, `endpoints.${name}.password`, tenantLabel, MIN_PASSWORD_LENGTH, { allowRepeatedChars: true })
+  if (ep.type === 'gopro' && ep.apiKey) {
+    // GoPro WebKeys are vendor-issued with an undocumented format, so use
+    // the shorter minimum; SYN-MUT-28-1 still catches placeholders.
+    validateSecretStrength(ep.apiKey, `endpoints.${name}.apiKey`, tenantLabel, MIN_PASSWORD_LENGTH)
   }
 
   // Custom-field ID validation (CONF-03) — when present, field IDs must be

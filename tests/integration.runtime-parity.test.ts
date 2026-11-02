@@ -56,7 +56,7 @@ const ONESYS_BRAND = '30220057411090' // Kerfisstjórn — onesystems
 const GOPRO_BRAND = '28710908212242' // Vinnueftirlitið — gopro (prod)
 // Tenant secrets — must satisfy the SYN-MUT-28-1 strength rules that
 // validateTenantConfig enforces (≥32 chars for tokens/keys, ≥16 for the
-// GoPro password; not a single repeated character). Weak values here make
+// GoPro WebKey; not a single repeated character). Weak values here make
 // resolveTenantConfig reject every tenant and 400 every scenario.
 const MALASKRA_KEY = 'test-malaskra-key-shared-0123456789ab'
 const K_TOKEN = 'kerfis-zendesk-api-token-0123456789ab'
@@ -64,7 +64,7 @@ const K_WEBHOOK = 'kerfis-zendesk-webhook-secret-0123456789'
 const K_APPKEY = 'kerfis-onesystems-app-key-0123456789ab'
 const V_TOKEN = 'vinnu-zendesk-api-token-0123456789abcd'
 const V_WEBHOOK = 'vinnu-zendesk-webhook-secret-0123456789'
-const V_PASSWORD = 'vinnu-gopro-password-0123456789'
+const V_GOPRO_KEY = 'vinnu-gopro-webkey-0123456789'
 const S_TOKEN = 'samg-zendesk-api-token-0123456789abcd'
 const S_WEBHOOK = 'samg-zendesk-webhook-secret-0123456789'
 const S_APPKEY = 'samg-onesystems-app-key-0123456789abcd'
@@ -88,8 +88,7 @@ const TENANT_ENV: Record<string, string> = {
   VINNUEFTIRLIT_ZENDESK_API_TOKEN: V_TOKEN,
   VINNUEFTIRLIT_ZENDESK_WEBHOOK_SECRET: V_WEBHOOK,
   VINNUEFTIRLIT_GOPRO_BASE_URL: GOPRO_BASE,
-  VINNUEFTIRLIT_GOPRO_USERNAME: 'vuser',
-  VINNUEFTIRLIT_GOPRO_PASSWORD: V_PASSWORD,
+  VINNUEFTIRLIT_GOPRO_API_KEY: V_GOPRO_KEY,
   VINNUEFTIRLIT_MALASKRA_API_KEY: MALASKRA_KEY,
   SAMGONGUSTOFA_ZENDESK_SUBDOMAIN: 'samgongu',
   SAMGONGUSTOFA_ZENDESK_EMAIL: 's@example.com',
@@ -262,7 +261,7 @@ function makeWorkerEnv() {
       zendesk: { subdomain: 'vinnu', email: 'v@example.com', apiToken: V_TOKEN, webhookSecret: V_WEBHOOK },
       services: {
         archive: {
-          endpoints: { gopro: { type: 'gopro', baseUrl: GOPRO_BASE, username: 'vuser', password: V_PASSWORD } },
+          endpoints: { gopro: { type: 'gopro', baseUrl: GOPRO_BASE, apiKey: V_GOPRO_KEY } },
           malaskra: { apiKey: MALASKRA_KEY },
           pdf: { companyName: 'Vinnueftirlitið', locale: 'is-IS', includeInternalNotes: false }
         }
