@@ -414,6 +414,47 @@ describe('handleUserUpdate — Zendesk failures', () => {
     expect(result).toEqual({ status: 502, body: { error: 'Zendesk user update failed' } })
   })
 
+  it('returns 404 when a successful read by id has no usable user in its body', async () => {
+    const store = makeStore([makeTenantConfig('610')])
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(new Response('not json', { status: 200 }))
+
+    const result = await handleUserUpdate(makeRequest({ brand_id: '610', id: USER_ID, name: 'x' }), store)
+    expect(result).toEqual({ status: 404, body: { error: 'User not found' } })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns 404 when a successful search has no users list in its body', async () => {
+    const store = makeStore([makeTenantConfig('611')])
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(json(200, { count: 0 }))
+
+    const result = await handleUserUpdate(makeRequest({ brand_id: '611', email: 'jon@example.is', name: 'x' }), store)
+    expect(result).toEqual({ status: 404, body: { error: 'User not found' } })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns 502 when Zendesk\'s error body is not JSON', async () => {
+    const store = makeStore([makeTenantConfig('608')])
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(shownUser())
+      .mockResolvedValueOnce(new Response('<html>Service Unavailable</html>', { status: 503 }))
+
+    const result = await handleUserUpdate(makeRequest({ brand_id: '608', id: USER_ID, name: 'x' }), store)
+    expect(result).toEqual({ status: 502, body: { error: 'Zendesk user update failed' } })
+  })
+
+  it('returns a generic 500 if the update call itself throws after a successful lookup', async () => {
+    const store = makeStore([makeTenantConfig('609')])
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(shownUser())
+      .mockRejectedValueOnce(new Error('network blip'))
+
+    const result = await handleUserUpdate(makeRequest({ brand_id: '609', id: USER_ID, name: 'x' }), store)
+    expect(result.status).toBe(500)
+    expect(result.body.error).toBe('Internal server error')
+  })
+
   it('returns a generic 500 if a Zendesk call itself throws', async () => {
     const store = makeStore([makeTenantConfig('606')])
     fetchMock.mockResolvedValueOnce(tokenResponse()).mockRejectedValueOnce(new Error('network blip'))
@@ -479,6 +520,30 @@ describe('handleUserUpdateHttp', () => {
 
     expect(res._getStatusCode()).toBe(400)
     expect(JSON.parse(res._getData())).toEqual({ error: 'Invalid JSON body' })
+  })
+
+  it.each([
+    ['JSON null', 'null', 'Missing user'],
+    ['a user without brand_id', JSON.stringify({ user: { id: USER_ID, name: 'x' } }), 'Missing user.brand_id']
+  ])('returns 400 for %s', async (_label, body, error) => {
+    const { req, res, send } = post(body)
+    const promise = handleUserUpdateHttp(req, res, makeStore([]))
+    send()
+    await promise
+
+    expect(res._getStatusCode()).toBe(400)
+    expect(JSON.parse(res._getData())).toEqual({ error })
+  })
+
+  it('returns 500 when the request body exceeds the size cap', async () => {
+    const { req, res, send } = post('x'.repeat(1024 * 1024 + 1))
+    const promise = handleUserUpdateHttp(req, res, makeStore([]))
+    send()
+    await promise
+
+    expect(res._getStatusCode()).toBe(500)
+    expect(JSON.parse(res._getData())).toEqual({ error: 'Internal server error' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('returns 500 with brand_id in the log line when something unexpected throws', async () => {
