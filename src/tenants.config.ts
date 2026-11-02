@@ -26,12 +26,12 @@
  * variables) use `optionalNumberEnv` and may be unset — unset means the
  * webhook create inputs are unavailable for that tenant.
  *
- * The ticket-update and ticket-create services are opt-in per tenant the
- * same way: see `ticketUpdateSection`, `ticketCreateSection` and
- * `trSection` (TR's Smári lookup and e-auth) below.
+ * The ticket-update, ticket-create and user-update services are opt-in
+ * per tenant the same way: see `ticketUpdateSection`, `ticketCreateSection`,
+ * `userUpdateSection` and `trSection` (TR's Smári lookup and e-auth) below.
  */
 
-import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig, TrServiceConfig } from './platform/types.js'
+import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig, TrServiceConfig, UserUpdateServiceConfig } from './platform/types.js'
 import { requireEnv, optionalNumberEnv } from './platform/env.js'
 
 /**
@@ -108,6 +108,40 @@ function ticketCreateSection(
 
 // e-auth defaults. Each can be overridden per tenant with
 // the matching <PREFIX>_TR_EAUTH_* variable.
+/**
+ * Build the optional `services.userUpdate` section for a tenant.
+ *
+ * Opt-in exactly like `ticketCreateSection`: none of the three variables
+ * set means no section (and a neutral 400 from `/v1/users/update` for the
+ * brand); some but not all set is a boot failure naming the missing one.
+ * Its key and OAuth client are its own, not ticket create's.
+ *
+ * A tenant is switched on by adding `...userUpdateSection('<T>', env)` to
+ * its `services` (Þjóðskrá is the first).
+ */
+export function userUpdateSection(
+  prefix: string,
+  env: Record<string, string | undefined>
+): { userUpdate?: UserUpdateServiceConfig } {
+  const names = {
+    apiKey: `${prefix}_USER_UPDATE_API_KEY`,
+    clientId: `${prefix}_USER_UPDATE_OAUTH_CLIENT_ID`,
+    clientSecret: `${prefix}_USER_UPDATE_OAUTH_CLIENT_SECRET`,
+  }
+
+  if (Object.values(names).every((name) => !env[name])) return {}
+
+  return {
+    userUpdate: {
+      apiKey: requireEnv(names.apiKey, env),
+      oauth: {
+        clientId: requireEnv(names.clientId, env),
+        clientSecret: requireEnv(names.clientSecret, env),
+      },
+    },
+  }
+}
+
 const TR_EAUTH_DEFAULTS = {
   timeoutSeconds: 120,
   attemptTtlSeconds: 180,
@@ -407,8 +441,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
       },
     },
     {
-      // Ticket creation only — no archive, so no Zendesk email/apiToken/
-      // webhookSecret (those are archive-only).
+      // Ticket creation and user update — no archive, so no Zendesk
+      // email/apiToken/webhookSecret (those are archive-only).
       brand_id: '30303665547154',
       name: 'Þjóðskrá',
       zendesk: {
@@ -416,6 +450,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
       },
       services: {
         ...ticketCreateSection('THJODSKRA', env),
+        ...userUpdateSection('THJODSKRA', env),
       },
     },
     {

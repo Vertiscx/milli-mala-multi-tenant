@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadTenants } from '../src/tenants.config.js'
+import { loadTenants, userUpdateSection } from '../src/tenants.config.js'
 import { validateTenantConfig } from '../src/platform/tenant.js'
 
 /**
@@ -81,6 +81,9 @@ const validEnv: Record<string, string> = {
   THJODSKRA_TICKET_CREATE_API_KEY: testSecret('thjod-create-api-key', 40),
   THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_ID: testSecret('thjod-create-client-id', 40),
   THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET: testSecret('thjod-create-client-secret', 40),
+  THJODSKRA_USER_UPDATE_API_KEY: testSecret('thjod-user-update-api-key', 40),
+  THJODSKRA_USER_UPDATE_OAUTH_CLIENT_ID: testSecret('thjod-user-update-client-id', 40),
+  THJODSKRA_USER_UPDATE_OAUTH_CLIENT_SECRET: testSecret('thjod-user-update-client-secret', 40),
   THSK_ZENDESK_SUBDOMAIN: 'thsk-test',
   THSK_ZENDESK_EMAIL: 'admin@thsk.test',
   THSK_ZENDESK_API_TOKEN: testSecret('thsk-zd-token', 40),
@@ -367,7 +370,7 @@ describe('loadTenants', () => {
   })
 })
 
-describe('loadTenants — Þjóðskrá (ticket creation only)', () => {
+describe('loadTenants — Þjóðskrá (ticket creation and user update, no archive)', () => {
   function thjodskra(env: Record<string, string | undefined> = validEnv) {
     return loadTenants(env).find(t => t.brand_id === '30303665547154')!
   }
@@ -418,6 +421,49 @@ describe('loadTenants — Þjóðskrá (ticket creation only)', () => {
     const env = { ...validEnv }
     delete env[name]
     expect(() => loadTenants(env)).toThrow(name)
+  })
+
+  it('wires the userUpdate API key and OAuth client', () => {
+    expect(thjodskra().services.userUpdate).toEqual({
+      apiKey: testSecret('thjod-user-update-api-key', 40),
+      oauth: {
+        clientId: testSecret('thjod-user-update-client-id', 40),
+        clientSecret: testSecret('thjod-user-update-client-secret', 40),
+      },
+    })
+  })
+
+  it('is the only tenant with a userUpdate section', () => {
+    for (const other of loadTenants(validEnv).filter(t => t.name !== 'Þjóðskrá')) {
+      expect(other.services.userUpdate).toBeUndefined()
+    }
+  })
+
+  it('has no userUpdate section, and keeps ticket creation, when none of its three variables are set', () => {
+    const env = { ...validEnv }
+    delete env.THJODSKRA_USER_UPDATE_API_KEY
+    delete env.THJODSKRA_USER_UPDATE_OAUTH_CLIENT_ID
+    delete env.THJODSKRA_USER_UPDATE_OAUTH_CLIENT_SECRET
+
+    const tenant = thjodskra(env)
+    expect(tenant.services.userUpdate).toBeUndefined()
+    expect(tenant.services.ticketCreate).toBeDefined()
+    expect(loadTenants(env)).toHaveLength(11)
+  })
+
+  it.each([
+    'THJODSKRA_USER_UPDATE_API_KEY',
+    'THJODSKRA_USER_UPDATE_OAUTH_CLIENT_ID',
+    'THJODSKRA_USER_UPDATE_OAUTH_CLIENT_SECRET',
+  ])('throws naming %s when only that one of the user-update three is missing', (name) => {
+    const env = { ...validEnv }
+    delete env[name]
+    expect(() => loadTenants(env)).toThrow(name)
+  })
+
+  it('fails validation if the user-update key is set to the ticket-create key', () => {
+    const env = { ...validEnv, THJODSKRA_USER_UPDATE_API_KEY: validEnv.THJODSKRA_TICKET_CREATE_API_KEY }
+    expect(() => validateTenantConfig(thjodskra(env))).toThrow('userUpdate.apiKey must differ from ticketCreate.apiKey')
   })
 
   it('throws when THJODSKRA_ZENDESK_SUBDOMAIN is missing', () => {
@@ -491,3 +537,31 @@ describe('loadTenants — TR services (Tryggingastofnun main brand)', () => {
     expect(byBrand(env, '36102499292434').services.tr).toBeUndefined()
   })
 })
+
+describe('userUpdateSection', () => {
+  const env = {
+    T_USER_UPDATE_API_KEY: testSecret('t-user-update-key', 40),
+    T_USER_UPDATE_OAUTH_CLIENT_ID: testSecret('t-user-update-client-id', 40),
+    T_USER_UPDATE_OAUTH_CLIENT_SECRET: testSecret('t-user-update-client-secret', 40)
+  }
+
+  it('builds the section from its three variables', () => {
+    expect(userUpdateSection('T', env)).toEqual({
+      userUpdate: {
+        apiKey: env.T_USER_UPDATE_API_KEY,
+        oauth: { clientId: env.T_USER_UPDATE_OAUTH_CLIENT_ID, clientSecret: env.T_USER_UPDATE_OAUTH_CLIENT_SECRET }
+      }
+    })
+  })
+
+  it('returns no section when none of the three variables are set', () => {
+    expect(userUpdateSection('T', {})).toEqual({})
+  })
+
+  it.each(Object.keys(env))('throws, naming %s, when only that one is missing', (name) => {
+    const partial: Record<string, string> = { ...env }
+    delete partial[name]
+    expect(() => userUpdateSection('T', partial)).toThrow(`Missing required environment variable: ${name}`)
+  })
+})
+
