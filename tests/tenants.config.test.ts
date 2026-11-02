@@ -95,12 +95,19 @@ const validEnv: Record<string, string> = {
   SJUKRA_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example',
   SJUKRA_ONESYSTEMS_APP_KEY: testSecret('sjukra-os-appkey', 40),
   SJUKRA_MALASKRA_API_KEY: testSecret('sjukra-malaskra-key', 40),
+  LANDLAEKNIR_ZENDESK_SUBDOMAIN: 'landlaeknir-test',
+  LANDLAEKNIR_ZENDESK_EMAIL: 'admin@landlaeknir.test',
+  LANDLAEKNIR_ZENDESK_API_TOKEN: testSecret('landlaeknir-zd-token', 40),
+  LANDLAEKNIR_ZENDESK_WEBHOOK_SECRET: testSecret('landlaeknir-zd-webhook', 40),
+  LANDLAEKNIR_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example',
+  LANDLAEKNIR_ONESYSTEMS_APP_KEY: testSecret('landlaeknir-os-appkey', 40),
+  LANDLAEKNIR_MALASKRA_API_KEY: testSecret('landlaeknir-malaskra-key', 40),
 }
 
 describe('loadTenants', () => {
   it('returns all tenants when all env vars are set', () => {
     const tenants = loadTenants(validEnv)
-    expect(tenants).toHaveLength(10)
+    expect(tenants).toHaveLength(11)
     expect(tenants[0].name).toBe('Kerfisstjórn')
     expect(tenants[1].name).toBe('Vinnueftirlitið')
     expect(tenants[2].name).toBe('Samgöngustofa')
@@ -110,6 +117,7 @@ describe('loadTenants', () => {
     expect(tenants[7].name).toBe('Þjóðskrá')
     expect(tenants[8].name).toBe('Þjóðskjalasafn Íslands')
     expect(tenants[9].name).toBe('Sjúkratryggingar Íslands')
+    expect(tenants[10].name).toBe('Embætti landlæknis')
   })
 
   it('produces tenants that pass validateTenantConfig', () => {
@@ -129,6 +137,7 @@ describe('loadTenants', () => {
     expect(tenants[5].services.archive!.pdf.companyName).toBe('HMS')
     expect(tenants[8].services.archive!.pdf.companyName).toBe('Þjóðskjalasafn Íslands')
     expect(tenants[9].services.archive!.pdf.companyName).toBe('Sjúkratryggingar Íslands')
+    expect(tenants[10].services.archive!.pdf.companyName).toBe('Embætti landlæknis')
   })
 
   it('uses per-tenant Zendesk credentials (no shared secrets across tenants)', () => {
@@ -260,6 +269,21 @@ describe('loadTenants', () => {
     expect(() => loadTenants(env)).toThrow('SJUKRA_ONESYSTEMS_APP_KEY')
   })
 
+  it('configures Embætti landlæknis with a OneSystems endpoint and the expected brand_id', () => {
+    const tenants = loadTenants(validEnv)
+    const landlaeknir = tenants.find(t => t.brand_id === '38723008064914')!
+    expect(landlaeknir.name).toBe('Embætti landlæknis')
+    expect(landlaeknir.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
+    expect(landlaeknir.services.archive!.pdf.includeInternalNotes).toBe(false)
+    expect(landlaeknir.services.ticketUpdate).toBeUndefined()
+  })
+
+  it('throws with a clear error when LANDLAEKNIR_ONESYSTEMS_APP_KEY is missing', () => {
+    const env = { ...validEnv }
+    delete env.LANDLAEKNIR_ONESYSTEMS_APP_KEY
+    expect(() => loadTenants(env)).toThrow('LANDLAEKNIR_ONESYSTEMS_APP_KEY')
+  })
+
   it('throws with a clear error when HMS_ZENDESK_API_TOKEN is missing', () => {
     const env = { ...validEnv }
     delete env.HMS_ZENDESK_API_TOKEN
@@ -383,7 +407,7 @@ describe('loadTenants — Þjóðskrá (ticket creation only)', () => {
     delete env.THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET
 
     expect(thjodskra(env).services.ticketCreate).toBeUndefined()
-    expect(loadTenants(env)).toHaveLength(10)
+    expect(loadTenants(env)).toHaveLength(11)
   })
 
   it.each([
@@ -400,5 +424,70 @@ describe('loadTenants — Þjóðskrá (ticket creation only)', () => {
     const env = { ...validEnv }
     delete env.THJODSKRA_ZENDESK_SUBDOMAIN
     expect(() => loadTenants(env)).toThrow('THJODSKRA_ZENDESK_SUBDOMAIN')
+  })
+})
+
+describe('loadTenants — TR services (Tryggingastofnun main brand)', () => {
+  const trEnv = {
+    TRYGGINGASTOFNUN_TR_API_KEY: testSecret('trygg-tr-api-key', 40),
+    TRYGGINGASTOFNUN_TR_HULD_BASE_URL: 'https://huldtest.tr.is/zendesktest/api/protected/v1',
+    TRYGGINGASTOFNUN_TR_AUTH0_DOMAIN: 'tr-test.eu.auth0.com',
+    TRYGGINGASTOFNUN_TR_AUTH0_AUDIENCE: 'https://zendesk.dev.tr.is',
+    TRYGGINGASTOFNUN_TR_AUTH0_CLIENT_ID: 'tr-m2m-client',
+    TRYGGINGASTOFNUN_TR_AUTH0_CLIENT_SECRET: testSecret('trygg-tr-auth0-secret', 40),
+    TRYGGINGASTOFNUN_TR_AGENT_AUTH_DOMAIN: 'tr-test.eu.auth0.com',
+    TRYGGINGASTOFNUN_TR_AGENT_AUTH_AUDIENCE: 'https://milli-mala.tr-services',
+    TRYGGINGASTOFNUN_TR_AGENT_AUTH_CLIENT_ID: 'tr-smari-spa-client',
+    TRYGGINGASTOFNUN_TR_AGENT_AUTH_EMAIL_CLAIM: 'https://tr.is/email',
+    TRYGGINGASTOFNUN_TR_AGENT_AUTH_EMAIL_VERIFIED_CLAIM: 'https://tr.is/email_verified',
+    TRYGGINGASTOFNUN_TR_EAUTH_ZENDESK_OAUTH_CLIENT_ID: 'tr-eauth-zd-client',
+    TRYGGINGASTOFNUN_TR_EAUTH_ZENDESK_OAUTH_CLIENT_SECRET: testSecret('trygg-tr-eauth-zd-secret', 40),
+  }
+  const byBrand = (env: Record<string, string | undefined>, brand: string) =>
+    loadTenants(env).find(t => t.brand_id === brand)!
+
+  it('has no tr section unless a TR service is switched on', () => {
+    expect(byBrand({ ...validEnv, ...trEnv }, '11204917066386').services.tr).toBeUndefined()
+  })
+
+  it('builds Smári only, with e-auth off', () => {
+    const tr = byBrand({ ...validEnv, ...trEnv, TRYGGINGASTOFNUN_TR_SMARI_ENABLED: 'true' }, '11204917066386').services.tr!
+    expect(tr.smari).toEqual({ enabled: true })
+    expect(tr.eauth).toBeUndefined()
+    expect(tr.agentAuth).toEqual({
+      domain: 'tr-test.eu.auth0.com',
+      audience: 'https://milli-mala.tr-services',
+      clientId: 'tr-smari-spa-client',
+      emailClaim: 'https://tr.is/email',
+      emailVerifiedClaim: 'https://tr.is/email_verified',
+    })
+  })
+
+  it('builds e-auth with defaults and per-tenant overrides', () => {
+    const tr = byBrand({
+      ...validEnv, ...trEnv,
+      TRYGGINGASTOFNUN_TR_EAUTH_ENABLED: 'true',
+      TRYGGINGASTOFNUN_TR_EAUTH_HASH_VALUE_MODE: 'sha256',
+      TRYGGINGASTOFNUN_TR_EAUTH_RATE_PER_TARGET_MAX: '5',
+    }, '11204917066386').services.tr!
+    expect(tr.smari).toBeUndefined()
+    expect(tr.eauth).toEqual({
+      hashValueMode: 'sha256',
+      timeoutSeconds: 120,
+      attemptTtlSeconds: 180,
+      rateLimits: { perAgent: { max: 10, windowSeconds: 600 }, perTarget: { max: 5, windowSeconds: 600 } },
+      zendeskOAuth: { clientId: 'tr-eauth-zd-client', clientSecret: trEnv.TRYGGINGASTOFNUN_TR_EAUTH_ZENDESK_OAUTH_CLIENT_SECRET },
+    })
+  })
+
+  it('throws naming a missing shared variable once a service is on', () => {
+    const env: Record<string, string | undefined> = { ...validEnv, ...trEnv, TRYGGINGASTOFNUN_TR_SMARI_ENABLED: 'true' }
+    delete env.TRYGGINGASTOFNUN_TR_AGENT_AUTH_AUDIENCE
+    expect(() => loadTenants(env)).toThrow('TRYGGINGASTOFNUN_TR_AGENT_AUTH_AUDIENCE')
+  })
+
+  it('never gives the internal TR brand a tr section', () => {
+    const env = { ...validEnv, ...trEnv, TRYGGINGASTOFNUN_TR_SMARI_ENABLED: 'true', TRYGGINGASTOFNUN_TR_EAUTH_ENABLED: 'true' }
+    expect(byBrand(env, '36102499292434').services.tr).toBeUndefined()
   })
 })

@@ -27,10 +27,11 @@
  * webhook create inputs are unavailable for that tenant.
  *
  * The ticket-update and ticket-create services are opt-in per tenant the
- * same way: see `ticketUpdateSection` and `ticketCreateSection` below.
+ * same way: see `ticketUpdateSection`, `ticketCreateSection` and
+ * `trSection` (TR's Smári lookup and e-auth) below.
  */
 
-import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig } from './platform/types.js'
+import type { TenantConfig, TicketCreateServiceConfig, TicketUpdateServiceConfig, TrServiceConfig } from './platform/types.js'
 import { requireEnv, optionalNumberEnv } from './platform/env.js'
 
 /**
@@ -101,6 +102,87 @@ function ticketCreateSection(
         clientId: requireEnv(names.clientId, env),
         clientSecret: requireEnv(names.clientSecret, env),
       },
+    },
+  }
+}
+
+// e-auth defaults. Each can be overridden per tenant with
+// the matching <PREFIX>_TR_EAUTH_* variable.
+const TR_EAUTH_DEFAULTS = {
+  timeoutSeconds: 120,
+  attemptTtlSeconds: 180,
+  perAgentMax: 10,
+  perAgentWindowSeconds: 600,
+  perTargetMax: 3,
+  perTargetWindowSeconds: 600,
+}
+
+/**
+ * Build the optional `services.tr` section (TR's Smári lookup and e-auth).
+ *
+ * The shared variables (API key, Huld, TR's Auth0 machine client, agent
+ * login) only matter once a service is switched on, so the section exists
+ * only when `<PREFIX>_TR_SMARI_ENABLED` or `<PREFIX>_TR_EAUTH_ENABLED` is
+ * "true". From then on every shared variable is required (boot failure
+ * naming the missing one), like ticketUpdate's partly-set rule.
+ *
+ * e-auth's Zendesk OAuth client has its own variables rather than reading
+ * ticketUpdate's, so DevOps may point them at the same client without the
+ * two services' config depending on each other.
+ */
+function trSection(
+  prefix: string,
+  env: Record<string, string | undefined>
+): { tr?: TrServiceConfig } {
+  const smari = env[`${prefix}_TR_SMARI_ENABLED`] === 'true'
+  const eauth = env[`${prefix}_TR_EAUTH_ENABLED`] === 'true'
+  if (!smari && !eauth) return {}
+
+  const n = (name: string) => `${prefix}_TR_${name}`
+  const num = (name: string, fallback: number) => optionalNumberEnv(n(name), env) ?? fallback
+  const d = TR_EAUTH_DEFAULTS
+
+  return {
+    tr: {
+      apiKey: requireEnv(n('API_KEY'), env),
+      huld: { baseUrl: requireEnv(n('HULD_BASE_URL'), env) },
+      auth0: {
+        domain: requireEnv(n('AUTH0_DOMAIN'), env),
+        audience: requireEnv(n('AUTH0_AUDIENCE'), env),
+        clientId: requireEnv(n('AUTH0_CLIENT_ID'), env),
+        clientSecret: requireEnv(n('AUTH0_CLIENT_SECRET'), env),
+      },
+      agentAuth: {
+        domain: requireEnv(n('AGENT_AUTH_DOMAIN'), env),
+        audience: requireEnv(n('AGENT_AUTH_AUDIENCE'), env),
+        clientId: requireEnv(n('AGENT_AUTH_CLIENT_ID'), env),
+        emailClaim: requireEnv(n('AGENT_AUTH_EMAIL_CLAIM'), env),
+        emailVerifiedClaim: requireEnv(n('AGENT_AUTH_EMAIL_VERIFIED_CLAIM'), env),
+      },
+      ...(smari ? { smari: { enabled: true as const } } : {}),
+      ...(eauth
+        ? {
+            eauth: {
+              hashValueMode: env[n('EAUTH_HASH_VALUE_MODE')] === 'sha256' ? 'sha256' as const : 'code' as const,
+              timeoutSeconds: num('EAUTH_TIMEOUT_SECONDS', d.timeoutSeconds),
+              attemptTtlSeconds: num('EAUTH_ATTEMPT_TTL_SECONDS', d.attemptTtlSeconds),
+              rateLimits: {
+                perAgent: {
+                  max: num('EAUTH_RATE_PER_AGENT_MAX', d.perAgentMax),
+                  windowSeconds: num('EAUTH_RATE_PER_AGENT_WINDOW_SECONDS', d.perAgentWindowSeconds),
+                },
+                perTarget: {
+                  max: num('EAUTH_RATE_PER_TARGET_MAX', d.perTargetMax),
+                  windowSeconds: num('EAUTH_RATE_PER_TARGET_WINDOW_SECONDS', d.perTargetWindowSeconds),
+                },
+              },
+              zendeskOAuth: {
+                clientId: requireEnv(n('EAUTH_ZENDESK_OAUTH_CLIENT_ID'), env),
+                clientSecret: requireEnv(n('EAUTH_ZENDESK_OAUTH_CLIENT_SECRET'), env),
+              },
+            },
+          }
+        : {}),
     },
   }
 }
@@ -231,6 +313,8 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           },
         },
         ...ticketUpdateSection('TRYGGINGASTOFNUN', env),
+        // TR's Smári lookup and e-auth: main brand only, not the internal one.
+        ...trSection('TRYGGINGASTOFNUN', env),
       },
     },
     {
@@ -392,6 +476,38 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           malaskra: { apiKey: requireEnv('SJUKRA_MALASKRA_API_KEY', env) },
           pdf: {
             companyName: 'Sjúkratryggingar Íslands',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
+        },
+      },
+    },
+    {
+      brand_id: '38723008064914',
+      name: 'Embætti landlæknis',
+      zendesk: {
+        subdomain: requireEnv('LANDLAEKNIR_ZENDESK_SUBDOMAIN', env),
+        email: requireEnv('LANDLAEKNIR_ZENDESK_EMAIL', env),
+        apiToken: requireEnv('LANDLAEKNIR_ZENDESK_API_TOKEN', env),
+        webhookSecret: requireEnv('LANDLAEKNIR_ZENDESK_WEBHOOK_SECRET', env),
+      },
+      services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('LANDLAEKNIR_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('LANDLAEKNIR_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('LANDLAEKNIR_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('LANDLAEKNIR_KENNITALA_FIELD_ID', env),
+              // MD-02 invariant: the webhook create path refuses to mint
+              // without a case-number field to stamp (duplicate-mint guard).
+              caseNumberFieldId: optionalNumberEnv('LANDLAEKNIR_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('LANDLAEKNIR_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Embætti landlæknis',
             locale: 'is-IS',
             includeInternalNotes: false,
           },
