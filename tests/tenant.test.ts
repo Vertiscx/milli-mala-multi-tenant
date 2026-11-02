@@ -761,3 +761,61 @@ describe('validateTenantConfig — ticketCreate section', () => {
   })
 
 })
+
+describe('validateTenantConfig — userUpdate section', () => {
+  type UserUpdate = NonNullable<TenantConfig['services']['userUpdate']>
+
+  const TICKET_CREATE_KEY = 'aK3xR7mT9nQ2vL5jW8pY6cB4fH1gA0eS'
+
+  function makeUserUpdateTenant(overrides: Partial<UserUpdate> = {}): TenantConfig {
+    return {
+      brand_id: '30303665547154',
+      name: 'Þjóðskrá',
+      zendesk: { subdomain: 'digitaliceland' },
+      services: {
+        ticketCreate: {
+          apiKey: TICKET_CREATE_KEY,
+          oauth: { clientId: 'create-client-id', clientSecret: 'cS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eD' }
+        },
+        userUpdate: {
+          apiKey: 'uU4xR7mT9nQ2vL5jW8pY6cB4fH1gA0eZ',
+          oauth: { clientId: 'user-client-id', clientSecret: 'uS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eQ' },
+          ...overrides
+        }
+      }
+    }
+  }
+
+  it('accepts a valid userUpdate section on a tenant without archive', () => {
+    expect(() => validateTenantConfig(makeUserUpdateTenant())).not.toThrow()
+  })
+
+  it('lists every missing credential', () => {
+    const tenant = makeUserUpdateTenant({ apiKey: '', oauth: { clientId: '', clientSecret: '' } })
+    expect(() => validateTenantConfig(tenant)).toThrow(
+      'missing userUpdate apiKey, oauth.clientId, oauth.clientSecret'
+    )
+  })
+
+  it('rejects a weak API key', () => {
+    expect(() => validateTenantConfig(makeUserUpdateTenant({ apiKey: 'short-key' })))
+      .toThrow('userUpdate.apiKey must be at least 32 characters')
+  })
+
+  it('rejects a weak OAuth client secret', () => {
+    const tenant = makeUserUpdateTenant({ oauth: { clientId: 'client-id', clientSecret: 'z'.repeat(40) } })
+    expect(() => validateTenantConfig(tenant)).toThrow('userUpdate.oauth.clientSecret must not be a repeated character')
+  })
+
+  it('rejects an API key equal to the tenant\'s ticketCreate key', () => {
+    expect(() => validateTenantConfig(makeUserUpdateTenant({ apiKey: TICKET_CREATE_KEY })))
+      .toThrow('userUpdate.apiKey must differ from ticketCreate.apiKey')
+  })
+
+  it('rejects the same userUpdate API key on two tenants loaded from JSON', () => {
+    const a = makeUserUpdateTenant()
+    const b = { ...makeUserUpdateTenant(), brand_id: '1', name: 'Other' }
+    b.services = { userUpdate: a.services.userUpdate }
+    expect(() => FileTenantStore.fromJson(JSON.stringify({ tenants: [a, b] }))).toThrow('Duplicate userUpdate.apiKey')
+  })
+})

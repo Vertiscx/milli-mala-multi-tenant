@@ -83,7 +83,8 @@ export class FileTenantStore implements TenantStore {
     for (const tenant of data.tenants) {
       const keys: [string, string | undefined][] = [
         ['malaskra.apiKey', tenant.services?.archive?.malaskra?.apiKey],
-        ['tr.apiKey', tenant.services?.tr?.apiKey]
+        ['tr.apiKey', tenant.services?.tr?.apiKey],
+        ['userUpdate.apiKey', tenant.services?.userUpdate?.apiKey]
       ]
       for (const [field, key] of keys) {
         if (!key) continue
@@ -155,6 +156,11 @@ export function validateTenantConfig(config: TenantConfig): void {
   const ticketCreate = config.services?.ticketCreate
   if (ticketCreate) {
     validateTicketCreateConfig(ticketCreate, config.name || config.brand_id)
+  }
+
+  const userUpdate = config.services?.userUpdate
+  if (userUpdate) {
+    validateUserUpdateConfig(userUpdate, config.name || config.brand_id, ticketCreate?.apiKey)
   }
 
   const tr = config.services?.tr
@@ -299,6 +305,34 @@ export function validateTicketCreateConfig(
 
 /** Auth0 tenant domains: hostname only, no scheme or path. */
 const AUTH0_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i
+
+/**
+ * Validate a user-update service section (services.userUpdate): the
+ * caller's API key and the Zendesk OAuth client credentials. The key must
+ * differ from the tenant's ticket-create key: the two services were given
+ * separate keys so either can be revoked alone. Throws with a descriptive
+ * message on failure. Only called when the section is present.
+ */
+export function validateUserUpdateConfig(
+  userUpdate: NonNullable<TenantConfig['services']['userUpdate']>,
+  label: string,
+  ticketCreateApiKey?: string
+): void {
+  const missing: string[] = []
+  if (!userUpdate.apiKey) missing.push('apiKey')
+  if (!userUpdate.oauth?.clientId) missing.push('oauth.clientId')
+  if (!userUpdate.oauth?.clientSecret) missing.push('oauth.clientSecret')
+
+  if (missing.length > 0) {
+    throw new Error(`Invalid tenant config for "${label}": missing userUpdate ${missing.join(', ')}`)
+  }
+
+  validateSecretStrength(userUpdate.apiKey, 'userUpdate.apiKey', label, MIN_SECRET_LENGTH)
+  validateSecretStrength(userUpdate.oauth.clientSecret, 'userUpdate.oauth.clientSecret', label, MIN_SECRET_LENGTH)
+  if (ticketCreateApiKey && userUpdate.apiKey === ticketCreateApiKey) {
+    throw new Error(`Invalid tenant config for "${label}": userUpdate.apiKey must differ from ticketCreate.apiKey`)
+  }
+}
 
 /**
  * Validate the TR section (services.tr): shared Huld + Auth0 + agent-login
