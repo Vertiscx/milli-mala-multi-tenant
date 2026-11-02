@@ -12,7 +12,7 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 
 | | |
 |---|---|
-| Services | Archive and ticket update (production), ticket create. Others are added under `src/services/` without touching the platform. |
+| Services | Archive and ticket update (production), ticket create, user update. Others are added under `src/services/` without touching the platform. |
 | Archive backends | OneSystems, GoPro |
 | Tenants | One per Zendesk brand. Eight configured. |
 | Production | One Node.js container on AWS ECS, run by Digital Iceland |
@@ -35,6 +35,7 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 | `POST` | `/v1/attachments` | Málaskrá sidebar app | `X-Api-Key` |
 | `POST` | `/v1/tickets/update` | Zendesk trigger | Zendesk HMAC-SHA256 signature |
 | `POST` | `/v1/tickets/create` | A system outside Zendesk (e.g. a web form's backend) | `X-Api-Key`, plus a required `Idempotency-Key` |
+| `POST` | `/v1/users/update` | A system outside Zendesk | `X-Api-Key` (its own, not ticket create's) |
 | `GET` | `/v1/audit` | Operator | `Authorization: Bearer <AUDIT_SECRET>` |
 | `GET` | `/v1/health` | Load balancer | none |
 
@@ -80,6 +81,22 @@ It updates the ticket through the Zendesk API using a per-tenant OAuth client (C
 
 The caller sends the tenant's API key in `X-Api-Key` and its own submission ID in `Idempotency-Key`; Zendesk ignores a repeat of the same key within two hours, so a retried request returns the original ticket rather than creating a second one. Because all brands share one Zendesk account, a few fields are always dropped: `assignee_id`, `requester_id`, `submitter_id`, `organization_id` and `comment.author_id`. Everything else, `group_id` and `ticket_form_id` included, is passed to Zendesk as sent. A dropped field never stops the ticket being created. The response is `201` with `{ success, ticket_id, brand_id, dropped_fields }`.
 
+`/v1/users/update` updates an end user for a caller outside Zendesk. `user.brand_id` selects the tenant, and exactly one of `user.id` (the Zendesk user ID) or `user.email` says which user; every other field in `user` is what to change.
+
+```json
+{
+  "user": {
+    "brand_id": 30303665547154,
+    "email": "jon@example.is",
+    "name": "...",
+    "phone": "+354...",
+    "user_fields": { "...": "..." }
+  }
+}
+```
+
+By email the gateway uses Zendesk's user search and accepts only one exact match (ignoring letter case); a user created moments ago can take a few seconds to appear there, so a `404` for a brand-new user is worth one retry after about ten seconds, or use `user.id`. The user must be an end user: a user that doesn't exist and an agent or admin both get `404 User not found`. Fields that would change who the user is or what they can do (`role`, `custom_role_id`, `organization_id`, `organization`, `suspended`, `verified`, `external_id`, `identities`, `moderator`, `ticket_restriction`, `agent_brand_ids`, `default_group_id`, `only_private_comments`, `signature`, `shared_phone_number`) are always dropped, and `email` is only ever the lookup key. The response is `200` with `{ success, user_id, brand_id, dropped_fields }`; `409` if the email matches more than one user, `422` if Zendesk refuses the change, and `429` with `Retry-After` when the user has been updated too often (Zendesk allows five updates per user per minute). Users belong to the Zendesk account, not to a brand, so a tenant with this service can update any end user on its account; see [ARCHITECTURE.md](ARCHITECTURE.md#9-security-boundaries).
+
 After every documentation attempt the gateway posts an internal note on the ticket with the result, and stamps custom fields if the tenant has them configured.
 
 ## Local development
@@ -88,7 +105,7 @@ Requires Node.js 20 or later.
 
 ```bash
 npm ci
-npm test              # 509 tests, under a second
+npm test              # 694 tests, about a second
 npm run typecheck
 ```
 

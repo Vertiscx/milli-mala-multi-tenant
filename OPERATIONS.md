@@ -102,11 +102,13 @@ Two layers.
 | `<T>_ZENDESK_OAUTH_CLIENT_ID`, `<T>_ZENDESK_OAUTH_CLIENT_SECRET` | opt-in | Credentials of a Zendesk OAuth client (Client Credentials grant) on that tenant's account, scoped `tickets:write`. Secret 32+ characters. |
 | `<T>_TICKET_CREATE_API_KEY` | opt-in | The key the tenant's ticket-create caller (e.g. a web form's backend) sends in `X-Api-Key`. Generate fresh: `openssl rand -hex 24`. **Unique per tenant**: whoever holds it can create tickets in that brand. The same value goes to the team running the caller. |
 | `<T>_TICKET_CREATE_OAUTH_CLIENT_ID`, `<T>_TICKET_CREATE_OAUTH_CLIENT_SECRET` | opt-in | A Zendesk OAuth client used only for ticket creation, separate from the ticket-update one. Secret 32+ characters. |
+| `<T>_USER_UPDATE_API_KEY` | opt-in | The key the tenant's user-update caller sends in `X-Api-Key`. Generate fresh: `openssl rand -hex 24`. Must differ from the same tenant's ticket-create key and from every other tenant's. Whoever holds it can update **any end user on the tenant's Zendesk account** (section 5c). |
+| `<T>_USER_UPDATE_OAUTH_CLIENT_ID`, `<T>_USER_UPDATE_OAUTH_CLIENT_SECRET` | opt-in | A Zendesk OAuth client used only for user updates, scoped `users:read` and `users:write`. Secret 32+ characters. |
 | `<T>_TEMPLATE_FIELD_ID`, `<T>_KENNITALA_FIELD_ID`, `<T>_CASE_NUMBER_FIELD_ID` | optional | Numeric Zendesk custom-field IDs. Not secrets. Account-level, so every brand on the same Zendesk account uses the same three numbers. Without `CASE_NUMBER_FIELD_ID` the webhook will not create cases. |
 
 The full list with current tenants is [.env.example](.env.example).
 
-The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — the container starts normally. **Some but not all three set is a boot failure** naming the missing variable, so a typo or a half-finished rollout is loud rather than silently leaving the service switched off. The three ticket-create variables work the same way.
+The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — the container starts normally. **Some but not all three set is a boot failure** naming the missing variable, so a typo or a half-finished rollout is loud rather than silently leaving the service switched off. The three ticket-create variables and the three user-update variables work the same way.
 
 A tenant without the archive service (Þjóðskrá, for example) needs only `<T>_ZENDESK_SUBDOMAIN` plus the variables of the services it uses. `<T>_ZENDESK_SUBDOMAIN` itself is always required, so adding such a tenant still means provisioning it before deploying.
 
@@ -155,6 +157,17 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 5. **The caller** sends `X-Api-Key` and its own submission ID in `Idempotency-Key` with every request, and escapes citizens' input before putting it in `html_body`. A retry with the same `Idempotency-Key` within two hours returns the original ticket instead of creating another.
 6. **Deploy**, check that `POST /v1/tickets/create` answers 400 or 401 (not 404), then make one real submission: confirm the ticket lands in the right brand and group, a requester new to Zendesk is created, and re-sending the same `Idempotency-Key` does not create a second ticket.
 
+## 5c. Enabling user updates for a tenant
+
+`/v1/users/update` lets a system outside Zendesk update an end user. It is enabled per tenant. **Users belong to the Zendesk account, not to a brand**: a tenant with this service can update any end user on its account, including citizens another institution on the same account deals with. Agents and admins can never be changed, and fields that would change who a user is or what they can do are always dropped, but which end users may be changed is not restricted. Enable it only for a tenant trusted with that reach.
+
+1. **Zendesk side:** create an OAuth client (Admin Center, Apps and integrations, APIs, OAuth clients) on the tenant's account, kind **Confidential**, used only for user updates. Restrict its scopes to `users:read` and `users:write`. Note the client ID and secret.
+2. **API key:** generate one with `openssl rand -hex 24`. It must differ from the tenant's ticket-create key.
+3. **Code:** in the tenant's block in `src/tenants.config.ts`, add `...userUpdateSection('<T>', env)` to its `services`, and add the three variable names to `.env.example`.
+4. **Secrets:** send the three values to DevOps as in section 5 step 4, and the API key also to the team running the caller. Confirm they are in Parameter Store before deploying.
+5. **The caller** sends `X-Api-Key` and `{ "user": { "brand_id", "id" or "email", …fields } }`. A `404` for a user created in the last few seconds is retried once after about ten seconds (Zendesk's search needs a moment), or the caller uses the user's ID. A `429` is retried after the `Retry-After` seconds. A `422` is not retried.
+6. **Deploy**, check that `POST /v1/users/update` answers 400 or 401 (not 404), then update one real test user: by email and by ID, and confirm an agent's email gets `404` and nothing changes.
+
 ## 6. Rotating a secret
 
 No code change. DevOps updates the value in Parameter Store and restarts the service. For the Málaskrá key, update the app's secure setting on the brand at the same time. For the webhook secret, regenerate it in Zendesk first, then update Parameter Store, then restart. Requests signed with the old secret fail with 401 in between, and Zendesk retries them.
@@ -189,6 +202,9 @@ Start with the ticket. Every attempt leaves an internal note: a tick with the ca
 | Archive returns 404 on upload | Trailing slash on the base URL, or wrong path | Config. |
 | Archive auth fails | Expired or wrong credential | Test the archive API directly. |
 | Same ticket archived repeatedly | Trigger is not one-shot | Fix the trigger as in section 5. |
+| `404 User not found` on `/v1/users/update` for a user who exists | The user is an agent or admin (never updated), or was created seconds ago and is not yet in Zendesk's search | Check the user's role in Zendesk. For a new user, retry once or send `user.id`. |
+| `409 Email matches more than one user` | Two users share that email address across the account | Send `user.id` instead. |
+| `429` on `/v1/users/update` | The same user was updated more than five times in a minute | Retry after the `Retry-After` seconds. |
 | Red "Build and Deploy" on a merged PR | Expected for fork PRs | Nothing was deployed. Run the workflow manually. |
 
 ## 9. Network

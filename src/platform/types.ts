@@ -12,6 +12,7 @@ export interface TenantConfig {
     archive?: ArchiveServiceConfig
     ticketUpdate?: TicketUpdateServiceConfig
     ticketCreate?: TicketCreateServiceConfig
+    userUpdate?: UserUpdateServiceConfig
     tr?: TrServiceConfig
   }
 }
@@ -51,6 +52,18 @@ export interface TrEauthConfig {
   }
   // Zendesk OAuth client for the ticket brand check and the internal note.
   zendeskOAuth: { clientId: string; clientSecret: string }
+}
+
+// Config for the userUpdate service (src/services/userUpdate/), called by a
+// system outside Zendesk, so authenticated by a per-tenant API key like
+// ticketCreate. Key and OAuth client are its own, separate from
+// ticketCreate's, so either service can be revoked alone.
+export interface UserUpdateServiceConfig {
+  apiKey: string
+  oauth: {
+    clientId: string
+    clientSecret: string
+  }
 }
 
 // Config for the ticketCreate service (src/services/ticketCreate/), called
