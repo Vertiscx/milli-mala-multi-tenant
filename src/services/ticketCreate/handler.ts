@@ -36,12 +36,15 @@ const logger: Logger = createLogger('ticketCreate')
 const MAX_BODY_SIZE = 1024 * 1024 // 1MB — matches every other route in this repo
 const MAX_IDEMPOTENCY_KEY_LENGTH = 255
 
+// Upload tokens from /v1/tickets/uploads that one ticket may carry.
+export const MAX_UPLOADS_PER_TICKET = 10
+
 const ALWAYS_DROPPED_FIELDS = ['assignee_id', 'requester_id', 'submitter_id', 'organization_id'] as const
 
 // Same check as the archive service's Málaskrá key (SHA-256, then a
 // constant-time compare), duplicated rather than imported: services
 // don't import each other.
-function verifyApiKey(provided: string | undefined, expected: string): boolean {
+export function verifyApiKey(provided: string | undefined, expected: string): boolean {
   if (!provided) return false
   const a = createHash('sha256').update(provided).digest()
   const b = createHash('sha256').update(expected).digest()
@@ -57,6 +60,22 @@ function isValidIdempotencyKey(key: unknown): key is string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Zendesk upload tokens are alphanumeric.
+export function isValidUploadToken(token: unknown): token is string {
+  return typeof token === 'string' && /^[A-Za-z0-9_-]{1,255}$/.test(token)
+}
+
+// comment.uploads, when present, must be a short list of upload tokens.
+// A malformed list is refused rather than dropped: dropping it would
+// create the ticket without the citizen's attachments and nobody would know.
+function isValidUploadsList(comment: unknown): boolean {
+  if (!isPlainObject(comment) || !('uploads' in comment)) return true
+  const uploads = comment.uploads
+  return Array.isArray(uploads) &&
+    uploads.length <= MAX_UPLOADS_PER_TICKET &&
+    uploads.every(isValidUploadToken)
 }
 
 /**
@@ -91,7 +110,7 @@ function prepareTicket(
 // Zendesk's validation messages can echo submitted values (e.g. a
 // requester's email), so only the error code and the names of the
 // offending fields are logged — never the descriptions.
-function summarizeZendeskError(text: string): { zendesk_error?: string; zendesk_error_fields?: string[] } {
+export function summarizeZendeskError(text: string): { zendesk_error?: string; zendesk_error_fields?: string[] } {
   try {
     const parsed = JSON.parse(text) as { error?: unknown; details?: unknown }
     return {
@@ -155,6 +174,10 @@ export async function handleTicketCreate(req: TicketCreateHttpRequest, tenantSto
     return { status: 400, body: { error: 'Invalid or missing Idempotency-Key header' } }
   }
 
+  if (!isValidUploadsList(ticket.comment)) {
+    return { status: 400, body: { error: 'Invalid comment.uploads' } }
+  }
+
   const { fields, dropped } = prepareTicket(ticket, tenantConfig.brand_id)
 
   logger.info('Ticket create request', {
@@ -199,6 +222,12 @@ export async function handleTicketCreate(req: TicketCreateHttpRequest, tenantSto
       logger.error('Zendesk ticket creation failed', {
         brand_id: brandId, idempotency_key: idempotencyKey, status: response.status, ...summarizeZendeskError(text)
       })
+      // A 422 is Zendesk refusing the ticket itself (e.g. an invalid field or
+      // an expired upload token). Retrying it unchanged can never succeed, so
+      // it must not look like the retryable 502 below.
+      if (response.status === 422) {
+        return { status: 422, body: { error: 'Ticket rejected by Zendesk validation' } }
+      }
       return { status: 502, body: { error: 'Zendesk ticket creation failed' } }
     }
 
