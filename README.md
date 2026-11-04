@@ -99,7 +99,7 @@ Requires Node.js 20 or later.
 
 ```bash
 npm ci
-npm test              # 669 tests, about a second
+npm test              # 673 tests, about a second
 npm run typecheck
 ```
 
