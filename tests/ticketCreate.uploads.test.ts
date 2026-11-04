@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { EventEmitter } from 'node:events'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequest, createResponse } from 'node-mocks-http'
 import {
   handleTicketUpload, handleTicketUploadHttp, MAX_UPLOAD_BYTES, UploadTooLargeError
@@ -368,5 +370,79 @@ describe('handleTicketUploadHttp', () => {
     expect(res._getStatusCode()).toBe(413)
     expect(JSON.parse(res._getData())).toEqual({ error: 'File too large' })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it('returns 500 and calls nothing when reading the body fails for another reason', async () => {
+    const req = createRequest({
+      method: 'POST',
+      url: '/v1/tickets/uploads?brand_id=403&filename=a.pdf',
+      headers: { 'x-api-key': API_KEY, 'content-type': 'application/pdf' }
+    })
+    const res = createResponse()
+
+    const promise = handleTicketUploadHttp(req, res, makeStore([makeTenantConfig('403')]))
+    setTimeout(() => req.emit('error', new Error('aborted')), 0)
+    await promise
+
+    expect(res._getStatusCode()).toBe(500)
+    expect(JSON.parse(res._getData())).toEqual({ error: 'Internal server error' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('answers 400 Missing brand_id when the request has no brand_id or no URL at all', async () => {
+    for (const url of ['/v1/tickets/uploads?filename=a.pdf', undefined]) {
+      const req = Object.assign(new EventEmitter(), { url, headers: { 'x-api-key': API_KEY, 'content-type': 'application/pdf' } })
+      const res = createResponse()
+
+      await handleTicketUploadHttp(req as unknown as IncomingMessage, res, makeStore([makeTenantConfig('405')]))
+
+      expect(res._getStatusCode()).toBe(400)
+      expect(JSON.parse(res._getData())).toEqual({ error: 'Missing brand_id' })
+    }
+  })
+
+  describe('after a 413', () => {
+    // A request that declares a body over the limit: the handler answers
+    // before reading it, then has to deal with the bytes still on the way.
+    function oversizeExchange() {
+      const req = Object.assign(new EventEmitter(), {
+        url: '/v1/tickets/uploads?brand_id=404&filename=a.pdf',
+        headers: { 'x-api-key': API_KEY, 'content-type': 'application/pdf', 'content-length': String(MAX_UPLOAD_BYTES + 1) },
+        resume: vi.fn(),
+        destroy: vi.fn()
+      })
+      const res = Object.assign(new EventEmitter(), {
+        writeHead: vi.fn(),
+        end: vi.fn(() => { res.emit('finish') })
+      })
+      return { req, res }
+    }
+
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    it('drains the rest of the body and keeps the connection when it ends in time', async () => {
+      const { req, res } = oversizeExchange()
+
+      await handleTicketUploadHttp(req as unknown as IncomingMessage, res as unknown as ServerResponse, makeStore([makeTenantConfig('404')]))
+
+      expect(res.writeHead).toHaveBeenCalledWith(413, { 'Content-Type': 'application/json' })
+      expect(res.end).toHaveBeenCalledWith(JSON.stringify({ error: 'File too large' }))
+      expect(req.resume).toHaveBeenCalledTimes(1)
+      req.emit('end')
+      vi.advanceTimersByTime(10_000)
+      expect(req.destroy).not.toHaveBeenCalled()
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('closes the connection if the body has not ended after 5 seconds', async () => {
+      const { req, res } = oversizeExchange()
+
+      await handleTicketUploadHttp(req as unknown as IncomingMessage, res as unknown as ServerResponse, makeStore([makeTenantConfig('404')]))
+
+      vi.advanceTimersByTime(4_999)
+      expect(req.destroy).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      expect(req.destroy).toHaveBeenCalledTimes(1)
+    })
   })
 })
