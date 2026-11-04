@@ -92,8 +92,9 @@ Two layers.
 | Variable | Required | Notes |
 |---|---|---|
 | `<T>_ZENDESK_SUBDOMAIN` | yes | **Bare subdomain only**, for example `digitaliceland`. Not the hostname. A value with a dot fails validation and the tenant returns 400 on every request. |
-| `<T>_ZENDESK_EMAIL` | archive tenants | The API user. Needs ticket-write scope for the case-number stamp and the result note. |
-| `<T>_ZENDESK_API_TOKEN` | archive tenants | 32+ characters. Zendesk tokens are 40. |
+| `<T>_ZENDESK_EMAIL` | archive tenants on an API token | The API user. Needs ticket-write scope for the case-number stamp and the result note. |
+| `<T>_ZENDESK_API_TOKEN` | archive tenants on an API token | 32+ characters. Zendesk tokens are 40. |
+| `<T>_ARCHIVE_OAUTH_CLIENT_ID`, `<T>_ARCHIVE_OAUTH_CLIENT_SECRET` | archive tenants on OAuth | In place of the email and API token, which Zendesk no longer issues. A Confidential OAuth client used only for archiving, scoped `tickets:read`, `tickets:write` and `users:read`. Secret 32+ characters. Section 5d. |
 | `<T>_ZENDESK_WEBHOOK_SECRET` | archive tenants | Shown once by Zendesk when the webhook is created. 32+ characters. |
 | `<T>_ONESYSTEMS_BASE_URL` and `<T>_ONESYSTEMS_APP_KEY` | OneSystems tenants | HTTPS, public hostname, **no trailing slash**. |
 | `<T>_GOPRO_BASE_URL`, `<T>_GOPRO_USERNAME`, `<T>_GOPRO_PASSWORD` | GoPro tenants | Password 16+ characters. |
@@ -168,6 +169,23 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 5. **The caller** sends `X-Api-Key` and `{ "user": { "brand_id", "id" or "email", …fields } }`. A `404` for a user created in the last few seconds is retried once after about ten seconds (Zendesk's search needs a moment), or the caller uses the user's ID. A `429` is retried after the `Retry-After` seconds. A `422` is not retried.
 6. **Deploy**, check that `POST /v1/users/update` answers 400 or 401 (not 404), then update one real test user: by email and by ID, and confirm an agent's email gets `404` and nothing changes.
 
+## 5d. Archiving with OAuth instead of an API token
+
+Zendesk no longer lets new API tokens be created, so a new archive tenant signs in to Zendesk with an OAuth client. Existing tenants keep their API tokens until they are moved over; the steps are the same.
+
+1. **Zendesk side:** create an OAuth client (Admin Center, Apps and integrations, APIs, OAuth clients) on the tenant's account, kind **Confidential**, used only for archiving. Restrict its scopes to `tickets:read`, `tickets:write` and `users:read`. Note the client ID and secret; the full secret is shown only once.
+2. **Check "Allow secure downloads" is off** (in Admin Center; search for "secure downloads"). The gateway downloads attachments without a token, because Zendesk refuses OAuth tokens on attachment URLs. With the setting on, every attachment download fails: the PDF is still filed, and the note on the ticket lists the missing files.
+3. **Code:** in the tenant's block in `src/tenants.config.ts`, replace `email` and `apiToken` with
+   ```ts
+   oauth: {
+     clientId: requireEnv('<T>_ARCHIVE_OAUTH_CLIENT_ID', env),
+     clientSecret: requireEnv('<T>_ARCHIVE_OAUTH_CLIENT_SECRET', env)
+   },
+   ```
+   and swap the variable names in `.env.example`. Keeping both is a boot failure.
+4. **Secrets:** send the two values to DevOps as in section 5 step 4. For a tenant moving over, ask DevOps to remove `<T>_ZENDESK_EMAIL` and `<T>_ZENDESK_API_TOKEN` once it is deployed, and revoke the old API token in Zendesk.
+5. **Deploy**, then archive one real test ticket with an attachment. The result note now shows the OAuth client's user as its author.
+
 ## 6. Rotating a secret
 
 No code change. DevOps updates the value in Parameter Store and restarts the service. For the Málaskrá key, update the app's secure setting on the brand at the same time. For the webhook secret, regenerate it in Zendesk first, then update Parameter Store, then restart. Requests signed with the old secret fail with 401 in between, and Zendesk retries them.
@@ -201,6 +219,8 @@ Start with the ticket. Every attempt leaves an internal note: a tick with the ca
 | `207 orphan_case` | Case was created in the archive but the upload or stamp failed | The case number is in the note and audit entry. File the document manually or re-run through Málaskrá with that case number. |
 | Archive returns 404 on upload | Trailing slash on the base URL, or wrong path | Config. |
 | Archive auth fails | Expired or wrong credential | Test the archive API directly. |
+| Every attachment of an OAuth tenant is listed as failed (`download status 403`) | "Allow secure downloads" was turned on in Zendesk | Turn it off (section 5d). |
+| Archive fails with `Zendesk OAuth token request failed` in the log | Wrong client ID or secret, the client was deleted, or it lacks a scope | Check the OAuth client in Zendesk against section 5d. |
 | Same ticket archived repeatedly | Trigger is not one-shot | Fix the trigger as in section 5. |
 | `404 User not found` on `/v1/users/update` for a user who exists | The user is an agent or admin (never updated), or was created seconds ago and is not yet in Zendesk's search | Check the user's role in Zendesk. For a new user, retry once or send `user.id`. |
 | `409 Email matches more than one user` | Two users share that email address across the account | Send `user.id` instead. |
