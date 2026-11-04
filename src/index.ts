@@ -3,11 +3,15 @@
  * Standalone HTTP server for non-Cloudflare deployments (Docker, K8s).
  *
  * Routes:
- *   POST /v1/webhook      — Zendesk webhook (ticket close → PDF → archive)
- *   POST /v1/attachments   — Malaskrá attachment forwarding
- *   GET  /v1/health        — Health check
- *   GET  /v1/audit         — Audit log query (requires AUDIT_SECRET)
- *   POST /v1/tr/...        — TR's Smári lookup and e-auth (Node only; see services/tr/)
+ *   POST /v1/webhook         — Zendesk webhook (ticket close → PDF → archive)
+ *   POST /v1/cases           — Málaskrá manual documentation / case creation
+ *   POST /v1/attachments     — Málaskrá attachment forwarding
+ *   POST /v1/tickets/update  — Zendesk-trigger ticket update (OAuth)
+ *   POST /v1/tickets/create  — Ticket creation for a system outside Zendesk
+ *   POST /v1/users/update    — End-user update for a system outside Zendesk
+ *   GET  /v1/health          — Health check
+ *   GET  /v1/audit           — Audit log query (requires AUDIT_SECRET)
+ *   POST /v1/tr/...          — TR's Smári lookup and e-auth (Node only; see services/tr/)
  */
 
 import { timingSafeEqual, createHash } from 'node:crypto'
@@ -23,12 +27,14 @@ import { createLogger } from './platform/logger.js'
 import type { Logger } from './platform/types.js'
 import { handleTicketUpdateHttp } from './services/ticketUpdate/handler.js'
 import { handleTicketCreateHttp } from './services/ticketCreate/handler.js'
+import { handleUserUpdateHttp } from './services/userUpdate/handler.js'
 
 export { handleWebhook, verifyWebhookSignature, isTimestampFresh } from './services/archive/webhook.js'
 export { handleAttachments } from './services/archive/attachments.js'
 export { handleCases } from './services/archive/cases.js'
 export { handleTicketUpdate } from './services/ticketUpdate/handler.js'
 export { handleTicketCreate } from './services/ticketCreate/handler.js'
+export { handleUserUpdate } from './services/userUpdate/handler.js'
 
 const logger: Logger = createLogger('main')
 
@@ -162,6 +168,7 @@ function startServer(): void {
     if (url.pathname === '/v1/audit' && req.method === 'GET') return handleAuditHttp(req, res, url, auditStore, config.auditSecret)
     if (url.pathname === '/v1/tickets/update' && req.method === 'POST') return handleTicketUpdateHttp(req, res, tenantStore)
     if (url.pathname === '/v1/tickets/create' && req.method === 'POST') return handleTicketCreateHttp(req, res, tenantStore)
+    if (url.pathname === '/v1/users/update' && req.method === 'POST') return handleUserUpdateHttp(req, res, tenantStore)
 
     const route = req.method === 'POST' ? findRoute(serviceRoutes, req.method, url.pathname) : undefined
     if (route) return dispatchServiceRoute(req, res, route, tenantStore, auditStore)

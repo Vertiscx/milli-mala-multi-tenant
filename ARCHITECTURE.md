@@ -20,6 +20,8 @@ Two archive products are supported: **OneSystems** and **GoPro**. Eight institut
 
 **The ticket-create service** is the third. It lets a system outside Zendesk — at first a web form's backend server — create a ticket in a tenant's brand, again through a per-tenant OAuth client of its own. The caller never holds Zendesk credentials: it holds only a milli-mála API key that can create tickets in one brand.
 
+**The user-update service** lets a system outside Zendesk update an end user, through its own per-tenant API key and OAuth client. Þjóðskrá is the first tenant set up for it. Users, unlike tickets, belong to the Zendesk account rather than to a brand, so it is the one service whose reach is not limited to the tenant's own brand (section 9).
+
 Another service, email inspection, was built in mid-2026 and is not merged. The rest of this document describes the platform and the archive service as they run today.
 
 ---
@@ -35,6 +37,7 @@ Another service, email inspection, was built in mid-2026 and is not merged. The 
                          │                                      │
   Zendesk trigger ──────▶│  POST /v1/tickets/update (HMAC)      │──┐
   Web form backend ─────▶│  POST /v1/tickets/create (X-Api-Key) │  │ Zendesk API
+  Outside system ───────▶│  POST /v1/users/update  (X-Api-Key)  │  │
                          │                                      │◀─┘ (OAuth token)
   Operator ─────────────▶│  GET  /v1/audit        (Bearer)      │
   Load balancer ────────▶│  GET  /v1/health       (none)        │
@@ -96,6 +99,11 @@ src/
     handler.ts              /v1/tickets/create: verify API key + Idempotency-Key, restrict fields, create via the Zendesk API
     oauthClient.ts          Zendesk OAuth token fetch + its own per-tenant cache (separate client from ticketUpdate's)
     types.ts                The Zendesk OAuth token response, request shape
+
+  services/userUpdate/      The user-update capability. Independent of every other service.
+    handler.ts              /v1/users/update: verify API key, find the user by id or email, require an end user, update via the Zendesk API
+    oauthClient.ts          Zendesk OAuth token fetch + its own per-tenant cache (scope users:read users:write)
+    types.ts                The Zendesk OAuth token response, request and result shapes
 ```
 
 The rule that keeps this honest: `platform/` never imports from `services/`, and services do not import each other. `services/ticketUpdate/` was added without touching the platform beyond one optional field on `TenantConfig`; it duplicates the twenty lines of signature verification rather than reaching into the archive service for them. `services/ticketCreate/` likewise keeps its own copy of the OAuth token client — it uses a different OAuth client, and a shared per-brand cache would let the two services' tokens overwrite each other.
@@ -141,6 +149,17 @@ Like ticket update, it resolves the tenant from `ticket.brand_id` itself. Then:
 
 Responses: 201 with `{ success, ticket_id, brand_id, dropped_fields }`; 409 if Zendesk reports the key was already used with a different body; 502 for any other Zendesk error; 500 if the call itself fails (e.g. a timeout after sending). Creating twice is not harmless the way updating twice is, so the idempotency key is what makes a 5xx safe here: the caller retries with the same key, and within two hours Zendesk returns the original ticket instead of creating another. Zendesk's validation messages can repeat submitted values, so only its error code and the names of the offending fields are logged, never the messages.
 
+**`/v1/users/update`** (a system outside Zendesk, user-update service)
+Like ticket create, it resolves the tenant from `user.brand_id` itself. Then:
+1. Check `X-Api-Key` against the tenant's `services.userUpdate.apiKey` (SHA-256, constant-time compare) — 401 on mismatch.
+2. Require exactly one of `user.id` (a positive integer or digit string) or `user.email` — 400 otherwise. Neither is sent to Zendesk as a change.
+3. Prepare the fields: drop `role`, `custom_role_id`, `organization_id`, `organization`, `suspended`, `verified`, `external_id`, `identities`, `moderator`, `ticket_restriction`, `agent_brand_ids`, `default_group_id`, `only_private_comments`, `signature` and `shared_phone_number` — everything that changes who the user is or what they can do. The rest passes through. Nothing left to send is a 400.
+4. Find the user with the tenant's OAuth token: by id, `GET users/{id}.json`; by email, `GET users/search.json?query=email:<email>`, keeping only results whose email equals the one sent, ignoring case, because a search can return near-matches. No match is 404, more than one is 409.
+5. Require `role` to be `end-user`. The OAuth client acts as an admin, so Zendesk itself would let an agent or admin be changed; this check is what stops it. A non-end user gets the same 404 as a missing one, so the endpoint never reveals agents.
+6. `PUT` the fields to `users/{id}.json`. Every Zendesk call retries once with a fresh token on 401.
+
+Responses: 200 with `{ success, user_id, brand_id, dropped_fields }`; 404, 409 as above; 422 if Zendesk refuses the change; 429 with Zendesk's `Retry-After` passed on when Zendesk rate-limits the call (it allows five updates of one user per minute); 502 for any other Zendesk error; 500 if a call itself fails. An update is safe to repeat, so a 5xx can be retried as is. A user created moments ago — for instance by `/v1/tickets/create` — took about six seconds to appear in the email search on the test account, so a 404 for a brand-new user is worth one retry, or the caller can use the id. Emails, names and phone numbers are never logged.
+
 ---
 
 ## 5. Case numbers and the failure rules
@@ -179,6 +198,8 @@ services.ticketUpdate (optional):
   webhookSecret, oauth: { clientId, clientSecret }
 services.ticketCreate (optional):
   apiKey, oauth: { clientId, clientSecret }
+services.userUpdate (optional):
+  apiKey, oauth: { clientId, clientSecret }
 ```
 
 The service sections are optional and independent. `services.ticketUpdate` is built only when all three of its environment variables are set: unset means the tenant does not use the service and `/v1/tickets/update` returns a neutral 400 for its brand, so a service no tenant has provisioned cannot stop the container — and with it archiving — from booting. Set partly, it still fails at boot, naming the missing variable.
@@ -189,12 +210,13 @@ Tenants are declared in `src/tenants.config.ts` with every secret read from an e
 - a Zendesk subdomain containing anything but letters, digits and hyphens,
 - an archive `baseUrl` that is not HTTPS or that points at a private or loopback address,
 - a secret shorter than 32 characters or made of one repeated character,
-- two tenants sharing a Málaskrá key (**only when loaded from JSON; the production path in `src/index.ts` bypasses this check**, so uniqueness is an operational rule until the guard moves into the store constructor),
+- a user-update key equal to the same tenant's ticket-create key (they are separate so either can be revoked alone),
+- two tenants sharing a Málaskrá, TR or user-update key (**only when loaded from JSON; the production path in `src/index.ts` bypasses this check**, so uniqueness is an operational rule until the guard moves into the store constructor),
 - a field ID that is not a positive integer.
 
 The Zendesk `email`, `apiToken` and `webhookSecret` are required only for a tenant with `services.archive`: the archive service's Zendesk client and webhook signature check are the only things that use them. A tenant without archive needs just the subdomain, and if it does set either secret anyway, the strength rule above still applies.
 
-A request for one tenant can only ever read that tenant's Zendesk and write to that tenant's archive. There is no cross-tenant code path.
+A request for one tenant can only ever read that tenant's Zendesk and write to that tenant's archive. The one exception is deliberate: users belong to the Zendesk account rather than to a brand, so `/v1/users/update` can change any end user on the tenant's account, including one another institution on the same account also deals with (section 9).
 
 ---
 
@@ -240,6 +262,10 @@ Entries hold ticket ID, brand, outcome, case number and source, duration, PDF si
 | Request to create a ticket is really from the tenant's own system | Per-tenant API key (`services.ticketCreate.apiKey`), SHA-256 then constant-time compare |
 | A created ticket stays in its own brand and isn't attached to other institutions' people | Brand forced to the tenant's own; assignee, requester, submitter, organization and comment-author IDs dropped. `group_id` and `ticket_form_id` are not restricted — they are passed as the caller sends them |
 | A retried create does not duplicate the ticket | `Idempotency-Key` required and passed to Zendesk |
+| Request to update a user is really from the tenant's own system | Its own per-tenant API key (`services.userUpdate.apiKey`), SHA-256 then constant-time compare; must differ from the ticket-create key |
+| Agents and admins cannot be changed through the gateway | Only users whose `role` is `end-user` are updated; others get the same 404 as a missing user |
+| An updated user cannot be given new powers or identities | `role`, `custom_role_id`, organisation, suspension, verification, `external_id`, identities and the other agent-only fields are always dropped; `email` is only a lookup key |
+| **Not enforced: which end users a tenant may update** | **Deliberate.** Users are account-wide, and the tenants on one account share them. Any tenant with a user-update key can update any end user on its account, including citizens other institutions on that account deal with. Only tenants trusted with that reach should be given the key. |
 | Ticket belongs to this tenant | Brand cross-check, 403 on mismatch, 403 if brand absent |
 | Outbound to archive only where configured | HTTPS only, private ranges blocked, at config validation |
 | Outbound to Zendesk only | Attachment URLs must be on `zendesk.com` or `zdassets.com` |
@@ -272,7 +298,7 @@ In priority order.
 
 ## 12. Tests
 
-24 files, 509 tests, `npm test`. Highlights:
+30 files, 694 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
@@ -280,5 +306,6 @@ In priority order.
 - `tests/tenants.config.test.ts` checks the real tenant list loads with placeholder secrets.
 - `tests/ticketUpdate.test.ts` covers the ticket-update route: signature and freshness rejection, the OAuth token cache, and the 401 retry.
 - `tests/ticketCreate.test.ts` covers the ticket-create route: API key and Idempotency-Key checks, the restricted fields, the 401 retry, the 409 and 502 mappings, and that no submitted values reach the logs.
+- `tests/userUpdate.test.ts` covers the user-update route: the key and identifier checks, lookup by id and by email (exact, case-insensitive matches only; 404, 409), that agents and admins are never updated, the dropped fields, the 401 retries, the 422, 429 (with `Retry-After`) and 502 mappings, and that no email, name or phone number reaches the logs.
 
 CI runs tests on Node 20 and 22 on every PR, plus CodeQL.
