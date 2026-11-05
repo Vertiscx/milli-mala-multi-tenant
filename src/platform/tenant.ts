@@ -137,7 +137,8 @@ export async function resolveTenantConfig(
  *
  * Core identity + Zendesk subdomain are always required. The archive
  * section (services.archive) is validated only when present, and brings
- * the Zendesk email/apiToken/webhookSecret requirement with it — a tenant
+ * the Zendesk credential (email + apiToken, or oauth) and webhookSecret
+ * requirement with it — a tenant
  * with no archive service configured is otherwise valid without them.
  */
 export function validateTenantConfig(config: TenantConfig): void {
@@ -219,10 +220,21 @@ export function validateArchiveConfig(
 ): void {
   const missing: string[] = []
 
-  // Zendesk credentials — the archive service's Basic-auth client and its
-  // webhook signature check need them; no other service does.
-  if (!zendesk?.email) missing.push('zendesk.email')
-  if (!zendesk?.apiToken) missing.push('zendesk.apiToken')
+  // Zendesk credentials — the archive service's Zendesk client and its
+  // webhook signature check need them; no other service does. The client
+  // signs in with EITHER email + apiToken (Basic) OR oauth, never both.
+  if (zendesk?.oauth) {
+    if ((zendesk.email ?? zendesk.apiToken) !== undefined) {
+      throw new Error(
+        `Invalid tenant config for "${label}": zendesk.oauth and zendesk.email/apiToken are both set — use one`
+      )
+    }
+    if (!zendesk.oauth.clientId) missing.push('zendesk.oauth.clientId')
+    if (!zendesk.oauth.clientSecret) missing.push('zendesk.oauth.clientSecret')
+  } else {
+    if (!zendesk?.email) missing.push('zendesk.email')
+    if (!zendesk?.apiToken) missing.push('zendesk.apiToken')
+  }
   if (!zendesk?.webhookSecret) missing.push('zendesk.webhookSecret')
 
   // Malaskra section
@@ -248,6 +260,9 @@ export function validateArchiveConfig(
   }
 
   // Secret strength validation (SYN-MUT-28-1)
+  if (zendesk.oauth?.clientSecret) {
+    validateSecretStrength(zendesk.oauth.clientSecret, 'zendesk.oauth.clientSecret', label, MIN_SECRET_LENGTH)
+  }
   if (archive.malaskra?.apiKey) {
     validateSecretStrength(archive.malaskra.apiKey, 'malaskra.apiKey', label, MIN_SECRET_LENGTH)
   }
