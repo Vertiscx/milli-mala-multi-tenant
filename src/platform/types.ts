@@ -109,14 +109,22 @@ export interface ArchiveServiceConfig {
   pdf: PdfConfig
 }
 
-// email, apiToken and webhookSecret are used only by the archive service
-// (Basic-auth Zendesk client, archive webhook signature), so they are
+// email, apiToken, oauth and webhookSecret are used only by the archive
+// service (its Zendesk client and webhook signature check), so they are
 // required only for tenants with services.archive — see validateArchiveConfig.
+// The archive's Zendesk client signs in with EITHER email + apiToken (Basic)
+// OR oauth (Client Credentials grant), never both.
 export interface ZendeskConfig {
   subdomain: string
   email?: string
   apiToken?: string
+  oauth?: ZendeskOAuthClientConfig
   webhookSecret?: string
+}
+
+export interface ZendeskOAuthClientConfig {
+  clientId: string
+  clientSecret: string
 }
 
 export interface EndpointConfig {
