@@ -14,7 +14,7 @@ Read [README.md](README.md) first for the short version and local setup. Read [O
 
 **The archive service** is the integration in production. An institution handles citizen correspondence in Zendesk and is obliged to file it in its official archive. The service receives a signed request naming a ticket, fetches the ticket from Zendesk, renders it to PDF, and uploads the PDF and any attachments into the institution's archive case. If the ticket has no case yet, it can ask the archive to create one and write the new case number back onto the ticket. Zendesk never sees archive credentials. Archive systems never see Zendesk credentials.
 
-Two archive products are supported: **OneSystems** and **GoPro**. Eight institutions are configured today; seven of them use archiving.
+Two archive products are supported: **OneSystems** and **GoPro**. Eleven institutions are configured today, and all of them use archiving.
 
 **The ticket-update service** is the platform's second service. It lets a Zendesk trigger update a ticket through the Zendesk API using a per-tenant OAuth client (Client Credentials grant) instead of a Basic-auth API token, which is the direction Zendesk is moving. The gateway makes the API call itself, so the access token never travels back through Zendesk's trigger machinery or its logs. It shares nothing with the archive service but the platform underneath it.
 
@@ -64,7 +64,8 @@ src/
     env.ts                  requireEnv / optionalNumberEnv — fail fast at boot
     config.ts               Instance settings: port, log level, audit secret
     tenant.ts               Tenant lookup + validation + SSRF and secret-strength guards
-    zendesk.ts              Zendesk REST client: read ticket, comments, users, attachments; write fields
+    zendesk.ts              Zendesk REST client: read ticket, comments, users, attachments; write fields.
+                            Signs in with an API token (Basic) or OAuth (own per-brand token cache)
     fileAuditStore.ts       Directory-backed audit store
     logger.ts               Structured JSON to stdout
     http/routes.ts          Route table type + matcher
@@ -202,7 +203,7 @@ Tenant shape (`src/platform/types.ts`):
 
 ```
 brand_id, name
-zendesk:   subdomain, email, apiToken, webhookSecret
+zendesk:   subdomain, webhookSecret, and email + apiToken OR oauth: { clientId, clientSecret }
 services.archive:
   endpoints:  { <name>: { type, baseUrl, appKey | username+password, field IDs } }
   malaskra:   { apiKey }
@@ -227,7 +228,13 @@ Tenants are declared in `src/tenants.config.ts` with every secret read from an e
 - two tenants sharing a Málaskrá, TR or user-update key (**only when loaded from JSON; the production path in `src/index.ts` bypasses this check**, so uniqueness is an operational rule until the guard moves into the store constructor),
 - a field ID that is not a positive integer.
 
-The Zendesk `email`, `apiToken` and `webhookSecret` are required only for a tenant with `services.archive`: the archive service's Zendesk client and webhook signature check are the only things that use them. A tenant without archive needs just the subdomain, and if it does set either secret anyway, the strength rule above still applies.
+The Zendesk credentials and `webhookSecret` are required only for a tenant with `services.archive`: the archive service's Zendesk client and webhook signature check are the only things that use them. A tenant without archive needs just the subdomain, and if it does set either secret anyway, the strength rule above still applies.
+
+The archive's Zendesk client signs in one of two ways, chosen in the tenant's block: `email` + `apiToken` (Basic), or `oauth` (a Confidential OAuth client, Client Credentials grant). Zendesk no longer issues new API tokens, so a new archive tenant uses `oauth`; Þjóðskrá is the first. A tenant with both is rejected at boot, so it is always clear which one is in use. With OAuth:
+
+- The token is requested with the scopes `tickets:read tickets:write users:read`, the least the archive needs: reading the ticket, comments and comment authors, stamping fields and posting the result note. It is cached per brand in `platform/zendesk.ts`, separately from the other services' caches, and a 401 gets one retry with a fresh token.
+- **Attachments are downloaded without any `Authorization` header.** Zendesk answers an OAuth token with 403 on attachment URLs, while the URL itself works without auth as long as the account setting "Allow secure downloads" is off. If that setting is ever turned on, attachment downloads fail; they are listed in the result note and audit entry as with any other failed download, and the PDF is still filed.
+- The result note's author is the user the OAuth client acts as, not an API-token user.
 
 A request for one tenant can only ever read that tenant's Zendesk and write to that tenant's archive. The one exception is deliberate: users belong to the Zendesk account rather than to a brand, so `/v1/users/update` can change any end user on the tenant's account, including one another institution on the same account also deals with (section 9).
 
@@ -285,6 +292,7 @@ Entries hold ticket ID, brand, outcome, case number and source, duration, PDF si
 | Ticket belongs to this tenant | Brand cross-check, 403 on mismatch, 403 if brand absent |
 | Outbound to archive only where configured | HTTPS only, private ranges blocked, at config validation |
 | Outbound to Zendesk only | Attachment URLs must be on `zendesk.com` or `zdassets.com` |
+| An archive OAuth token can do no more than the archive needs | Requested with `tickets:read tickets:write users:read` only; never sent to attachment URLs |
 | No secret leakage in responses | Fixed error strings; upstream bodies are capped before logging |
 | No PII in audit | Metadata only |
 | Weak or placeholder secrets | Rejected at boot |
@@ -314,7 +322,7 @@ In priority order.
 
 ## 12. Tests
 
-31 files, 750 tests, `npm test`. Highlights:
+32 files, 785 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
@@ -323,6 +331,7 @@ In priority order.
 - `tests/ticketUpdate.test.ts` covers the ticket-update route: signature and freshness rejection, the OAuth token cache, and the 401 retry.
 - `tests/ticketCreate.test.ts` covers the ticket-create route: API key and Idempotency-Key checks, the restricted fields, the 401 retry, the 409, 422 and 502 mappings, the `comment.uploads` check, and that no submitted values reach the logs.
 - `tests/ticketCreate.uploads.test.ts` covers the upload route: every check runs before the body is read, the bytes reach Zendesk unchanged, the 20 MB cap, the token chaining, the error mappings, and that the filename is never logged.
+- `tests/zendesk.oauth.test.ts` covers the archive's Zendesk client in OAuth mode: the token request and scope, the per-brand cache and its expiry, the single 401 retry for reads and writes, attachment downloads without auth, the `createZendeskClient` choice between OAuth and Basic, and the fetch step end to end for an OAuth tenant.
 - `tests/userUpdate.test.ts` covers the user-update route: the key and identifier checks, lookup by id and by email (exact, case-insensitive matches only; 404, 409), that agents and admins are never updated, the dropped fields, the 401 retries, the 422, 429 (with `Retry-After`) and 502 mappings, and that no email, name or phone number reaches the logs.
 
 CI runs tests on Node 20 and 22 on every PR, plus CodeQL.
