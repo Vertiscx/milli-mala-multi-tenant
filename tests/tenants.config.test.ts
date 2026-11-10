@@ -185,11 +185,13 @@ describe('loadTenants', () => {
     expect(samgongustofa.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
   })
 
-  it('includes internal notes in the Samgöngustofa PDF — the only tenant that does', () => {
+  it('includes internal notes in the PDF only for Samgöngustofa and Embætti landlæknis', () => {
     const tenants = loadTenants(validEnv)
-    const samgongustofa = tenants.find(t => t.name === 'Samgöngustofa')!
-    expect(samgongustofa.services.archive!.pdf.includeInternalNotes).toBe(true)
-    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa')) {
+    const included = ['Samgöngustofa', 'Embætti landlæknis']
+    for (const name of included) {
+      expect(tenants.find(t => t.name === name)!.services.archive!.pdf.includeInternalNotes).toBe(true)
+    }
+    for (const other of tenants.filter(t => !included.includes(t.name))) {
       expect(other.services.archive!.pdf.includeInternalNotes).toBe(false)
     }
   })
@@ -282,7 +284,7 @@ describe('loadTenants', () => {
     const landlaeknir = tenants.find(t => t.brand_id === '38723008064914')!
     expect(landlaeknir.name).toBe('Embætti landlæknis')
     expect(landlaeknir.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
-    expect(landlaeknir.services.archive!.pdf.includeInternalNotes).toBe(false)
+    expect(landlaeknir.services.archive!.pdf.includeInternalNotes).toBe(true)
     expect(landlaeknir.services.ticketUpdate).toBeUndefined()
   })
 
