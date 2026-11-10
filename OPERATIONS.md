@@ -152,8 +152,14 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 2. **API key:** generate one with `openssl rand -hex 24`. It must be unique to this tenant.
 3. **Code:** in the tenant's block in `src/tenants.config.ts`, add `...ticketCreateSection('<T>', env)` to its `services`. `group_id` and `ticket_form_id` are not restricted: whatever the caller sends is passed to Zendesk. Add the three variable names to `.env.example`. If the tenant is new and has no archive, its block needs only `zendesk.subdomain` besides this section.
 4. **Secrets:** send the three values to DevOps as in section 5 step 4, and the API key also to the team running the caller. Confirm they are in Parameter Store before deploying.
-5. **The caller** sends `X-Api-Key` and its own submission ID in `Idempotency-Key` with every request, and escapes citizens' input before putting it in `html_body`. A retry with the same `Idempotency-Key` within two hours returns the original ticket instead of creating another.
-6. **Deploy**, check that `POST /v1/tickets/create` answers 400 or 401 (not 404), then make one real submission: confirm the ticket lands in the right brand and group, a requester new to Zendesk is created, and re-sending the same `Idempotency-Key` does not create a second ticket.
+5. **The caller** sends `X-Api-Key` and its own submission ID in `Idempotency-Key` with every request, and escapes citizens' input before putting it in `html_body`. A retry with the same `Idempotency-Key` within two hours returns the original ticket instead of creating another. A `422` means Zendesk refused the ticket and must not be retried unchanged; a `502` or `500` is retried with the same key and body.
+6. **Attachments, if the form has them.** Before creating the ticket, the caller uploads each file to `POST /v1/tickets/uploads?brand_id=<brand>&filename=<url-encoded name>` with the same `X-Api-Key`, the file's MIME type as `Content-Type`, and the raw file bytes as the body. Each upload returns `{ success, token }`; the tokens (at most 10) go in `comment.uploads` on the create call. The rules the caller must follow:
+   - Files are capped at **20 MB**; check the size in the form as well.
+   - A token is valid for **60 minutes**, so upload when the citizen submits, right before the create call.
+   - A failed upload is simply repeated. A failed create is retried with the **same** `Idempotency-Key` **and the same tokens** — never upload again for a retry, or Zendesk sees a different request under the same key and the gateway returns 409. Within two hours this is safe even after the tokens expire.
+   - If no create has succeeded and the tokens are over 60 minutes old, start again: upload again and create with a **new** `Idempotency-Key`.
+7. **Ingress:** the load balancer in front of the service must accept request bodies of at least 20 MB on `/v1/tickets/uploads`. Confirm this with DevOps before the first deploy that carries uploads.
+8. **Deploy**, check that `POST /v1/tickets/create` and `POST /v1/tickets/uploads` answer 400 or 401 (not 404), then make one real submission: confirm the ticket lands in the right brand and group, a requester new to Zendesk is created, any uploaded file is attached to the first comment, and re-sending the same `Idempotency-Key` does not create a second ticket.
 
 ## 6. Rotating a secret
 
@@ -189,14 +195,16 @@ Start with the ticket. Every attempt leaves an internal note: a tick with the ca
 | Archive returns 404 on upload | Trailing slash on the base URL, or wrong path | Config. |
 | Archive auth fails | Expired or wrong credential | Test the archive API directly. |
 | Same ticket archived repeatedly | Trigger is not one-shot | Fix the trigger as in section 5. |
+| `413 File too large` on `/v1/tickets/uploads` for a file under 20 MB, or a 413 that is HTML rather than JSON | The load balancer's body-size limit is lower than the gateway's | Ask DevOps to raise it to at least 20 MB (section 5b). |
+| `422 Ticket rejected by Zendesk validation` on `/v1/tickets/create` | An invalid field, or upload tokens older than 60 minutes | Container log for that `brand_id` shows Zendesk's error code and field names. For expired tokens, the caller uploads again and uses a new `Idempotency-Key`. |
 | Red "Build and Deploy" on a merged PR | Expected for fork PRs | Nothing was deployed. Run the workflow manually. |
 
 ## 9. Network
 
 Inbound: HTTPS from Zendesk and from the Málaskrá app in agents' browsers.
 
-Outbound, and nothing else: `*.zendesk.com` and `*.zdassets.com` for the Zendesk API and attachment downloads, and each tenant's archive URL. Attachment downloads are refused for any other host. Archive URLs are refused if they resolve to private or loopback ranges.
+Outbound, and nothing else: `*.zendesk.com` and `*.zdassets.com` for the Zendesk API, attachment downloads and ticket-create uploads, and each tenant's archive URL. Attachment downloads are refused for any other host. Archive URLs are refused if they resolve to private or loopback ranges.
 
 ## 10. Data handling
 
-The service is stateless. Ticket content, comments, attachments and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Internal notes are excluded from the PDF unless the tenant opts in.
+The service is stateless. Ticket content, comments, attachments, uploaded files and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Internal notes are excluded from the PDF unless the tenant opts in.
