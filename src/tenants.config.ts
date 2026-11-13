@@ -570,7 +570,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           pdf: {
             companyName: 'Embætti landlæknis',
             locale: 'is-IS',
-            includeInternalNotes: true,
+            includeInternalNotes: false,
           },
         },
       },
