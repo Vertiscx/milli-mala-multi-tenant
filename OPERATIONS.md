@@ -98,6 +98,7 @@ Two layers.
 | `<T>_ZENDESK_WEBHOOK_SECRET` | archive tenants | Shown once by Zendesk when the webhook is created. 32+ characters. |
 | `<T>_ONESYSTEMS_BASE_URL` and `<T>_ONESYSTEMS_APP_KEY` | OneSystems tenants | HTTPS, public hostname, **no trailing slash**. |
 | `<T>_GOPRO_BASE_URL`, `<T>_GOPRO_USERNAME`, `<T>_GOPRO_PASSWORD` | GoPro tenants | Password 16+ characters. |
+| `<T>_WORKPOINT_BASE_URL`, `<T>_WORKPOINT_APP_KEY`, `<T>_WORKPOINT_CLIENT_ID` | WorkPoint tenants | Issued by Spektra per institution. Dev `https://zendesk-wp-dev.spektra.is`, prod `https://zendesk-wp.spektra.is`, **no trailing slash**. App key 32+ characters. |
 | `<T>_MALASKRA_API_KEY` | yes | Generate fresh: `openssl rand -hex 24`. Must be unique across tenants. The same value goes into the Málaskrá app's secure setting for that brand. |
 | `<T>_TICKET_UPDATE_WEBHOOK_SECRET` | opt-in | Shown once by Zendesk when that webhook is created. 32+ characters. **Not the same value as `<T>_ZENDESK_WEBHOOK_SECRET`** — Zendesk generates one signing secret per webhook target and never lets it be chosen. |
 | `<T>_ZENDESK_OAUTH_CLIENT_ID`, `<T>_ZENDESK_OAUTH_CLIENT_SECRET` | opt-in | Credentials of a Zendesk OAuth client (Client Credentials grant) on that tenant's account, scoped `tickets:write`. Secret 32+ characters. |

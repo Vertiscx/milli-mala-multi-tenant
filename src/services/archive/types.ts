@@ -20,6 +20,7 @@ export interface CreateCaseParams {
   externalId?: string
   caseName?: string
   currentUser?: string
+  clientName?: string     // WorkPoint only — the ticket requester's name
 }
 
 export interface CreateCaseResult {

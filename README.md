@@ -13,7 +13,7 @@ The shared part is the **platform**: HTTP handling, signature and key verificati
 | | |
 |---|---|
 | Services | Archive and ticket update (production), ticket create, user update. Others are added under `src/services/` without touching the platform. |
-| Archive backends | OneSystems, GoPro |
+| Archive backends | OneSystems, GoPro, WorkPoint |
 | Tenants | One per Zendesk brand. Eleven configured. |
 | Production | One Node.js container on AWS ECS, run by Digital Iceland |
 | Runtime dependency | jsPDF, and nothing else |

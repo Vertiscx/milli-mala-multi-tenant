@@ -20,6 +20,7 @@ export interface TicketInfo {
   failedAttachments: { filename: string; reason: string }[]
   userMap: Record<number, string>
   solvingAgentEmail: string
+  requesterName: string
 }
 
 /**
@@ -57,7 +58,8 @@ export async function fetchTicketInfo(
   const failedAttachments = attachments.failed ?? []
 
   // 2. Resolve all comment author names in one batch
-  const authorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))]
+  // The requester rides the same batch (WorkPoint needs their name as clientName).
+  const authorIds = [...new Set([...comments.map(c => c.author_id), ticket.requester_id].filter((id): id is number => Boolean(id)))]
   let authors: ZendeskUser[] = []
   try {
     authors = authorIds.length > 0 ? await zendesk.getUsersMany(authorIds) : []
@@ -76,5 +78,7 @@ export async function fetchTicketInfo(
     }
   }
 
-  return { ok: true, info: { zendesk, ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail } }
+  const requesterName = authors.find(u => u.id === ticket.requester_id)?.name || ''
+
+  return { ok: true, info: { zendesk, ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail, requesterName } }
 }

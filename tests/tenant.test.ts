@@ -194,6 +194,38 @@ describe('validateTenantConfig', () => {
     }))).not.toThrow()
   })
 
+  it('should validate workpoint endpoint with appKey and clientId', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        workpoint: { type: 'workpoint', baseUrl: 'https://wp.test', appKey: 'wK8xR3mT9nQ2vL5jY7cB4fH1gD0eA6sZ', clientId: 'hi' }
+      }
+    }))).not.toThrow()
+  })
+
+  it('should throw for workpoint endpoint missing clientId', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        workpoint: { type: 'workpoint', baseUrl: 'https://wp.test', appKey: 'wK8xR3mT9nQ2vL5jY7cB4fH1gD0eA6sZ' }
+      }
+    }))).toThrow('clientId')
+  })
+
+  it('should throw for workpoint endpoint missing appKey', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        workpoint: { type: 'workpoint', baseUrl: 'https://wp.test', clientId: 'hi' }
+      }
+    }))).toThrow('appKey')
+  })
+
+  it('should reject a weak workpoint appKey', () => {
+    expect(() => validateTenantConfig(makeValidTenant({
+      endpoints: {
+        workpoint: { type: 'workpoint', baseUrl: 'https://wp.test', appKey: 'short', clientId: 'hi' }
+      }
+    }))).toThrow()
+  })
+
   // ─── Subdomain validation ───────────────────────────────────────────
 
   it('should reject subdomain with dots (URL injection)', () => {

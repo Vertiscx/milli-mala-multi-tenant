@@ -5,6 +5,7 @@
 
 import { OneSystemsClient } from './onesystems.js'
 import { GoProClient } from './gopro.js'
+import { WorkpointClient } from './workpoint.js'
 import type { EndpointConfig } from '../../platform/types.js'
 import type { DocClient } from './types.js'
 
@@ -19,6 +20,15 @@ export function createDocClient(ep: EndpointConfig, user?: string): DocClient {
     }
     return new GoProClient(ep.baseUrl, ep.username, ep.password, {
       tokenTtlMs: ep.tokenTtlMs
+    })
+  }
+  if (ep.type === 'workpoint') {
+    if (!ep.appKey || !ep.clientId) {
+      throw new Error('WorkPoint endpoint missing appKey or clientId')
+    }
+    return new WorkpointClient(ep.baseUrl, ep.appKey, ep.clientId, {
+      tokenTtlMs: ep.tokenTtlMs,
+      user: user || 'Zendesk'
     })
   }
   if (!ep.appKey) {

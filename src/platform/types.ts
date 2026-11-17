@@ -128,9 +128,10 @@ export interface ZendeskOAuthClientConfig {
 }
 
 export interface EndpointConfig {
-  type: 'onesystems' | 'gopro'
+  type: 'onesystems' | 'gopro' | 'workpoint'
   baseUrl: string
-  appKey?: string           // OneSystems
+  appKey?: string           // OneSystems; WorkPoint (login key)
+  clientId?: string         // WorkPoint — per-institution client ID in every API path
   username?: string         // GoPro
   password?: string         // GoPro
   caseNumberFieldId?: number | null
@@ -161,6 +162,7 @@ export interface ZendeskTicket {
   updated_at?: string
   custom_fields?: ZendeskCustomField[]
   brand_id?: number
+  requester_id?: number
 }
 
 export interface ZendeskCustomField {

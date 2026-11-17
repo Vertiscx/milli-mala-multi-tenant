@@ -155,13 +155,14 @@ export async function runWebhookCreateFlow(args: {
   docClient: DocClient
   clientCanCreate: boolean
   solvingAgentEmail: string
+  requesterName?: string
   auditStore?: AuditStore
   latch: CreateFlowLatch
 }): Promise<HandlerResult | undefined> {
   const {
     tenantConfig, ep, docEndpoint, ticketId, startTime, ticket, comments,
     attachments, failedAttachments, pdfBuffer, zendesk, docClient,
-    clientCanCreate, solvingAgentEmail, auditStore, latch
+    clientCanCreate, solvingAgentEmail, requesterName, auditStore, latch
   } = args
   const brandId = tenantConfig.brand_id
 
@@ -199,7 +200,8 @@ export async function runWebhookCreateFlow(args: {
     kennitala: createInputs.kennitala,
     caseName: ticket.subject,
     externalId: `ticket_${ticketId}`,
-    currentUser: solvingAgentEmail
+    currentUser: solvingAgentEmail,
+    clientName: requesterName
   })
   // LATCH the minted number the instant createCase resolves — the
   // outer failure-finalize catch reports it via resolvedCaseNumber.

@@ -99,7 +99,7 @@ export async function documentTicket(
     const fetched = await fetchTicketInfo(tenantConfig, ticketId)
     if (!fetched.ok) return fetched.result
     ;({ ticket, comments, attachments, failedAttachments } = fetched.info)
-    const { userMap, solvingAgentEmail, zendesk } = fetched.info
+    const { userMap, solvingAgentEmail, requesterName, zendesk } = fetched.info
 
     // 3. Generate PDF
     pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
@@ -124,7 +124,7 @@ export async function documentTicket(
     const createResult = await runWebhookCreateFlow({
       tenantConfig, ep, docEndpoint, ticketId, startTime,
       ticket, comments, attachments, failedAttachments, pdfBuffer,
-      zendesk, docClient, clientCanCreate, solvingAgentEmail, auditStore, latch
+      zendesk, docClient, clientCanCreate, solvingAgentEmail, requesterName, auditStore, latch
     })
     // Keep the outer-catch state in sync with the latch regardless of
     // whether the flow returned or threw.

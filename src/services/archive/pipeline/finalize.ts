@@ -76,7 +76,8 @@ export async function finalizeWebhookFailure(args: {
               ...ep,
               username: ep.username || 'unused',
               password: ep.password || 'unused',
-              appKey: ep.appKey || 'unused'
+              appKey: ep.appKey || 'unused',
+              clientId: ep.clientId || 'unused'
             },
             ''
           ) as Partial<OneSystemsClient>).createCase === 'function'

@@ -14,7 +14,7 @@ Read [README.md](README.md) first for the short version and local setup. Read [O
 
 **The archive service** is the integration in production. An institution handles citizen correspondence in Zendesk and is obliged to file it in its official archive. The service receives a signed request naming a ticket, fetches the ticket from Zendesk, renders it to PDF, and uploads the PDF and any attachments into the institution's archive case. If the ticket has no case yet, it can ask the archive to create one and write the new case number back onto the ticket. Zendesk never sees archive credentials. Archive systems never see Zendesk credentials.
 
-Two archive products are supported: **OneSystems** and **GoPro**. Eleven institutions are configured today, and all of them use archiving.
+Three archive products are supported: **OneSystems**, **GoPro** and **WorkPoint** (through Spektra's Zendesk-to-WorkPoint API). Eleven institutions are configured today, and all of them use archiving.
 
 **The ticket-update service** is the platform's second service. It lets a Zendesk trigger update a ticket through the Zendesk API using a per-tenant OAuth client (Client Credentials grant) instead of a Basic-auth API token, which is the direction Zendesk is moving. The gateway makes the API call itself, so the access token never travels back through Zendesk's trigger machinery or its logs. It shares nothing with the archive service but the platform underneath it.
 
@@ -32,8 +32,8 @@ Another service, email inspection, was built in mid-2026 and is not merged. The 
                          ┌──────────────────────────────────────┐
   Zendesk trigger ──────▶│  POST /v1/webhook      (HMAC signed) │
                          │                                      │      OneSystems
-  Málaskrá app ─────────▶│  POST /v1/cases        (X-Api-Key)   │────▶    or
-  (agent sidebar)        │  POST /v1/attachments  (X-Api-Key)   │       GoPro
+  Málaskrá app ─────────▶│  POST /v1/cases        (X-Api-Key)   │────▶  GoPro or
+  (agent sidebar)        │  POST /v1/attachments  (X-Api-Key)   │      WorkPoint
                          │                                      │
   Zendesk trigger ──────▶│  POST /v1/tickets/update (HMAC)      │──┐
   Web form backend ─┬───▶│  POST /v1/tickets/create (X-Api-Key) │  │ Zendesk API
@@ -81,7 +81,7 @@ src/
       fetch.ts                get ticket + comments + users + attachments; brand cross-check
       render.ts               PDF
       caseNumber.ts           read the case-number field, or fall back to ZD-<ticket>
-      createFlow.ts           create a case when the field is empty (OneSystems only)
+      createFlow.ts           create a case when the field is empty (OneSystems, WorkPoint)
       deliver.ts              upload PDF + attachments to the archive
       finalize.ts             failure bookkeeping
       audit.ts                audit entry writer
@@ -89,6 +89,7 @@ src/
     docClient.ts            THE adapter switch. Only place that branches on endpoint type.
     onesystems.ts           OneSystems adapter (upload + createCase)
     gopro.ts                GoPro adapter (upload only)
+    workpoint.ts            WorkPoint adapter (upload + createCase; requester name sent as clientName)
     pdf.ts                  jsPDF rendering
     types.ts                Archive-only types (DocClient, DocumentationOutcome, ...)
 
@@ -184,8 +185,8 @@ This is the part of the system that carries the most domain knowledge. The rules
 |---|---|
 | Ticket's case-number field is populated | Use it. Validate length and characters. Upload. |
 | Field is empty, backend is GoPro | Use `ZD-<ticket id>` as the case reference. GoPro cannot create cases. |
-| Field is empty, backend is OneSystems, template and kennitala fields present | **Create** a case in OneSystems, **stamp** the new number on the ticket, **then** upload. |
-| Field is empty, backend is OneSystems, template or kennitala missing | **422**, nothing created, nothing uploaded. Internal note explains which field is missing. |
+| Field is empty, backend is OneSystems or WorkPoint, template and kennitala fields present | **Create** a case in the archive, **stamp** the new number on the ticket, **then** upload. |
+| Field is empty, backend is OneSystems or WorkPoint, template or kennitala missing | **422**, nothing created, nothing uploaded. Internal note explains which field is missing. |
 | Case was created but stamp or upload then failed | **207** with the created case number in the body and the audit entry. Never a 5xx. |
 | Any failure before a case is created | **500**. Zendesk retries. Safe because nothing was minted. |
 

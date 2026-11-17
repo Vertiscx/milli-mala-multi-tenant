@@ -512,8 +512,11 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
   } else if (ep.type === 'gopro') {
     if (!ep.username) missing.push('username')
     if (!ep.password) missing.push('password')
+  } else if (ep.type === 'workpoint') {
+    if (!ep.appKey) missing.push('appKey')
+    if (!ep.clientId) missing.push('clientId')
   } else if (ep.type) {
-    throw new Error(`Endpoint "${name}": unknown type "${ep.type}". Must be "onesystems" or "gopro".`)
+    throw new Error(`Endpoint "${name}": unknown type "${ep.type}". Must be "onesystems", "gopro" or "workpoint".`)
   }
 
   if (missing.length > 0) {
@@ -521,7 +524,7 @@ function validateEndpoint(name: string, ep: EndpointConfig, tenantLabel: string 
   }
 
   // Endpoint secret strength validation (SYN-MUT-28-1)
-  if (ep.type === 'onesystems' && ep.appKey) {
+  if ((ep.type === 'onesystems' || ep.type === 'workpoint') && ep.appKey) {
     validateSecretStrength(ep.appKey, `endpoints.${name}.appKey`, tenantLabel, MIN_SECRET_LENGTH)
   }
   if (ep.type === 'gopro' && ep.password) {
