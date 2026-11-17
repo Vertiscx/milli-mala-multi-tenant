@@ -441,14 +441,40 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
       },
     },
     {
-      // Ticket creation and user update — no archive, so no Zendesk
-      // email/apiToken/webhookSecret (those are archive-only).
+      // Archive (OneSystems), ticket creation and user update.
       brand_id: '30303665547154',
       name: 'Þjóðskrá',
       zendesk: {
         subdomain: requireEnv('THJODSKRA_ZENDESK_SUBDOMAIN', env),
+        // OAuth in place of email + API token: Zendesk no longer issues
+        // new API tokens. See OPERATIONS.md section 5d.
+        oauth: {
+          clientId: requireEnv('THJODSKRA_ARCHIVE_OAUTH_CLIENT_ID', env),
+          clientSecret: requireEnv('THJODSKRA_ARCHIVE_OAUTH_CLIENT_SECRET', env),
+        },
+        webhookSecret: requireEnv('THJODSKRA_ZENDESK_WEBHOOK_SECRET', env),
       },
       services: {
+        archive: {
+          endpoints: {
+            onesystems: {
+              type: 'onesystems',
+              baseUrl: requireEnv('THJODSKRA_ONESYSTEMS_BASE_URL', env),
+              appKey: requireEnv('THJODSKRA_ONESYSTEMS_APP_KEY', env),
+              templateFieldId: optionalNumberEnv('THJODSKRA_TEMPLATE_FIELD_ID', env),
+              kennitalaFieldId: optionalNumberEnv('THJODSKRA_KENNITALA_FIELD_ID', env),
+              // MD-02 invariant: the webhook create path refuses to mint
+              // without a case-number field to stamp (duplicate-mint guard).
+              caseNumberFieldId: optionalNumberEnv('THJODSKRA_CASE_NUMBER_FIELD_ID', env),
+            },
+          },
+          malaskra: { apiKey: requireEnv('THJODSKRA_MALASKRA_API_KEY', env) },
+          pdf: {
+            companyName: 'Þjóðskrá',
+            locale: 'is-IS',
+            includeInternalNotes: false,
+          },
+        },
         ...ticketCreateSection('THJODSKRA', env),
         ...userUpdateSection('THJODSKRA', env),
       },

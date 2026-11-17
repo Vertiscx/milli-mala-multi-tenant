@@ -92,8 +92,9 @@ Two layers.
 | Variable | Required | Notes |
 |---|---|---|
 | `<T>_ZENDESK_SUBDOMAIN` | yes | **Bare subdomain only**, for example `digitaliceland`. Not the hostname. A value with a dot fails validation and the tenant returns 400 on every request. |
-| `<T>_ZENDESK_EMAIL` | archive tenants | The API user. Needs ticket-write scope for the case-number stamp and the result note. |
-| `<T>_ZENDESK_API_TOKEN` | archive tenants | 32+ characters. Zendesk tokens are 40. |
+| `<T>_ZENDESK_EMAIL` | archive tenants on an API token | The API user. Needs ticket-write scope for the case-number stamp and the result note. |
+| `<T>_ZENDESK_API_TOKEN` | archive tenants on an API token | 32+ characters. Zendesk tokens are 40. |
+| `<T>_ARCHIVE_OAUTH_CLIENT_ID`, `<T>_ARCHIVE_OAUTH_CLIENT_SECRET` | archive tenants on OAuth | In place of the email and API token, which Zendesk no longer issues. A Confidential OAuth client used only for archiving, scoped `tickets:read`, `tickets:write` and `users:read`. Secret 32+ characters. Section 5d. |
 | `<T>_ZENDESK_WEBHOOK_SECRET` | archive tenants | Shown once by Zendesk when the webhook is created. 32+ characters. |
 | `<T>_ONESYSTEMS_BASE_URL` and `<T>_ONESYSTEMS_APP_KEY` | OneSystems tenants | HTTPS, public hostname, **no trailing slash**. |
 | `<T>_GOPRO_BASE_URL`, `<T>_GOPRO_USERNAME`, `<T>_GOPRO_PASSWORD` | GoPro tenants | Password 16+ characters. |
@@ -110,7 +111,7 @@ The full list with current tenants is [.env.example](.env.example).
 
 The three ticket-update variables are opt-in per tenant. All three unset means the tenant has no `services.ticketUpdate` section and `/v1/tickets/update` returns 400 for its brand — the container starts normally. **Some but not all three set is a boot failure** naming the missing variable, so a typo or a half-finished rollout is loud rather than silently leaving the service switched off. The three ticket-create variables and the three user-update variables work the same way.
 
-A tenant without the archive service (Þjóðskrá, for example) needs only `<T>_ZENDESK_SUBDOMAIN` plus the variables of the services it uses. `<T>_ZENDESK_SUBDOMAIN` itself is always required, so adding such a tenant still means provisioning it before deploying.
+A tenant without the archive service needs only `<T>_ZENDESK_SUBDOMAIN` plus the variables of the services it uses. `<T>_ZENDESK_SUBDOMAIN` itself is always required, so adding such a tenant still means provisioning it before deploying.
 
 Validation runs at boot. The container refuses to start on a missing required variable, a subdomain with invalid characters, a non-HTTPS or private-address archive URL, a short or repeated-character secret, or a non-integer field ID. The error names the variable.
 
@@ -154,8 +155,14 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 2. **API key:** generate one with `openssl rand -hex 24`. It must be unique to this tenant.
 3. **Code:** in the tenant's block in `src/tenants.config.ts`, add `...ticketCreateSection('<T>', env)` to its `services`. `group_id` and `ticket_form_id` are not restricted: whatever the caller sends is passed to Zendesk. Add the three variable names to `.env.example`. If the tenant is new and has no archive, its block needs only `zendesk.subdomain` besides this section.
 4. **Secrets:** send the three values to DevOps as in section 5 step 4, and the API key also to the team running the caller. Confirm they are in Parameter Store before deploying.
-5. **The caller** sends `X-Api-Key` and its own submission ID in `Idempotency-Key` with every request, and escapes citizens' input before putting it in `html_body`. A retry with the same `Idempotency-Key` within two hours returns the original ticket instead of creating another.
-6. **Deploy**, check that `POST /v1/tickets/create` answers 400 or 401 (not 404), then make one real submission: confirm the ticket lands in the right brand and group, a requester new to Zendesk is created, and re-sending the same `Idempotency-Key` does not create a second ticket.
+5. **The caller** sends `X-Api-Key` and its own submission ID in `Idempotency-Key` with every request, and escapes citizens' input before putting it in `html_body`. A retry with the same `Idempotency-Key` within two hours returns the original ticket instead of creating another. A `422` means Zendesk refused the ticket and must not be retried unchanged; a `502` or `500` is retried with the same key and body.
+6. **Attachments, if the form has them.** Before creating the ticket, the caller uploads each file to `POST /v1/tickets/uploads?brand_id=<brand>&filename=<url-encoded name>` with the same `X-Api-Key`, the file's MIME type as `Content-Type`, and the raw file bytes as the body. Each upload returns `{ success, token }`; the tokens (at most 10) go in `comment.uploads` on the create call. The rules the caller must follow:
+   - Files are capped at **20 MB**; check the size in the form as well.
+   - A token is valid for **60 minutes**, so upload when the citizen submits, right before the create call.
+   - A failed upload is simply repeated. A failed create is retried with the **same** `Idempotency-Key` **and the same tokens** — never upload again for a retry, or Zendesk sees a different request under the same key and the gateway returns 409. Within two hours this is safe even after the tokens expire.
+   - If no create has succeeded and the tokens are over 60 minutes old, start again: upload again and create with a **new** `Idempotency-Key`.
+7. **Ingress:** the load balancer in front of the service must accept request bodies of at least 20 MB on `/v1/tickets/uploads`. Confirm this with DevOps before the first deploy that carries uploads.
+8. **Deploy**, check that `POST /v1/tickets/create` and `POST /v1/tickets/uploads` answer 400 or 401 (not 404), then make one real submission: confirm the ticket lands in the right brand and group, a requester new to Zendesk is created, any uploaded file is attached to the first comment, and re-sending the same `Idempotency-Key` does not create a second ticket.
 
 ## 5c. Enabling user updates for a tenant
 
@@ -167,6 +174,23 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 4. **Secrets:** send the three values to DevOps as in section 5 step 4, and the API key also to the team running the caller. Confirm they are in Parameter Store before deploying.
 5. **The caller** sends `X-Api-Key` and `{ "user": { "brand_id", "id" or "email", …fields } }`. A `404` for a user created in the last few seconds is retried once after about ten seconds (Zendesk's search needs a moment), or the caller uses the user's ID. A `429` is retried after the `Retry-After` seconds. A `422` is not retried.
 6. **Deploy**, check that `POST /v1/users/update` answers 400 or 401 (not 404), then update one real test user: by email and by ID, and confirm an agent's email gets `404` and nothing changes.
+
+## 5d. Archiving with OAuth instead of an API token
+
+Zendesk no longer lets new API tokens be created, so a new archive tenant signs in to Zendesk with an OAuth client. Existing tenants keep their API tokens until they are moved over; the steps are the same.
+
+1. **Zendesk side:** create an OAuth client (Admin Center, Apps and integrations, APIs, OAuth clients) on the tenant's account, kind **Confidential**, used only for archiving. Restrict its scopes to `tickets:read`, `tickets:write` and `users:read`. Note the client ID and secret; the full secret is shown only once.
+2. **Check "Allow secure downloads" is off** (in Admin Center; search for "secure downloads"). The gateway downloads attachments without a token, because Zendesk refuses OAuth tokens on attachment URLs. With the setting on, every attachment download fails: the PDF is still filed, and the note on the ticket lists the missing files.
+3. **Code:** in the tenant's block in `src/tenants.config.ts`, replace `email` and `apiToken` with
+   ```ts
+   oauth: {
+     clientId: requireEnv('<T>_ARCHIVE_OAUTH_CLIENT_ID', env),
+     clientSecret: requireEnv('<T>_ARCHIVE_OAUTH_CLIENT_SECRET', env)
+   },
+   ```
+   and swap the variable names in `.env.example`. Keeping both is a boot failure.
+4. **Secrets:** send the two values to DevOps as in section 5 step 4. For a tenant moving over, ask DevOps to remove `<T>_ZENDESK_EMAIL` and `<T>_ZENDESK_API_TOKEN` once it is deployed, and revoke the old API token in Zendesk.
+5. **Deploy**, then archive one real test ticket with an attachment. The result note now shows the OAuth client's user as its author.
 
 ## 6. Rotating a secret
 
@@ -201,18 +225,22 @@ Start with the ticket. Every attempt leaves an internal note: a tick with the ca
 | `207 orphan_case` | Case was created in the archive but the upload or stamp failed | The case number is in the note and audit entry. File the document manually or re-run through Málaskrá with that case number. |
 | Archive returns 404 on upload | Trailing slash on the base URL, or wrong path | Config. |
 | Archive auth fails | Expired or wrong credential | Test the archive API directly. |
+| Every attachment of an OAuth tenant is listed as failed (`download status 403`) | "Allow secure downloads" was turned on in Zendesk | Turn it off (section 5d). |
+| Archive fails with `Zendesk OAuth token request failed` in the log | Wrong client ID or secret, the client was deleted, or it lacks a scope | Check the OAuth client in Zendesk against section 5d. |
 | Same ticket archived repeatedly | Trigger is not one-shot | Fix the trigger as in section 5. |
 | `404 User not found` on `/v1/users/update` for a user who exists | The user is an agent or admin (never updated), or was created seconds ago and is not yet in Zendesk's search | Check the user's role in Zendesk. For a new user, retry once or send `user.id`. |
 | `409 Email matches more than one user` | Two users share that email address across the account | Send `user.id` instead. |
 | `429` on `/v1/users/update` | The same user was updated more than five times in a minute | Retry after the `Retry-After` seconds. |
+| `413 File too large` on `/v1/tickets/uploads` for a file under 20 MB, or a 413 that is HTML rather than JSON | The load balancer's body-size limit is lower than the gateway's | Ask DevOps to raise it to at least 20 MB (section 5b). |
+| `422 Ticket rejected by Zendesk validation` on `/v1/tickets/create` | An invalid field, or upload tokens older than 60 minutes | Container log for that `brand_id` shows Zendesk's error code and field names. For expired tokens, the caller uploads again and uses a new `Idempotency-Key`. |
 | Red "Build and Deploy" on a merged PR | Expected for fork PRs | Nothing was deployed. Run the workflow manually. |
 
 ## 9. Network
 
 Inbound: HTTPS from Zendesk and from the Málaskrá app in agents' browsers.
 
-Outbound, and nothing else: `*.zendesk.com` and `*.zdassets.com` for the Zendesk API and attachment downloads, and each tenant's archive URL. Attachment downloads are refused for any other host. Archive URLs are refused if they resolve to private or loopback ranges.
+Outbound, and nothing else: `*.zendesk.com` and `*.zdassets.com` for the Zendesk API, attachment downloads and ticket-create uploads, and each tenant's archive URL. Attachment downloads are refused for any other host. Archive URLs are refused if they resolve to private or loopback ranges.
 
 ## 10. Data handling
 
-The service is stateless. Ticket content, comments, attachments and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Internal notes are excluded from the PDF unless the tenant opts in.
+The service is stateless. Ticket content, comments, attachments, uploaded files and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Internal notes are excluded from the PDF unless the tenant opts in.

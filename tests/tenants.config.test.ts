@@ -78,6 +78,12 @@ const validEnv: Record<string, string> = {
   SYSLUMENN_ONESYSTEMS_APP_KEY: testSecret('syslu-os-appkey', 40),
   SYSLUMENN_MALASKRA_API_KEY: testSecret('syslu-malaskra-key', 40),
   THJODSKRA_ZENDESK_SUBDOMAIN: 'thjodskra-test',
+  THJODSKRA_ARCHIVE_OAUTH_CLIENT_ID: 'milli-mala-archive-thjodskra',
+  THJODSKRA_ARCHIVE_OAUTH_CLIENT_SECRET: testSecret('thjod-archive-client-secret', 40),
+  THJODSKRA_ZENDESK_WEBHOOK_SECRET: testSecret('thjod-zd-webhook', 40),
+  THJODSKRA_ONESYSTEMS_BASE_URL: 'https://onesystems.test.example',
+  THJODSKRA_ONESYSTEMS_APP_KEY: testSecret('thjod-os-appkey', 40),
+  THJODSKRA_MALASKRA_API_KEY: testSecret('thjod-malaskra-key', 40),
   THJODSKRA_TICKET_CREATE_API_KEY: testSecret('thjod-create-api-key', 40),
   THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_ID: testSecret('thjod-create-client-id', 40),
   THJODSKRA_TICKET_CREATE_OAUTH_CLIENT_SECRET: testSecret('thjod-create-client-secret', 40),
@@ -183,8 +189,7 @@ describe('loadTenants', () => {
     const tenants = loadTenants(validEnv)
     const samgongustofa = tenants.find(t => t.name === 'Samgöngustofa')!
     expect(samgongustofa.services.archive!.pdf.includeInternalNotes).toBe(true)
-    // Only archive tenants have a PDF config (Þjóðskrá has no archive).
-    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa' && t.services.archive)) {
+    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa')) {
       expect(other.services.archive!.pdf.includeInternalNotes).toBe(false)
     }
   })
@@ -370,17 +375,63 @@ describe('loadTenants', () => {
   })
 })
 
-describe('loadTenants — Þjóðskrá (ticket creation and user update, no archive)', () => {
+describe('loadTenants — Þjóðskrá (OneSystems archive, ticket creation and user update)', () => {
   function thjodskra(env: Record<string, string | undefined> = validEnv) {
     return loadTenants(env).find(t => t.brand_id === '30303665547154')!
   }
 
-  it('configures Þjóðskrá with its brand, name and subdomain, and no archive or Zendesk credentials', () => {
+  it('configures Þjóðskrá with its brand, name and Zendesk OAuth credentials (no API token), and no ticketUpdate', () => {
     const tenant = thjodskra()
     expect(tenant.name).toBe('Þjóðskrá')
-    expect(tenant.zendesk).toEqual({ subdomain: 'thjodskra-test' })
-    expect(tenant.services.archive).toBeUndefined()
+    expect(tenant.zendesk).toEqual({
+      subdomain: 'thjodskra-test',
+      oauth: {
+        clientId: 'milli-mala-archive-thjodskra',
+        clientSecret: testSecret('thjod-archive-client-secret', 40),
+      },
+      webhookSecret: testSecret('thjod-zd-webhook', 40),
+    })
     expect(tenant.services.ticketUpdate).toBeUndefined()
+  })
+
+  it('configures a OneSystems archive endpoint, its own Málaskrá key and the PDF settings', () => {
+    const archive = thjodskra().services.archive!
+    expect(Object.keys(archive.endpoints)).toEqual(['onesystems'])
+    expect(archive.endpoints.onesystems).toMatchObject({
+      type: 'onesystems',
+      appKey: testSecret('thjod-os-appkey', 40),
+    })
+    expect(archive.malaskra.apiKey).toBe(testSecret('thjod-malaskra-key', 40))
+    expect(archive.pdf).toEqual({ companyName: 'Þjóðskrá', locale: 'is-IS', includeInternalNotes: false })
+  })
+
+  it('wires the template, kennitala and case-number field IDs, and leaves them unset when absent', () => {
+    const env = {
+      ...validEnv,
+      THJODSKRA_TEMPLATE_FIELD_ID: '111',
+      THJODSKRA_KENNITALA_FIELD_ID: '222',
+      THJODSKRA_CASE_NUMBER_FIELD_ID: '333',
+    }
+    expect(thjodskra(env).services.archive!.endpoints.onesystems).toMatchObject({
+      templateFieldId: 111, kennitalaFieldId: 222, caseNumberFieldId: 333,
+    })
+    const unset = thjodskra().services.archive!.endpoints.onesystems!
+    expect(unset.templateFieldId).toBeUndefined()
+    expect(unset.kennitalaFieldId).toBeUndefined()
+    expect(unset.caseNumberFieldId).toBeUndefined()
+  })
+
+  it.each([
+    'THJODSKRA_ARCHIVE_OAUTH_CLIENT_ID',
+    'THJODSKRA_ARCHIVE_OAUTH_CLIENT_SECRET',
+    'THJODSKRA_ZENDESK_WEBHOOK_SECRET',
+    'THJODSKRA_ONESYSTEMS_BASE_URL',
+    'THJODSKRA_ONESYSTEMS_APP_KEY',
+    'THJODSKRA_MALASKRA_API_KEY',
+  ])('throws with a clear error when the archive variable %s is missing', (name) => {
+    const env = { ...validEnv }
+    delete env[name]
+    expect(() => loadTenants(env)).toThrow(name)
   })
 
   it('wires the ticketCreate API key and OAuth client', () => {

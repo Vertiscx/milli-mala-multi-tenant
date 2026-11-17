@@ -13,7 +13,7 @@
  * calls writeAudit + postResultToTicket.
  */
 
-import { ZendeskClient } from '../../platform/zendesk.js'
+import { createZendeskClient } from '../../platform/zendesk.js'
 import { writeAudit } from './pipeline/audit.js'
 import { createLogger } from '../../platform/logger.js'
 import type {
@@ -171,12 +171,7 @@ export async function postResultToTicket(
       ticketBody.custom_fields = customFields
     }
 
-    // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
-    const zendesk = new ZendeskClient(
-      tenantConfig.zendesk.subdomain,
-      tenantConfig.zendesk.apiToken!,
-      tenantConfig.zendesk.email!
-    )
+    const zendesk = createZendeskClient(tenantConfig)
     await zendesk.requestWrite(
       `/tickets/${o.ticketId}.json`,
       'PUT',

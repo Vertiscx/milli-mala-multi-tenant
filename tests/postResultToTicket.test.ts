@@ -16,11 +16,14 @@ import type { EndpointConfig, TenantConfig } from '../src/platform/types.js'
 import type { DocumentationOutcome } from '../src/services/archive/types.js'
 
 const putMock = vi.fn()
+const createClientMock = vi.fn()
 vi.mock('../src/platform/zendesk.js', () => ({
-  ZendeskClient: class {
-    constructor(..._a: unknown[]) {}
-    requestWrite(...args: unknown[]) {
-      return putMock(...args)
+  createZendeskClient: (...a: unknown[]) => {
+    createClientMock(...a)
+    return {
+      requestWrite(...args: unknown[]) {
+        return putMock(...args)
+      }
     }
   }
 }))
@@ -201,6 +204,13 @@ describe('postResultToTicket — single atomic PUT', () => {
   beforeEach(() => {
     putMock.mockReset()
     putMock.mockResolvedValue({})
+    createClientMock.mockReset()
+  })
+
+  it('builds its Zendesk client from the tenant config (OAuth or Basic is the factory\'s call)', async () => {
+    const c = ctx()
+    await postResultToTicket(baseOutcome(), c)
+    expect(createClientMock).toHaveBeenCalledWith(c.tenantConfig)
   })
 
   it('documented → one PUT, comment public:false + 4 fields', async () => {

@@ -684,6 +684,52 @@ describe('validateTenantConfig — Zendesk credentials are archive-only', () => 
   })
 })
 
+describe('validateTenantConfig — archive Zendesk credential: Basic or OAuth', () => {
+  const OAUTH = { clientId: 'milli-mala-archive', clientSecret: 'cS7xK2mN9pQ4vR6jL8cY1bT3fH5gA0eDz' }
+
+  function makeOAuthTenant(oauth: Partial<typeof OAUTH> = OAUTH): TenantConfig {
+    const tenant = makeValidTenant()
+    delete tenant.zendesk.email
+    delete tenant.zendesk.apiToken
+    tenant.zendesk.oauth = oauth as typeof OAUTH
+    return tenant
+  }
+
+  it('accepts an archive tenant with oauth and no email or apiToken', () => {
+    expect(() => validateTenantConfig(makeOAuthTenant())).not.toThrow()
+  })
+
+  it('rejects an archive tenant with both oauth and email/apiToken', () => {
+    const tenant = makeValidTenant()
+    tenant.zendesk.oauth = OAUTH
+    expect(() => validateTenantConfig(tenant))
+      .toThrow('zendesk.oauth and zendesk.email/apiToken are both set')
+  })
+
+  it('rejects oauth plus only an email', () => {
+    const tenant = makeOAuthTenant()
+    tenant.zendesk.email = 'test@example.com'
+    expect(() => validateTenantConfig(tenant)).toThrow('are both set')
+  })
+
+  it.each(['clientId', 'clientSecret'] as const)('requires zendesk.oauth.%s', (field) => {
+    const oauth: Partial<typeof OAUTH> = { ...OAUTH }
+    delete oauth[field]
+    expect(() => validateTenantConfig(makeOAuthTenant(oauth))).toThrow(`missing zendesk.oauth.${field}`)
+  })
+
+  it('still requires webhookSecret with oauth', () => {
+    const tenant = makeOAuthTenant()
+    delete tenant.zendesk.webhookSecret
+    expect(() => validateTenantConfig(tenant)).toThrow('missing zendesk.webhookSecret')
+  })
+
+  it('rejects a weak oauth clientSecret', () => {
+    expect(() => validateTenantConfig(makeOAuthTenant({ ...OAUTH, clientSecret: 'short' })))
+      .toThrow('zendesk.oauth.clientSecret must be at least 32 characters')
+  })
+})
+
 describe('validateTenantConfig — ticketUpdate section', () => {
   type TicketUpdate = NonNullable<TenantConfig['services']['ticketUpdate']>
 
