@@ -9,6 +9,7 @@
  * failure-finalize is itself wrapped and NEVER throws.
  */
 
+import { buildPdfFilename } from '../pdfFilename.js'
 import { createLogger } from '../../../platform/logger.js'
 import { createDocClient } from '../docClient.js'
 import { recordOutcome } from '../postResultToTicket.js'
@@ -99,7 +100,7 @@ export async function finalizeWebhookFailure(args: {
       docSystem: ep.type,
       ticketId,
       durationMs: Date.now() - startTime,
-      pdfFilename: `ticket-${ticketId}.pdf`,
+      pdfFilename: buildPdfFilename(ticketId, ticket?.subject),
       pdfSizeBytes: pdfBuffer?.length ?? 0,
       failedAttachments: failedAttachments ?? [],
       sanitizedReason: 'Sjálfvirk skjalfesting mistókst',

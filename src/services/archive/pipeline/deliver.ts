@@ -1,4 +1,5 @@
 import type { ZendeskTicket, DownloadedAttachment } from '../../../platform/types.js'
+import { buildPdfFilename } from '../pdfFilename.js'
 import type { DocClient } from '../types.js'
 
 /**
@@ -15,7 +16,7 @@ export async function postToCase(
   pdfBuffer: Buffer,
   attachments: DownloadedAttachment[]
 ): Promise<void> {
-  const uploadFilename = `ticket-${ticketId}.pdf`
+  const uploadFilename = buildPdfFilename(ticketId, ticket.subject)
 
   await docClient.uploadDocument({
     caseNumber,

@@ -28,6 +28,7 @@
  * (retry-safe, NOT a GW-06 outcome), exactly like the sibling handlers.
  */
 
+import { buildPdfFilename } from './pdfFilename.js'
 import { timingSafeEqual, createHash } from 'node:crypto'
 import { createLogger } from '../../platform/logger.js'
 import { resolveEndpoint, validateCaseNumber } from '../../platform/tenant.js'
@@ -213,7 +214,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
           docSystem: ep.type,
           ticketId,
           durationMs: Date.now() - startTime,
-          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfFilename: buildPdfFilename(ticketId, ticket.subject),
           pdfSizeBytes: pdfBuffer.length,
           failedAttachments,
           sanitizedReason: 'Stofnun máls mistókst',
@@ -270,7 +271,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
           // status field + note are written via finalize.
           ticketId,
           durationMs: Date.now() - startTime,
-          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfFilename: buildPdfFilename(ticketId, ticket.subject),
           pdfSizeBytes: pdfBuffer.length,
           failedAttachments,
           sanitizedReason: 'Skjalfesting eftir stofnun máls mistókst',
@@ -304,7 +305,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         docSystem: ep.type,
         ticketId,
         durationMs: Date.now() - startTime,
-        pdfFilename: `ticket-${ticketId}.pdf`,
+        pdfFilename: buildPdfFilename(ticketId, ticket.subject),
         pdfSizeBytes: pdfBuffer.length,
         failedAttachments,
         sanitizedReason: 'Skjalfesting í fyrirliggjandi mál mistókst',
@@ -331,7 +332,7 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
       template: hasCreate ? createdTemplate : undefined,
       ticketId,
       durationMs: duration,
-      pdfFilename: `ticket-${ticketId}.pdf`,
+      pdfFilename: buildPdfFilename(ticketId, ticket.subject),
       pdfSizeBytes: pdfBuffer.length,
       failedAttachments,
       timestamp: lastExport

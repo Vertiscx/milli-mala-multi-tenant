@@ -690,6 +690,21 @@ describe('documentTicket webhook create path', () => {
     })
   })
 
+  it('uploads the PDF as "<ticketId> - <subject>.pdf" and names it the same in the ticket note', async () => {
+    const calls = installCreateRouter()
+    const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeCreateTenant() })
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(200)
+    const upload = calls.find(c => c.label === 'upload')!
+    expect(upload.body).toMatch(/name="FileName"\r\n\r\n123 - Test ticket\.pdf\r\n/)
+    expect(upload.body).not.toContain('ticket-123.pdf')
+
+    const postBack = calls.find(c => c.label === 'postBackPut')!
+    const note = (JSON.parse(postBack.body!) as { ticket: { comment: { body: string } } }).ticket.comment.body
+    expect(note).toContain('Skjal: 123 - Test ticket.pdf')
+  })
+
   it('WHCC-02: minted number is stamped onto the case-number field BEFORE the upload', async () => {
     const calls = installCreateRouter()
     const req = makeRequest({ ticket_id: 123 }, { tenantConfig: makeCreateTenant() })
