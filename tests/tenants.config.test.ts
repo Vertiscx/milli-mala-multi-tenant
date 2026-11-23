@@ -185,12 +185,11 @@ describe('loadTenants', () => {
     expect(samgongustofa.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
   })
 
-  it('includes internal notes in the Samgöngustofa PDF — the only tenant that does', () => {
+  it('includes internal notes only in the Samgöngustofa and Þjóðskrá PDFs', () => {
     const tenants = loadTenants(validEnv)
-    const samgongustofa = tenants.find(t => t.name === 'Samgöngustofa')!
-    expect(samgongustofa.services.archive!.pdf.includeInternalNotes).toBe(true)
-    for (const other of tenants.filter(t => t.name !== 'Samgöngustofa')) {
-      expect(other.services.archive!.pdf.includeInternalNotes).toBe(false)
+    const included = ['Samgöngustofa', 'Þjóðskrá']
+    for (const tenant of tenants) {
+      expect(tenant.services.archive!.pdf.includeInternalNotes).toBe(included.includes(tenant.name))
     }
   })
 
@@ -402,7 +401,7 @@ describe('loadTenants — Þjóðskrá (OneSystems archive, ticket creation and 
       appKey: testSecret('thjod-os-appkey', 40),
     })
     expect(archive.malaskra.apiKey).toBe(testSecret('thjod-malaskra-key', 40))
-    expect(archive.pdf).toEqual({ companyName: 'Þjóðskrá', locale: 'is-IS', includeInternalNotes: false })
+    expect(archive.pdf).toEqual({ companyName: 'Þjóðskrá', locale: 'is-IS', includeInternalNotes: true })
   })
 
   it('wires the template, kennitala and case-number field IDs, and leaves them unset when absent', () => {

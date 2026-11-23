@@ -472,7 +472,7 @@ export function loadTenants(env: Record<string, string | undefined> = process.en
           pdf: {
             companyName: 'Þjóðskrá',
             locale: 'is-IS',
-            includeInternalNotes: false,
+            includeInternalNotes: true,
           },
         },
         ...ticketCreateSection('THJODSKRA', env),
