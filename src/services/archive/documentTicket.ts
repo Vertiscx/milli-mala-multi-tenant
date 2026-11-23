@@ -11,6 +11,7 @@
  * with G2's createCase — but G1 wires nothing new.
  */
 
+import { buildPdfFilename } from './pdfFilename.js'
 import { resolveEndpoint } from '../../platform/tenant.js'
 import { createDocClient } from './docClient.js'
 import { recordOutcome } from './postResultToTicket.js'
@@ -158,7 +159,7 @@ export async function documentTicket(
         docSystem: ep.type,
         ticketId,
         durationMs: duration,
-        pdfFilename: `ticket-${ticketId}.pdf`,
+        pdfFilename: buildPdfFilename(ticketId, ticket?.subject),
         pdfSizeBytes: pdfBuffer.length,
         failedAttachments,
         timestamp: new Date().toISOString()

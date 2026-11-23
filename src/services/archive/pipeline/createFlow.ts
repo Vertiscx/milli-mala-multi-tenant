@@ -1,4 +1,5 @@
 import { createLogger } from '../../../platform/logger.js'
+import { buildPdfFilename } from '../pdfFilename.js'
 import { validateCaseNumber } from '../../../platform/tenant.js'
 import { ZendeskClient } from '../../../platform/zendesk.js'
 import { recordOutcome } from '../postResultToTicket.js'
@@ -89,7 +90,7 @@ async function rejectWebhookCreate(args: {
         docSystem: ep.type,
         ticketId,
         durationMs: Date.now() - startTime,
-        pdfFilename: `ticket-${ticketId}.pdf`,
+        pdfFilename: buildPdfFilename(ticketId, ticket.subject),
         pdfSizeBytes: pdfBuffer.length,
         failedAttachments,
         sanitizedReason: REJECT_SANITIZED_REASONS[mode],
@@ -247,7 +248,7 @@ export async function runWebhookCreateFlow(args: {
           docSystem: ep.type,
           ticketId,
           durationMs: Date.now() - startTime,
-          pdfFilename: `ticket-${ticketId}.pdf`,
+          pdfFilename: buildPdfFilename(ticketId, ticket.subject),
           pdfSizeBytes: pdfBuffer.length,
           failedAttachments,
           sanitizedReason: 'Skjalfesting eftir stofnun máls mistókst',
@@ -291,7 +292,7 @@ export async function runWebhookCreateFlow(args: {
       template: created.caseTemplate,
       ticketId,
       durationMs: duration,
-      pdfFilename: `ticket-${ticketId}.pdf`,
+      pdfFilename: buildPdfFilename(ticketId, ticket.subject),
       pdfSizeBytes: pdfBuffer.length,
       failedAttachments,
       timestamp: new Date().toISOString(),
