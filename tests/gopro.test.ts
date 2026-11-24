@@ -120,7 +120,7 @@ describe('GoProClient', () => {
       client.tokenExpiry = Date.now() + 60 * 1000
     })
 
-    it('should upload with Token and Gopro-Origin headers and the guide body', async () => {
+    it('should upload with Token and Gopro-Origin headers and the Swagger body (no subject)', async () => {
       fetchMock().mockResolvedValueOnce(uploadOk())
 
       const pdfBuffer = Buffer.from('fake pdf content')
@@ -146,7 +146,6 @@ describe('GoProClient', () => {
       const callBody = JSON.parse(fetchMock().mock.calls[0][1].body)
       expect(callBody).toEqual({
         caseNumber: 'CASE-123',
-        subject: 'Test ticket',
         origin: 'Zendesk',
         fileName: 'ticket-456.pdf',
         content: pdfBuffer.toString('base64')
@@ -163,11 +162,11 @@ describe('GoProClient', () => {
       expect(JSON.stringify(fetchMock().mock.calls[0][1])).not.toContain('test-webkey')
     })
 
-    it('should fall back to the file name as subject', async () => {
+    it('should not send a subject (GoPro uses the file name as subject)', async () => {
       fetchMock().mockResolvedValueOnce(uploadOk())
 
-      await client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x') })
-      expect(JSON.parse(fetchMock().mock.calls[0][1].body).subject).toBe('f.pdf')
+      await client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x'), metadata: { subject: 'S' } })
+      expect(JSON.parse(fetchMock().mock.calls[0][1].body)).not.toHaveProperty('subject')
     })
 
     it('should upload each file separately when attachments provided', async () => {
@@ -301,6 +300,101 @@ describe('GoProClient', () => {
 
       const result = await client.uploadDocument({ caseNumber: 'C', filename: 'f.pdf', pdfBuffer: Buffer.from('x') })
       expect(result).toBe('doc-plain')
+    })
+  })
+
+  describe('cases', () => {
+    const jsonOk = (body: unknown) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) })
+
+    beforeEach(() => {
+      client.token = 'valid-token'
+      client.tokenExpiry = Date.now() + 60 * 1000
+    })
+
+    it('listTemplates: GET LookupTemplates with the Token header, no body', async () => {
+      const templates = [{ id: 'tpl-1', type: 'General', category: 'Þjónusta', name: 'Almennt erindi' }]
+      fetchMock().mockResolvedValueOnce(jsonOk(templates))
+
+      expect(await client.listTemplates()).toEqual(templates)
+      const [url, init] = fetchMock().mock.calls[0]
+      expect(url).toBe('https://api.gopro.test/Tickets/v1/Cases/LookupTemplates')
+      expect(init.method).toBe('GET')
+      expect(init.headers).toEqual({ 'Token': 'valid-token', 'Gopro-Origin': 'foris' })
+      expect(init.body).toBeUndefined()
+    })
+
+    it('findCaseByNumber: POST FindByCaseNumber and return the case', async () => {
+      const found = { id: 'g', caseNumber: '202611-0037', name: 'Prufa', url: null }
+      fetchMock().mockResolvedValueOnce(jsonOk(found))
+
+      expect(await client.findCaseByNumber('202611-0037')).toEqual(found)
+      expect(fetchMock().mock.calls[0][0]).toBe('https://api.gopro.test/Tickets/v1/Cases/FindByCaseNumber')
+      expect(JSON.parse(fetchMock().mock.calls[0][1].body)).toEqual({ caseNumber: '202611-0037' })
+    })
+
+    it('findCaseByNumber: surfaces GoPro\'s not-found message', async () => {
+      fetchMock().mockResolvedValueOnce({ ok: false, status: 400, text: async () => '{"message":"Case with number \'X\' not found"}' })
+
+      await expect(client.findCaseByNumber('X')).rejects.toThrow("GoPro case lookup failed: 400 - {\"message\":\"Case with number 'X' not found\"}")
+    })
+
+    it('findCasesByKennitala: sends digits only', async () => {
+      fetchMock().mockResolvedValueOnce(jsonOk([]))
+
+      expect(await client.findCasesByKennitala('010190-2989')).toEqual([])
+      expect(JSON.parse(fetchMock().mock.calls[0][1].body)).toEqual({ idNumber: '0101902989' })
+    })
+
+    it('findCasesByKennitala: refuses anything but a full 10-digit kennitala (GoPro would prefix-match)', async () => {
+      await expect(client.findCasesByKennitala('0101')).rejects.toThrow('full 10-digit kennitala')
+      await expect(client.findCasesByKennitala('')).rejects.toThrow('full 10-digit kennitala')
+      expect(global.fetch).not.toHaveBeenCalled()
+    })
+
+    it('createCase: POST Cases/Create with templateId, trimmed name and digits-only kennitala', async () => {
+      fetchMock().mockResolvedValueOnce(jsonOk({ id: 'g', caseNumber: '2026110012', name: 'n', url: 'https://x' }))
+
+      const result = await client.createCase({ caseTemplate: 'tpl-1', kennitala: '010190 2989', caseName: '  Ticket #123 – Subject  ', externalId: 'ticket_123' })
+
+      expect(result).toEqual({ caseNumber: '2026110012', caseTemplate: 'tpl-1' })
+      expect(fetchMock().mock.calls[0][0]).toBe('https://api.gopro.test/Tickets/v1/Cases/Create')
+      expect(JSON.parse(fetchMock().mock.calls[0][1].body)).toEqual({
+        templateId: 'tpl-1',
+        name: 'Ticket #123 – Subject',
+        idNumber: '0101902989'
+      })
+    })
+
+    it('createCase: falls back to a name from the external id and omits an empty kennitala', async () => {
+      fetchMock().mockResolvedValueOnce(jsonOk({ caseNumber: 'C-1' }))
+
+      await client.createCase({ caseTemplate: 'tpl-1', kennitala: '', externalId: 'ticket_9' })
+      expect(JSON.parse(fetchMock().mock.calls[0][1].body)).toEqual({ templateId: 'tpl-1', name: 'Zendesk ticket_9' })
+    })
+
+    it('createCase: throws when GoPro returns no case number', async () => {
+      fetchMock().mockResolvedValueOnce(jsonOk({ id: 'g' }))
+
+      await expect(client.createCase({ caseTemplate: 'tpl-1', kennitala: '0101902989' }))
+        .rejects.toThrow('GoPro createCase: missing case number in response')
+    })
+
+    it('createCase: surfaces a validation error naming the field', async () => {
+      fetchMock().mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'TemplateId is required and must be a valid GUID' })
+
+      await expect(client.createCase({ caseTemplate: 'bad', kennitala: '0101902989' }))
+        .rejects.toThrow('GoPro createCase failed: 400 - TemplateId is required and must be a valid GUID')
+    })
+
+    it('case calls re-authenticate once on 401 and retry', async () => {
+      fetchMock()
+        .mockResolvedValueOnce({ ok: false, status: 401, text: async () => '' })
+        .mockResolvedValueOnce(authOk('fresh-token'))
+        .mockResolvedValueOnce(jsonOk([]))
+
+      expect(await client.listTemplates()).toEqual([])
+      expect(fetchMock().mock.calls[1][0]).toBe('https://api.gopro.test/Tickets/v1/Authenticate')
+      expect(fetchMock().mock.calls[2][1].headers.Token).toBe('fresh-token')
     })
   })
 })

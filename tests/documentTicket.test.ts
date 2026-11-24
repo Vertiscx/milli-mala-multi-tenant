@@ -598,6 +598,7 @@ describe('documentTicket webhook create path', () => {
     uploadFails?: boolean
     stampFails?: boolean
     goproUploadFails?: boolean
+    goproCreateFails?: boolean
     mintedCaseNumber?: string
   } = {}): RoutedCall[] {
     const calls: RoutedCall[] = []
@@ -643,10 +644,16 @@ describe('documentTicket webhook create path', () => {
         if (opts.uploadFails) return { ok: false, status: 500, text: async () => 'upload boom' }
         return { ok: true, json: async () => ({ success: true }) }
       }
-      // GoPro routes (WHCC-07 scenario)
+      // GoPro routes (Tickets v1)
       if (url.includes('/Tickets/v1/Authenticate')) {
         record('goproAuth')
         return { ok: true, headers: new Headers({ 'X-GoProToken': 'gopro-token' }) }
+      }
+      if (url.includes('/Tickets/v1/Cases/Create')) {
+        record('goproCreateCase')
+        if (opts.goproCreateFails) return { ok: false, status: 400, text: async () => 'TemplateId is required and must be a valid GUID' }
+        const minted = opts.mintedCaseNumber ?? '202611-0099'
+        return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'case-guid', caseNumber: minted, name: 'x', url: null }) }
       }
       if (url.includes('/Tickets/v1/Documents/Create')) {
         record('goproUpload')
@@ -893,8 +900,10 @@ describe('documentTicket webhook create path', () => {
     assertLoudReject(result, calls, captured, 'missing_kennitala')
   })
 
-  it('WHCC-07 GoPro: empty field + template + kennitala but no createCase on the client → create never engages, ZD- fallback as today', async () => {
-    const goproTenant = makeTenantConfig({
+  const GOPRO_TEMPLATE_ID = 'a0fbcffc-8d49-4091-8d6b-98de93bc1560'
+
+  function makeGoProCreateTenant(epOverrides: Record<string, unknown> = {}): TenantConfig {
+    return makeTenantConfig({
       endpoints: {
         gopro: {
           type: 'gopro',
@@ -902,23 +911,65 @@ describe('documentTicket webhook create path', () => {
           apiKey: 'gopro-webkey-0123456789',
           caseNumberFieldId: 7777,
           templateFieldId: 100,
-          kennitalaFieldId: 200
+          kennitalaFieldId: 200,
+          ...epOverrides
         }
       }
     })
-    const calls = installCreateRouter()
+  }
+
+  it('WHCC-07 GoPro: empty field + template GUID + kennitala → creates the GoPro case, stamps it, then uploads into it', async () => {
+    const ticket = makeCreateTicket([
+      { id: 7777, value: null },
+      { id: 100, value: GOPRO_TEMPLATE_ID },
+      { id: 200, value: '010190-2989' }
+    ])
+    const calls = installCreateRouter({ ticket })
     const req = makeRequest(
       { ticket_id: 123 },
-      { tenantConfig: goproTenant, docEndpoint: 'gopro' }
+      { tenantConfig: makeGoProCreateTenant(), docEndpoint: 'gopro' }
     )
     const result = await handleWebhook(req)
 
     expect(result.status).toBe(200)
-    expect(result.body.case_number).toBe('ZD-123')
-    // Duck-typed guard: no OneSystems create call, GoPro documents as today.
+    expect(result.body.case_number).toBe('202611-0099')
+    // GoPro's own create endpoint, never the OneSystems one.
     expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
-    expect(calls.filter(c => c.label === 'goproUpload').length).toBeGreaterThan(0)
+    const creates = calls.filter(c => c.label === 'goproCreateCase')
+    expect(creates).toHaveLength(1)
+    expect(JSON.parse(creates[0].body!)).toEqual({
+      templateId: GOPRO_TEMPLATE_ID,
+      name: baseTicket.subject,
+      idNumber: '0101902989'
+    })
+    // Locked order: create → stamp → upload into the minted case.
+    const order = calls.map(c => c.label).filter(l => ['goproCreateCase', 'stampPut', 'goproUpload'].includes(l))
+    expect(order.slice(0, 3)).toEqual(['goproCreateCase', 'stampPut', 'goproUpload'])
+    const upload = calls.find(c => c.label === 'goproUpload')!
+    expect(JSON.parse(upload.body!).caseNumber).toBe('202611-0099')
+  })
+
+  it('GoPro create rejected (400) → 500, nothing stamped or uploaded, failure audit never fabricates ZD-', async () => {
+    const ticket = makeCreateTicket([
+      { id: 7777, value: null },
+      { id: 100, value: 'not-a-guid' },
+      { id: 200, value: '010190-2989' }
+    ])
+    const calls = installCreateRouter({ ticket, goproCreateFails: true })
+    const captured: string[] = []
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeGoProCreateTenant(), docEndpoint: 'gopro', auditStore: makeCapturingAuditStore(captured) }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(500)
     expect(calls.filter(c => c.label === 'stampPut')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'goproUpload')).toHaveLength(0)
+    const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
+    expect(persisted.destination.case_number).toBeNull()
+    expect(persisted.destination.case_number_source).toBe('none')
+    for (const entry of captured) expect(entry).not.toContain('ZD-')
   })
 
   it('invalid minted case number: fails validateCaseNumber → post-mint 207 orphan, no stamp, no upload (LO-04)', async () => {
@@ -1004,32 +1055,41 @@ describe('documentTicket webhook create path', () => {
     expect(persisted.destination.case_number_source).toBe('created')
   })
 
-  it('WR-02 GoPro regression: whitespace-only field on a non-create client → gate never engages, ZD- fallback exactly as today', async () => {
-    const goproTenant = makeTenantConfig({
-      endpoints: {
-        gopro: {
-          type: 'gopro',
-          baseUrl: 'https://api.gopro.test',
-          apiKey: 'gopro-webkey-0123456789',
-          caseNumberFieldId: 7777
-        }
-      }
-    })
+  it('WR-02 GoPro: whitespace-only field and no template field configured → 422 missing_template, nothing created or uploaded (no ZD- fallback)', async () => {
+    // GoPro rejects unknown case numbers, so the old ZD- fallback could only
+    // fail at upload. Now that GoPro can create cases, an empty field takes
+    // the create gate and fails loudly instead.
     const calls = installCreateRouter({
       ticket: makeCreateTicket([{ id: 7777, value: '   ' }])
     })
     const req = makeRequest(
       { ticket_id: 123 },
-      { tenantConfig: goproTenant, docEndpoint: 'gopro' }
+      { tenantConfig: makeGoProCreateTenant({ templateFieldId: undefined, kennitalaFieldId: undefined }), docEndpoint: 'gopro' }
+    )
+    const result = await handleWebhook(req)
+
+    expect(result.status).toBe(422)
+    expect(result.body.outcome).toBe('missing_template')
+    expect(result.body.case_number).toBeUndefined()
+    expect(calls.filter(c => c.label === 'goproCreateCase')).toHaveLength(0)
+    expect(calls.filter(c => c.label === 'goproUpload')).toHaveLength(0)
+  })
+
+  it('GoPro with a case number on the ticket → uploads into it, no case created', async () => {
+    const calls = installCreateRouter({
+      ticket: makeCreateTicket([{ id: 7777, value: '202611-0037' }])
+    })
+    const req = makeRequest(
+      { ticket_id: 123 },
+      { tenantConfig: makeGoProCreateTenant(), docEndpoint: 'gopro' }
     )
     const result = await handleWebhook(req)
 
     expect(result.status).toBe(200)
-    // resolveCaseNumber is untouched: GoPro keeps today's behavior for a
-    // whitespace field byte-identically (whitespace value, not ZD-).
-    expect(result.body.case_number).toBe('   ')
-    expect(calls.filter(c => c.label === 'createCase')).toHaveLength(0)
-    expect(calls.filter(c => c.label === 'goproUpload').length).toBeGreaterThan(0)
+    expect(result.body.case_number).toBe('202611-0037')
+    expect(calls.filter(c => c.label === 'goproCreateCase')).toHaveLength(0)
+    const upload = calls.find(c => c.label === 'goproUpload')!
+    expect(JSON.parse(upload.body!).caseNumber).toBe('202611-0037')
   })
 
   it('distinctness: the three loud-fail entries are identifiable by event/outcome alone, distinct from each other and from ticket_archived', async () => {
@@ -1138,38 +1198,31 @@ describe('documentTicket webhook create path', () => {
     }
   })
 
-  it('outer-catch GoPro byte-identical: upload throw → failure audit keeps ZD-123 + source fallback exactly', async () => {
-    const goproTenant = makeTenantConfig({
-      endpoints: {
-        gopro: {
-          type: 'gopro',
-          baseUrl: 'https://api.gopro.test',
-          apiKey: 'gopro-webkey-0123456789'
-        }
-      }
+  it('outer-catch GoPro: upload throw into the ticket\'s case → failure audit keeps that case number (custom_field)', async () => {
+    installCreateRouter({
+      goproUploadFails: true,
+      ticket: makeCreateTicket([{ id: 7777, value: '202611-0037' }])
     })
-    installCreateRouter({ goproUploadFails: true })
     const captured: string[] = []
     const req = makeRequest(
       { ticket_id: 123 },
-      { tenantConfig: goproTenant, docEndpoint: 'gopro', auditStore: makeCapturingAuditStore(captured) }
+      { tenantConfig: makeGoProCreateTenant(), docEndpoint: 'gopro', auditStore: makeCapturingAuditStore(captured) }
     )
     const result = await handleWebhook(req)
 
     expect(result.status).toBe(500)
     expect(result.body.error).toBe('Internal server error')
 
-    // GoPro keeps today's fallback in the failure audit — byte-identical.
     expect(captured.length).toBeGreaterThan(0)
     const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
-    expect(persisted.destination.case_number).toBe('ZD-123')
-    expect(persisted.destination.case_number_source).toBe('fallback')
+    expect(persisted.destination.case_number).toBe('202611-0037')
+    expect(persisted.destination.case_number_source).toBe('custom_field')
   })
 
   // WR-03: a CONSTRUCTION throw (missing credentials) must not flip the
-  // catch-side capability re-derivation — GoPro keeps ZD- + 'fallback'
-  // byte-identical, OneSystems keeps null + 'none'.
-  it('WR-03 outer-catch GoPro construction-throw: missing apiKey → failure audit keeps ZD-123 + source fallback (byte-identical)', async () => {
+  // catch-side capability re-derivation. GoPro and OneSystems are both
+  // create-capable now, so both report null + 'none' — never ZD-.
+  it('WR-03 outer-catch GoPro construction-throw: missing apiKey → failure audit carries case_number null / source none — never ZD-', async () => {
     const goproTenant = makeTenantConfig({
       endpoints: {
         gopro: {
@@ -1192,8 +1245,9 @@ describe('documentTicket webhook create path', () => {
 
     expect(captured.length).toBeGreaterThan(0)
     const persisted = JSON.parse(captured[0]) as Record<string, Record<string, unknown>>
-    expect(persisted.destination.case_number).toBe('ZD-123')
-    expect(persisted.destination.case_number_source).toBe('fallback')
+    expect(persisted.destination.case_number).toBeNull()
+    expect(persisted.destination.case_number_source).toBe('none')
+    for (const entry of captured) expect(entry).not.toContain('ZD-')
   })
 
   it('WR-03 outer-catch OneSystems construction-throw: missing appKey → failure audit carries case_number null / source none — never ZD-', async () => {

@@ -180,9 +180,14 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     const docClient = createDocClient(ep, solvingAgentEmail)
 
     if (hasCreate) {
-      // CREATE PATH — capability check FIRST (duck-typed, NEVER ep.type)
+      // CREATE PATH — capability check FIRST (duck-typed). GW-06 only
+      // defines the create.onesystems body, so a create against any other
+      // backend stays gopro_create_unsupported until the contract (owned by
+      // the Málaskrá app) adds a namespace for it — even though the GoPro
+      // client itself can now create cases on the webhook path.
       const canCreateCase =
-        typeof (docClient as Partial<OneSystemsClient>).createCase === 'function'
+        typeof (docClient as Partial<OneSystemsClient>).createCase === 'function' &&
+        ep.type === 'onesystems'
       if (!canCreateCase) {
         return {
           status: 422,

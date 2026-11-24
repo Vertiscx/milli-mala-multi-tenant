@@ -1,25 +1,51 @@
 /**
- * GoPro (gopro.net) API Client - handles authentication and document upload
+ * GoPro (gopro.net) API Client - authentication, cases and document upload
  *
  * Targets GoPro's "Tickets v1" integration API (the vendor's universal
  * ticket-system connection; requires the "GoPro Ticket System Integration
  * Module" licence; GoPro Foris 22.1.4+). baseUrl is the services root, e.g.
  * https://<host>/<instance>/services
  *
- * Contract per the vendor's "How to Set Up Zendesk Integration in GoPro
- * Foris" guide: WebKey → Authenticate → X-GoProToken (60 min default);
- * Documents/Create with Token + Gopro-Origin headers returns the new
- * document ID as a JSON string. Swagger omits `subject`; the guide has it.
+ * Contract per the vendor's Swagger and integration notes (Nov 2026):
+ *  - WebKey → POST Tickets/v1/Authenticate → token in the X-GoProToken
+ *    response header (60 min default); every other call sends `Token`.
+ *  - Cases: LookupTemplates, Create (from a template GUID), FindByIdNumber,
+ *    FindByCaseNumber. Cases are created as the WebKey user.
+ *  - Documents/Create returns the new document ID as a JSON string. There
+ *    is no subject field: fileName is the subject, GoPro appends the origin.
+ *  - 401 means the token expired: re-authenticate once and retry.
+ *
+ * Because this client has createCase(), the archive pipeline treats GoPro
+ * tenants as create-capable (same duck-typed check as OneSystems).
  */
 
 import { createLogger, capBody } from '../../platform/logger.js'
 import type { Logger } from '../../platform/types.js'
 import { fetchWithTimeout } from '../../platform/http.js'
-import type { UploadDocumentParams, DocClient } from './types.js'
+import type { UploadDocumentParams, DocClient, CreateCaseParams, CreateCaseResult } from './types.js'
 
 const logger: Logger = createLogger('gopro')
 
 const DEFAULT_ORIGIN = 'Zendesk'
+
+export interface GoProCaseTemplate {
+  id: string
+  type?: string
+  category: string
+  name: string
+}
+
+export interface GoProCase {
+  id: string
+  caseNumber: string
+  name: string
+  url: string | null
+}
+
+/** Kennitala as GoPro expects it: digits only. */
+function normalizeKennitala(raw: string): string {
+  return raw.replace(/\D+/g, '')
+}
 
 export class GoProClient implements DocClient {
   baseUrl: string
@@ -47,8 +73,8 @@ export class GoProClient implements DocClient {
     if (!response.ok) {
       throw new Error(`GoPro auth failed: ${response.status}`)
     }
-    // Token is returned in the X-GoProToken response header; the body
-    // (CurrentContextObject) also carries it as `token` — use as fallback.
+    // Token is returned in the X-GoProToken response header; fall back to
+    // a `token` field in the body if a server ever returns it there.
     let token = response.headers?.get('X-GoProToken') || null
     if (!token) {
       try {
@@ -72,21 +98,94 @@ export class GoProClient implements DocClient {
     }
   }
 
-  private postDocument(body: Record<string, string>): Promise<Response> {
-    return fetchWithTimeout(`${this.baseUrl}/Tickets/v1/Documents/Create`, {
-      method: 'POST',
+  /**
+   * Authenticated call to a Tickets/v1 endpoint. Re-authenticates once and
+   * retries when GoPro rejects the token with 401. Throws on any non-2xx
+   * with GoPro's (capped) error body, which names the problem.
+   */
+  private async request(method: 'GET' | 'POST', path: string, label: string, body?: unknown): Promise<unknown> {
+    await this.ensureAuthenticated()
+    const send = () => fetchWithTimeout(`${this.baseUrl}/Tickets/v1/${path}`, {
+      method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         'Token': this.token!,
         'Gopro-Origin': 'foris'
       },
-      body: JSON.stringify(body)
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
     })
+
+    let response = await send()
+    // Token may expire server-side before our TTL — re-auth once and retry
+    if (response.status === 401) {
+      logger.info('GoPro token rejected, re-authenticating', { path })
+      await this.authenticate()
+      response = await send()
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`GoPro ${label} failed: ${response.status} - ${capBody(errorText)}`)
+    }
+
+    const text = await response.text()
+    try {
+      return JSON.parse(text)
+    } catch {
+      return text // plain-string response
+    }
   }
 
-  async uploadDocument({ caseNumber, filename, pdfBuffer, attachments = [], metadata = {} }: UploadDocumentParams): Promise<unknown> {
-    await this.ensureAuthenticated()
+  /** Case templates (type General) that cases can be created from. */
+  async listTemplates(): Promise<GoProCaseTemplate[]> {
+    const result = await this.request('GET', 'Cases/LookupTemplates', 'template lookup')
+    return Array.isArray(result) ? result as GoProCaseTemplate[] : []
+  }
 
+  /** One case by case number (or case record GUID). Throws if not found. */
+  async findCaseByNumber(caseNumber: string): Promise<GoProCase> {
+    return await this.request('POST', 'Cases/FindByCaseNumber', 'case lookup', { caseNumber }) as GoProCase
+  }
+
+  /**
+   * Cases linked to a client by kennitala. Only a full 10-digit kennitala
+   * is accepted: GoPro falls back to "begins with" matching when there is
+   * no exact match, so a partial value could return other clients' cases.
+   */
+  async findCasesByKennitala(kennitala: string): Promise<GoProCase[]> {
+    const idNumber = normalizeKennitala(kennitala)
+    if (idNumber.length !== 10) {
+      throw new Error('GoPro case search needs a full 10-digit kennitala')
+    }
+    const result = await this.request('POST', 'Cases/FindByIdNumber', 'case search', { idNumber })
+    return Array.isArray(result) ? result as GoProCase[] : []
+  }
+
+  /**
+   * Create a case from a template. `caseTemplate` is the GoPro template
+   * GUID (from listTemplates). The kennitala links the client as involved
+   * party when GoPro finds an exact active match; otherwise GoPro ignores
+   * it and still creates the case.
+   */
+  async createCase({ caseTemplate, kennitala, caseName, externalId }: CreateCaseParams): Promise<CreateCaseResult> {
+    const idNumber = normalizeKennitala(kennitala ?? '')
+    const body = {
+      templateId: caseTemplate,
+      name: (caseName ?? '').trim() || `Zendesk ${externalId ?? 'case'}`,
+      ...(idNumber ? { idNumber } : {})
+    }
+
+    logger.info('Creating GoPro case', { caseTemplate })
+    const created = await this.request('POST', 'Cases/Create', 'createCase', body) as Partial<GoProCase>
+    if (!created?.caseNumber) {
+      throw new Error('GoPro createCase: missing case number in response')
+    }
+
+    logger.info('GoPro case created', { caseNumber: created.caseNumber, url: created.url ?? null })
+    return { caseNumber: created.caseNumber, caseTemplate }
+  }
+
+  async uploadDocument({ caseNumber, filename, pdfBuffer, attachments = [] }: UploadDocumentParams): Promise<unknown> {
     // GoPro API accepts one file per call, so upload each separately
     const allFiles = [
       { fileName: filename, content: pdfBuffer.toString('base64') },
@@ -100,39 +199,14 @@ export class GoProClient implements DocClient {
 
     const results: unknown[] = []
     for (const file of allFiles) {
-      const body = {
+      const documentId = await this.request('POST', 'Documents/Create', 'upload', {
         caseNumber,
-        subject: (metadata as Record<string, string>).subject || file.fileName,
         origin: this.origin,
         fileName: file.fileName,
         content: file.content
-      }
-
-      let response = await this.postDocument(body)
-
-      // Token may expire server-side before our TTL — re-auth once and retry
-      if (response.status === 401) {
-        logger.info('GoPro token rejected, re-authenticating', { caseNumber })
-        await this.authenticate()
-        response = await this.postDocument(body)
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`GoPro upload failed: ${response.status} - ${capBody(errorText)}`)
-      }
-
-      // Success body is the new document ID as a JSON string
-      const text = await response.text()
-      let result: unknown = text
-      try {
-        result = JSON.parse(text)
-      } catch {
-        // plain-string response
-      }
-
-      logger.info('Upload successful', { caseNumber, fileName: file.fileName, documentId: capBody(result) })
-      results.push(result)
+      })
+      logger.info('Upload successful', { caseNumber, fileName: file.fileName, documentId: capBody(documentId) })
+      results.push(documentId)
     }
 
     return results.length === 1 ? results[0] : results
