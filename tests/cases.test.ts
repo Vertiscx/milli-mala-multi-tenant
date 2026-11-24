@@ -226,6 +226,139 @@ describe('handleCases', () => {
     expect(urls.some(u => u.includes('CreateCaseUid'))).toBe(false)
   })
 
+  // ─── GoPro create (create.gopro) ───────────────────────────────────
+  const GP_TEMPLATE = 'a0fbcffc-8d49-4091-8d6b-98de93bc1560'
+
+  function goproCreateTenant(): TenantConfig {
+    return makeTenantConfig({
+      endpoints: {
+        gopro: {
+          type: 'gopro',
+          baseUrl: 'https://api.gopro.test',
+          apiKey: 'gopro-webkey-0123456789',
+          caseNumberFieldId: 7777
+        }
+      }
+    })
+  }
+
+  /** URL-routed mock for the GoPro create flow; records every call. */
+  function installGoProRouter(opts: { createFails?: boolean; uploadFails?: boolean } = {}) {
+    const calls: { url: string; method: string; body?: string }[] = []
+    fetchMock().mockImplementation(async (input: unknown, init?: { method?: string; body?: string }) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      calls.push({ url, method, ...(init?.body !== undefined ? { body: String(init.body) } : {}) })
+      if (/\/tickets\/123\.json$/.test(url) && method === 'GET') return { ok: true, json: async () => ({ ticket: { id: 123, subject: 'Test', brand_id: 360001234567, custom_fields: [] } }) }
+      if (url.includes('/comments.json')) return { ok: true, json: async () => ({ comments: [{ id: 1, body: 'Hi', public: true, author_id: 7 }] }) }
+      if (url.includes('/users/show_many.json')) return { ok: true, json: async () => ({ users: [{ id: 7, name: 'Agent', email: 'agent@example.com' }] }) }
+      if (/\/tickets\/123\.json$/.test(url) && method === 'PUT') return { ok: true, json: async () => ({ ticket: {} }) }
+      if (url.includes('/Tickets/v1/Authenticate')) return { ok: true, headers: new Headers({ 'X-GoProToken': 'tok' }) }
+      if (url.includes('/Tickets/v1/Cases/LookupTemplates')) return { ok: true, status: 200, text: async () => JSON.stringify([{ id: GP_TEMPLATE, category: '', name: 'Demo case template' }]) }
+      if (url.includes('/Tickets/v1/Cases/Create')) {
+        if (opts.createFails) return { ok: false, status: 400, text: async () => 'TemplateId is required and must be a valid GUID' }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'g', caseNumber: '202611-0043', name: 'Demo case template', url: null }) }
+      }
+      if (url.includes('/Tickets/v1/Documents/Create')) {
+        if (opts.uploadFails) return { ok: false, status: 500, text: async () => 'boom' }
+        return { ok: true, status: 200, text: async () => JSON.stringify('doc-1') }
+      }
+      throw new Error(`unexpected fetch: ${method} ${url}`)
+    })
+    return calls
+  }
+
+  it('create.gopro → creates the GoPro case (template name), stamps it, archives into it → 200 documented', async () => {
+    const calls = installGoProRouter()
+    const result = await handleCases({
+      body: { ticket_id: 123, create: { gopro: { caseTemplate: GP_TEMPLATE, kennitala: '690923-0330' } } },
+      headers: KEY,
+      tenantConfig: goproCreateTenant(),
+      docEndpoint: 'gopro'
+    })
+
+    expect(result.status).toBe(200)
+    expect(result.body).toEqual({ ok: true, outcome: 'documented', caseNumber: '202611-0043' })
+    const create = calls.find(c => c.url.includes('/Cases/Create'))!
+    expect(JSON.parse(create.body!)).toEqual({ templateId: GP_TEMPLATE, name: 'Demo case template', idNumber: '6909230330' })
+    // Order: create → stamp the case number → upload into the new case
+    const order = calls.map(c =>
+      c.url.includes('/Cases/Create') ? 'create'
+        : c.url.includes('/Documents/Create') ? 'upload'
+          : (c.method === 'PUT' && !String(c.body).includes('"comment"')) ? 'stamp' : null
+    ).filter(Boolean)
+    expect(order.slice(0, 3)).toEqual(['create', 'stamp', 'upload'])
+    const upload = calls.find(c => c.url.includes('/Documents/Create'))!
+    expect(JSON.parse(upload.body!).caseNumber).toBe('202611-0043')
+    // ✅ internal note posted back
+    expect(calls.some(c => c.method === 'PUT' && String(c.body).includes('"comment"'))).toBe(true)
+  })
+
+  it('create.gopro without kennitala → still creates (no idNumber sent)', async () => {
+    const calls = installGoProRouter()
+    const result = await handleCases({
+      body: { ticket_id: 123, create: { gopro: { caseTemplate: GP_TEMPLATE } } },
+      headers: KEY,
+      tenantConfig: goproCreateTenant(),
+      docEndpoint: 'gopro'
+    })
+    expect(result.status).toBe(200)
+    const create = calls.find(c => c.url.includes('/Cases/Create'))!
+    expect(JSON.parse(create.body!)).not.toHaveProperty('idNumber')
+  })
+
+  it('create.gopro without caseTemplate → 400 validation, nothing fetched', async () => {
+    const result = await handleCases({
+      body: { ticket_id: 123, create: { gopro: { kennitala: '6909230330' } } },
+      headers: KEY,
+      tenantConfig: goproCreateTenant(),
+      docEndpoint: 'gopro'
+    })
+    expect(result.status).toBe(400)
+    expect(result.body).toEqual({ ok: false, outcome: 'validation', error: 'Missing create.gopro.caseTemplate' })
+    expect(fetchMock()).not.toHaveBeenCalled()
+  })
+
+  it('create.gopro rejected by GoPro → 502 create_failed, nothing uploaded', async () => {
+    const calls = installGoProRouter({ createFails: true })
+    const result = await handleCases({
+      body: { ticket_id: 123, create: { gopro: { caseTemplate: 'bad' } } },
+      headers: KEY,
+      tenantConfig: goproCreateTenant(),
+      docEndpoint: 'gopro'
+    })
+    expect(result.status).toBe(502)
+    expect(result.body.outcome).toBe('create_failed')
+    expect(calls.some(c => c.url.includes('/Documents/Create'))).toBe(false)
+  })
+
+  it('create.gopro, upload fails after the case exists → 207 orphan_case carrying the new case number', async () => {
+    installGoProRouter({ uploadFails: true })
+    const result = await handleCases({
+      body: { ticket_id: 123, create: { gopro: { caseTemplate: GP_TEMPLATE } } },
+      headers: KEY,
+      tenantConfig: goproCreateTenant(),
+      docEndpoint: 'gopro'
+    })
+    expect(result.status).toBe(207)
+    expect(result.body.outcome).toBe('orphan_case')
+    expect(result.body.caseNumber).toBe('202611-0043')
+  })
+
+  it('create.gopro against a OneSystems endpoint → 422, never creates', async () => {
+    mockTicketPrelude()
+    const result = await handleCases({
+      body: { ticket_id: 123, create: { gopro: { caseTemplate: GP_TEMPLATE } } },
+      headers: KEY,
+      tenantConfig: makeTenantConfig(),
+      docEndpoint: 'onesystems'
+    })
+    expect(result.status).toBe(422)
+    expect(result.body.outcome).toBe('gopro_create_unsupported')
+    const urls = fetchMock().mock.calls.map(c => String(c[0]))
+    expect(urls.some(u => u.includes('CreateCaseUid') || u.includes('Cases/Create'))).toBe(false)
+  })
+
   // (9) create_failed — no caseNumber
   it('createCase fetch fails → 502 create_failed, no caseNumber', async () => {
     mockTicketPrelude()

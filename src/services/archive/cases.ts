@@ -6,7 +6,9 @@
  *
  * Malaskrá sends: { ticket_id, brand_id, doc_endpoint } plus EXACTLY ONE OF
  *   - create: { onesystems: { caseTemplate, kennitala, caseName? } }  → mint a new case
- *                                                                       (backend-namespaced)
+ *             { gopro: { caseTemplate, kennitala?, caseName? } }      (backend-namespaced;
+ *                                                                       GoPro caseTemplate =
+ *                                                                       template GUID)
  *   - case_number: string                             → document into an existing case
  *
  * Every structured response body is the GW-06 envelope:
@@ -105,24 +107,31 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     }
 
     // create path: validate the GW-06 backend-namespaced create sub-shape
-    // (body.create.onesystems.caseTemplate / .kennitala — NOT flat).
-    let createParams: { caseTemplate: string; kennitala: string; caseName?: string } | undefined
+    // (body.create.<backend>.caseTemplate / .kennitala — NOT flat).
+    //   create.onesystems: caseTemplate + kennitala required
+    //   create.gopro:      caseTemplate (template GUID) required, kennitala
+    //                      optional (GoPro creates the case without a client)
+    let createParams: { namespace: 'onesystems' | 'gopro'; caseTemplate: string; kennitala: string; caseName?: string } | undefined
     if (hasCreate) {
       const c = body.create as Record<string, unknown>
-      const ns = c?.onesystems as Record<string, unknown> | undefined
+      const namespace = c?.gopro != null ? 'gopro' : 'onesystems'
+      const ns = c?.[namespace] as Record<string, unknown> | undefined
       const caseTemplate = typeof ns?.caseTemplate === 'string' ? ns.caseTemplate : ''
       const kennitala = typeof ns?.kennitala === 'string' ? ns.kennitala : ''
-      if (!caseTemplate || !kennitala) {
+      if (namespace === 'gopro' ? !caseTemplate : (!caseTemplate || !kennitala)) {
         return {
           status: 400,
           body: {
             ok: false,
             outcome: 'validation',
-            error: 'Missing create.onesystems.caseTemplate or create.onesystems.kennitala'
+            error: namespace === 'gopro'
+              ? 'Missing create.gopro.caseTemplate'
+              : 'Missing create.onesystems.caseTemplate or create.onesystems.kennitala'
           }
         }
       }
       createParams = {
+        namespace,
         caseTemplate,
         kennitala,
         caseName: typeof ns?.caseName === 'string' ? ns.caseName : undefined
@@ -180,14 +189,13 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
     const docClient = createDocClient(ep, solvingAgentEmail)
 
     if (hasCreate) {
-      // CREATE PATH — capability check FIRST (duck-typed). GW-06 only
-      // defines the create.onesystems body, so a create against any other
-      // backend stays gopro_create_unsupported until the contract (owned by
-      // the Málaskrá app) adds a namespace for it — even though the GoPro
-      // client itself can now create cases on the webhook path.
+      // CREATE PATH — capability check FIRST (duck-typed), and the create
+      // body's backend namespace must match the endpoint: create.onesystems
+      // against a GoPro endpoint stays gopro_create_unsupported (unchanged
+      // GW-06 behaviour); create.gopro is the GoPro create body.
       const canCreateCase =
         typeof (docClient as Partial<OneSystemsClient>).createCase === 'function' &&
-        ep.type === 'onesystems'
+        ep.type === createParams!.namespace
       if (!canCreateCase) {
         return {
           status: 422,
