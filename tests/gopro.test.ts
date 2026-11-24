@@ -351,36 +351,68 @@ describe('GoProClient', () => {
       expect(global.fetch).not.toHaveBeenCalled()
     })
 
-    it('createCase: POST Cases/Create with templateId, trimmed name and digits-only kennitala', async () => {
-      fetchMock().mockResolvedValueOnce(jsonOk({ id: 'g', caseNumber: '2026110012', name: 'n', url: 'https://x' }))
+    const templates = [
+      { id: 'tpl-1', type: 'General', category: 'Þjónusta', name: 'Almennt erindi' },
+      { id: 'tpl-2', type: 'General', category: '', name: 'Kvörtun' }
+    ]
 
-      const result = await client.createCase({ caseTemplate: 'tpl-1', kennitala: '010190 2989', caseName: '  Ticket #123 – Subject  ', externalId: 'ticket_123' })
+    it('createCase: names the case after its template, sends templateId and digits-only kennitala', async () => {
+      fetchMock()
+        .mockResolvedValueOnce(jsonOk(templates))
+        .mockResolvedValueOnce(jsonOk({ id: 'g', caseNumber: '2026110012', name: 'Almennt erindi', url: 'https://x' }))
+
+      const result = await client.createCase({ caseTemplate: 'tpl-1', kennitala: '010190 2989', caseName: 'Ticket #123 – Subject', externalId: 'ticket_123' })
 
       expect(result).toEqual({ caseNumber: '2026110012', caseTemplate: 'tpl-1' })
-      expect(fetchMock().mock.calls[0][0]).toBe('https://api.gopro.test/Tickets/v1/Cases/Create')
-      expect(JSON.parse(fetchMock().mock.calls[0][1].body)).toEqual({
+      expect(fetchMock().mock.calls[0][0]).toBe('https://api.gopro.test/Tickets/v1/Cases/LookupTemplates')
+      expect(fetchMock().mock.calls[1][0]).toBe('https://api.gopro.test/Tickets/v1/Cases/Create')
+      expect(JSON.parse(fetchMock().mock.calls[1][1].body)).toEqual({
         templateId: 'tpl-1',
-        name: 'Ticket #123 – Subject',
+        name: 'Almennt erindi',
         idNumber: '0101902989'
       })
     })
 
-    it('createCase: falls back to a name from the external id and omits an empty kennitala', async () => {
-      fetchMock().mockResolvedValueOnce(jsonOk({ caseNumber: 'C-1' }))
+    it('createCase: matches the template GUID case-insensitively', async () => {
+      fetchMock()
+        .mockResolvedValueOnce(jsonOk([{ id: 'A0FB-1', category: '', name: 'Demo case template' }]))
+        .mockResolvedValueOnce(jsonOk({ caseNumber: 'C-1' }))
+
+      await client.createCase({ caseTemplate: 'a0fb-1', kennitala: '' })
+      expect(JSON.parse(fetchMock().mock.calls[1][1].body).name).toBe('Demo case template')
+    })
+
+    it('createCase: template not in the list → falls back to the trimmed ticket subject', async () => {
+      fetchMock()
+        .mockResolvedValueOnce(jsonOk(templates))
+        .mockResolvedValueOnce(jsonOk({ caseNumber: 'C-1' }))
+
+      await client.createCase({ caseTemplate: 'tpl-unknown', kennitala: '', caseName: '  Ticket subject  ' })
+      expect(JSON.parse(fetchMock().mock.calls[1][1].body).name).toBe('Ticket subject')
+    })
+
+    it('createCase: template lookup fails → falls back to a name from the external id, omits an empty kennitala', async () => {
+      fetchMock()
+        .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' })
+        .mockResolvedValueOnce(jsonOk({ caseNumber: 'C-1' }))
 
       await client.createCase({ caseTemplate: 'tpl-1', kennitala: '', externalId: 'ticket_9' })
-      expect(JSON.parse(fetchMock().mock.calls[0][1].body)).toEqual({ templateId: 'tpl-1', name: 'Zendesk ticket_9' })
+      expect(JSON.parse(fetchMock().mock.calls[1][1].body)).toEqual({ templateId: 'tpl-1', name: 'Zendesk ticket_9' })
     })
 
     it('createCase: throws when GoPro returns no case number', async () => {
-      fetchMock().mockResolvedValueOnce(jsonOk({ id: 'g' }))
+      fetchMock()
+        .mockResolvedValueOnce(jsonOk(templates))
+        .mockResolvedValueOnce(jsonOk({ id: 'g' }))
 
       await expect(client.createCase({ caseTemplate: 'tpl-1', kennitala: '0101902989' }))
         .rejects.toThrow('GoPro createCase: missing case number in response')
     })
 
     it('createCase: surfaces a validation error naming the field', async () => {
-      fetchMock().mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'TemplateId is required and must be a valid GUID' })
+      fetchMock()
+        .mockResolvedValueOnce(jsonOk(templates))
+        .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'TemplateId is required and must be a valid GUID' })
 
       await expect(client.createCase({ caseTemplate: 'bad', kennitala: '0101902989' }))
         .rejects.toThrow('GoPro createCase failed: 400 - TemplateId is required and must be a valid GUID')

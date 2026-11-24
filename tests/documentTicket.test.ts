@@ -592,6 +592,8 @@ describe('documentTicket webhook create path', () => {
    * PUT (custom_fields only, no comment) from the GW-01 post-back PUT
    * (carries a comment) so stamp-before-upload ordering is assertable.
    */
+  const GOPRO_TEMPLATE_ID_FOR_ROUTER = 'a0fbcffc-8d49-4091-8d6b-98de93bc1560'
+
   function installCreateRouter(opts: {
     ticket?: object
     createCaseFails?: boolean
@@ -648,6 +650,10 @@ describe('documentTicket webhook create path', () => {
       if (url.includes('/Tickets/v1/Authenticate')) {
         record('goproAuth')
         return { ok: true, headers: new Headers({ 'X-GoProToken': 'gopro-token' }) }
+      }
+      if (url.includes('/Tickets/v1/Cases/LookupTemplates')) {
+        record('goproTemplates')
+        return { ok: true, status: 200, text: async () => JSON.stringify([{ id: GOPRO_TEMPLATE_ID_FOR_ROUTER, category: '', name: 'Almennt erindi' }]) }
       }
       if (url.includes('/Tickets/v1/Cases/Create')) {
         record('goproCreateCase')
@@ -939,7 +945,7 @@ describe('documentTicket webhook create path', () => {
     expect(creates).toHaveLength(1)
     expect(JSON.parse(creates[0].body!)).toEqual({
       templateId: GOPRO_TEMPLATE_ID,
-      name: baseTicket.subject,
+      name: 'Almennt erindi', // the template's name, not the ticket subject
       idNumber: '0101902989'
     })
     // Locked order: create → stamp → upload into the minted case.

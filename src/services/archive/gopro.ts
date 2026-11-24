@@ -162,16 +162,33 @@ export class GoProClient implements DocClient {
   }
 
   /**
+   * Name a new case after its template. Falls back to the caller's name
+   * (the ticket subject) when the template list can't be read or doesn't
+   * contain the template — GoPro then rejects an unknown template anyway.
+   */
+  private async caseNameFor(caseTemplate: string, fallback: string): Promise<string> {
+    try {
+      const template = (await this.listTemplates()).find(t => t.id.toLowerCase() === caseTemplate.toLowerCase())
+      if (template?.name?.trim()) return template.name.trim()
+      logger.warn('GoPro template not in template list, using fallback case name', { caseTemplate })
+    } catch (err) {
+      logger.warn('GoPro template lookup failed, using fallback case name', { caseTemplate, error: (err as Error).message })
+    }
+    return fallback
+  }
+
+  /**
    * Create a case from a template. `caseTemplate` is the GoPro template
-   * GUID (from listTemplates). The kennitala links the client as involved
-   * party when GoPro finds an exact active match; otherwise GoPro ignores
-   * it and still creates the case.
+   * GUID (from listTemplates); the case is named after that template. The
+   * kennitala links the client as involved party when GoPro finds an exact
+   * active match; otherwise GoPro ignores it and still creates the case.
    */
   async createCase({ caseTemplate, kennitala, caseName, externalId }: CreateCaseParams): Promise<CreateCaseResult> {
     const idNumber = normalizeKennitala(kennitala ?? '')
+    const fallbackName = (caseName ?? '').trim() || `Zendesk ${externalId ?? 'case'}`
     const body = {
       templateId: caseTemplate,
-      name: (caseName ?? '').trim() || `Zendesk ${externalId ?? 'case'}`,
+      name: await this.caseNameFor(caseTemplate, fallbackName),
       ...(idNumber ? { idNumber } : {})
     }
 
