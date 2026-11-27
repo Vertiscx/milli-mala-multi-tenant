@@ -11,6 +11,9 @@ import type {
   Logger
 } from '../../../platform/types.js'
 
+import { collectImageSources, prepareInlineImages } from '../inlineImages.js'
+import type { InlineImageMap } from '../types.js'
+
 const logger: Logger = createLogger('documentTicket')
 
 export interface TicketInfo {
@@ -19,15 +22,18 @@ export interface TicketInfo {
   comments: ZendeskComment[]
   /** Empty unless the tenant's pdf.includeSideConversations is true. */
   sideConversations: SideConversationThread[]
+  /** The ticket's attachments, plus pasted images sent as separate files. */
   attachments: DownloadedAttachment[]
   failedAttachments: { filename: string; reason: string }[]
+  /** Decision per pasted image, by src, for the PDF. */
+  inlineImages: InlineImageMap
   userMap: Record<number, string>
   solvingAgentEmail: string
 }
 
 /**
- * Fetch ticket + comments + (opt-in) side conversations + attachments and
- * resolve comment authors.
+ * Fetch ticket + comments + (opt-in) side conversations + attachments +
+ * pasted images, and resolve comment authors.
  * Owns the fail-closed brand cross-check (returns the exact 403
  * HandlerResult, never throws) and the best-effort author-resolution
  * inner try/catch (a getUsersMany rejection does NOT propagate).
@@ -70,8 +76,31 @@ export async function fetchTicketInfo(
     }
   }
 
-  const attachments = await zendesk.fetchAttachments(comments)
-  const failedAttachments = attachments.failed ?? []
+  const downloaded = await zendesk.fetchAttachments(comments)
+
+  // Images pasted into the text, but only from what the PDF will show:
+  // internal notes only if the tenant includes them, side conversations
+  // only if it includes those (the list above is empty otherwise). The
+  // same body fields as pdf.ts, so every <img> drawn has a decision.
+  const pdfConfig = tenantConfig.services.archive?.pdf
+  const shownComments = pdfConfig?.includeInternalNotes === true
+    ? comments
+    : comments.filter(c => c.public !== false)
+  const inline = await prepareInlineImages(
+    zendesk,
+    collectImageSources([
+      ...shownComments.map(c => c.html_body || c.body || c.plain_body || ''),
+      ...sideConversations.flatMap(t => t.events.map(e => e.message?.html_body || e.message?.body || ''))
+    ]),
+    downloaded,
+    brandId
+  )
+  // Images that could not be drawn go to the archive with the attachments;
+  // images with no file are reported with the failed attachments.
+  const attachments: DownloadedAttachment[] = inline.separateFiles.length > 0
+    ? [...downloaded, ...inline.separateFiles]
+    : downloaded
+  const failedAttachments = [...(downloaded.failed ?? []), ...inline.failed]
 
   // 2. Resolve all comment author names in one batch
   const authorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))]
@@ -93,5 +122,5 @@ export async function fetchTicketInfo(
     }
   }
 
-  return { ok: true, info: { zendesk, ticket, comments, sideConversations, attachments, failedAttachments, userMap, solvingAgentEmail } }
+  return { ok: true, info: { zendesk, ticket, comments, sideConversations, attachments, failedAttachments, inlineImages: inline.images, userMap, solvingAgentEmail } }
 }

@@ -90,6 +90,7 @@ src/
     onesystems.ts           OneSystems adapter (upload + createCase)
     gopro.ts                GoPro adapter (upload only)
     pdf.ts                  jsPDF rendering
+    inlineImages.ts         Images pasted into the text: draw, send separately, or report
     types.ts                Archive-only types (DocClient, DocumentationOutcome, ...)
 
   services/ticketUpdate/    The ticket-update capability. Independent of archive.
@@ -128,8 +129,14 @@ Then, per endpoint:
 1. Verify the Zendesk HMAC-SHA256 signature over `timestamp + body` with the tenant's webhook secret. Constant-time compare.
 2. Reject if the timestamp is more than five minutes from now. Replay protection.
 3. Fetch the ticket. **Brand cross-check:** if the ticket's `brand_id` does not equal the tenant's, return 403. This is what stops one institution's webhook from archiving another institution's ticket.
-4. Fetch comments, the users named in them, side conversations (only if the tenant's `pdf.includeSideConversations` is true), and attachments. Attachment downloads are restricted to `zendesk.com` and `zdassets.com` hosts and are capped by count and total size. Skipped files are reported, never silently dropped.
+4. Fetch comments, the users named in them, side conversations (only if the tenant's `pdf.includeSideConversations` is true), and attachments. Attachment downloads are restricted to `zendesk.com` and `zdassets.com` hosts and are capped by count and total size. Skipped files are reported, never silently dropped. Images pasted into the text (`<img>` in the HTML) are fetched the same way, but only from what the PDF will show: internal notes and side conversations only when the tenant includes them.
 5. Render the PDF. Internal notes are included only if the tenant's `pdf.includeInternalNotes` is true. Side conversations, with every message in them, get their own section after the ticket's conversation only if `pdf.includeSideConversations` is true. For such a tenant a failure to read side conversations fails the request like a failed comments fetch (500, Zendesk retries, nothing created yet); the PDF is never filed without them.
+   Pasted images are decided one by one before the PDF is drawn:
+   - **PNG or JPEG that jsPDF can read:** drawn where it was pasted, scaled down to the column and to one page.
+   - **Downloaded but not drawable** (GIF, WebP, HEIC, damaged, or over 10 MB): an italic placeholder in the PDF, e.g. `[Mynd: logo.gif – vistuð sem sérstakt skjal: mynd-2-logo.gif]`, and the file is sent to the archive with the attachments under that numbered name.
+   - **No file** (download refused or failed, a `cid:` reference Zendesk did not resolve, or a limit reached): a placeholder, e.g. `[Mynd: image.png – tókst ekki að sækja]`, and an entry in the result note's failed-attachment list.
+
+   Limits per request: 50 images and 50 MB downloaded; images sent separately share the 50-file, 100 MB attachment limits.
 6. Decide the case number. See section 5.
 7. Upload PDF and attachments to the archive.
 8. Write an audit entry and post an internal note back to the ticket with the outcome. If configured, stamp status and last-export custom fields.
@@ -322,7 +329,7 @@ In priority order.
 
 ## 12. Tests
 
-33 files, 802 tests, `npm test`. Highlights:
+34 files, 829 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
@@ -333,6 +340,7 @@ In priority order.
 - `tests/ticketCreate.uploads.test.ts` covers the upload route: every check runs before the body is read, the bytes reach Zendesk unchanged, the 20 MB cap, the token chaining, the error mappings, and that the filename is never logged.
 - `tests/zendesk.oauth.test.ts` covers the archive's Zendesk client in OAuth mode: the token request and scope, the per-brand cache and its expiry, the single 401 retry for reads and writes, attachment downloads without auth, the `createZendeskClient` choice between OAuth and Basic, and the fetch step end to end for an OAuth tenant.
 - `tests/sideConversations.test.ts` covers side conversations in the PDF: the list calls and their pagination (a `next_page` off the API base is refused), the `side_conversations:read` scope requested only when the option is on, the fetch step calling nothing when it is off and failing loudly when it is on and Zendesk refuses, the PDF section, and the config validation.
+- `tests/inlineImages.test.ts` covers pasted images: the `<img>` parsing, format detection by the file's first bytes, each of the three outcomes and their placeholders, the host check and limits, that images in hidden internal notes are never downloaded, and drawing in comments, internal notes and side conversations.
 - `tests/userUpdate.test.ts` covers the user-update route: the key and identifier checks, lookup by id and by email (exact, case-insensitive matches only; 404, 409), that agents and admins are never updated, the dropped fields, the 401 retries, the 422, 429 (with `Retry-After`) and 502 mappings, and that no email, name or phone number reaches the logs.
 
 CI runs tests on Node 20 and 22 on every PR, plus CodeQL.

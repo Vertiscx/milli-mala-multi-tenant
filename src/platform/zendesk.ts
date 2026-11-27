@@ -274,63 +274,82 @@ export class ZendeskClient {
         }
         return finalize()
       }
-      try {
-        // SSRF protection: only allow genuine Zendesk URLs
-        const attUrl = new URL(att.content_url)
-        if (attUrl.protocol !== 'https:') {
+      const download = await this.downloadFile(att.content_url)
+      if (!download.ok) {
+        if (download.reason === 'non-HTTPS URL') {
           logger.warn('Skipping non-HTTPS attachment URL', { url: att.content_url })
-          failed.push({ filename: att.file_name, reason: 'non-HTTPS URL' })
-          continue
-        }
-        // Proper domain check: extract the last two labels and compare exactly.
-        // This prevents bypasses like "evil-zendesk.com" matching ".zendesk.com".
-        const hostParts = attUrl.hostname.split('.')
-        const domain = hostParts.slice(-2).join('.')
-        if (domain !== 'zendesk.com' && domain !== 'zdassets.com') {
+        } else if (download.reason === 'non-Zendesk URL') {
           logger.warn('Skipping non-Zendesk attachment URL', { url: att.content_url })
-          failed.push({ filename: att.file_name, reason: 'non-Zendesk URL' })
-          continue
-        }
-        // An OAuth token gets 403 on attachment URLs, while the URL itself
-        // works without any auth as long as the account's "Allow secure
-        // downloads" setting is off (checked on d3v, 2026-11-04). So an
-        // OAuth client sends no Authorization header here; if that
-        // setting is ever turned on, downloads fail and show up in the
-        // result note and the audit entry.
-        const response = await fetchWithTimeout(att.content_url, this.oauth
-          ? {}
-          : { headers: { 'Authorization': `Basic ${this.auth}` } })
-        if (!response.ok) {
+        } else if (download.reason === 'download error') {
+          logger.warn('Failed to download attachment', { filename: att.file_name, error: download.error })
+        } else {
           logger.warn('Attachment download returned non-OK status', {
-            filename: att.file_name, status: response.status
+            filename: att.file_name, status: download.status
           })
-          failed.push({ filename: att.file_name, reason: `download status ${response.status}` })
-          continue
         }
-        const buffer = Buffer.from(await response.arrayBuffer())
-        if (totalBytes + buffer.length > maxTotalBytes) {
-          logger.warn('Attachment total size limit reached', {
-            maxTotalBytes, currentBytes: totalBytes, skipped: all.length - i
-          })
-          for (const rest of all.slice(i)) {
-            failed.push({ filename: rest.file_name, reason: 'total size limit reached' })
-          }
-          return finalize()
-        }
-        totalBytes += buffer.length
-        attachments.push({
-          filename: att.file_name,
-          contentType: att.content_type,
-          size: att.size,
-          data: buffer
-        })
-        logger.debug('Downloaded attachment', { filename: att.file_name, size: att.size })
-      } catch (error) {
-        logger.warn('Failed to download attachment', { filename: att.file_name, error: (error as Error).message })
-        failed.push({ filename: att.file_name, reason: 'download error' })
+        failed.push({ filename: att.file_name, reason: download.reason })
+        continue
       }
+      const buffer = download.data
+      if (totalBytes + buffer.length > maxTotalBytes) {
+        logger.warn('Attachment total size limit reached', {
+          maxTotalBytes, currentBytes: totalBytes, skipped: all.length - i
+        })
+        for (const rest of all.slice(i)) {
+          failed.push({ filename: rest.file_name, reason: 'total size limit reached' })
+        }
+        return finalize()
+      }
+      totalBytes += buffer.length
+      attachments.push({
+        filename: att.file_name,
+        contentType: att.content_type,
+        size: att.size,
+        data: buffer
+      })
+      logger.debug('Downloaded attachment', { filename: att.file_name, size: att.size })
     }
     return finalize()
+  }
+
+  /**
+   * Download one file from Zendesk: an attachment's content_url, or an
+   * image pasted into a comment. Never throws; a refusal or failure comes
+   * back as a reason string for the result note.
+   *
+   * SSRF protection: only HTTPS URLs on zendesk.com or zdassets.com are
+   * fetched. The domain check compares the last two labels exactly, so
+   * "evil-zendesk.com" does not pass as ".zendesk.com".
+   */
+  async downloadFile(url: string): Promise<
+    | { ok: true; data: Buffer; contentType: string }
+    | { ok: false; reason: string; status?: number; error?: string }
+  > {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'https:') return { ok: false, reason: 'non-HTTPS URL' }
+      const domain = parsed.hostname.split('.').slice(-2).join('.')
+      if (domain !== 'zendesk.com' && domain !== 'zdassets.com') {
+        return { ok: false, reason: 'non-Zendesk URL' }
+      }
+      // An OAuth token gets 403 on attachment URLs, while the URL itself
+      // works without any auth as long as the account's "Allow secure
+      // downloads" setting is off (checked on d3v, 2026-11-04). So an
+      // OAuth client sends no Authorization header here; if that
+      // setting is ever turned on, downloads fail and show up in the
+      // result note and the audit entry.
+      const response = await fetchWithTimeout(url, this.oauth
+        ? {}
+        : { headers: { 'Authorization': `Basic ${this.auth}` } })
+      if (!response.ok) {
+        return { ok: false, reason: `download status ${response.status}`, status: response.status }
+      }
+      const data = Buffer.from(await response.arrayBuffer())
+      const contentType = response.headers?.get?.('content-type') ?? ''
+      return { ok: true, data, contentType }
+    } catch (error) {
+      return { ok: false, reason: 'download error', error: (error as Error).message }
+    }
   }
 }
 

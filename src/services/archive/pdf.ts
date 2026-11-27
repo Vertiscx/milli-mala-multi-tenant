@@ -1,17 +1,20 @@
 /**
  * PDF Generator - creates ticket documentation PDF using jsPDF
- * Renders rich text (HTML) from Zendesk comments with basic formatting.
+ * Renders rich text (HTML) from Zendesk comments with basic formatting,
+ * and pasted images where they appear (see inlineImages.ts).
  */
 
 import { jsPDF } from 'jspdf'
 import type { ZendeskTicket, ZendeskComment, PdfConfig, SideConversationThread, ZendeskSideConversationParticipant } from '../../platform/types.js'
-import type { PdfBlock, PdfRun } from './types.js'
+import type { PdfBlock, PdfRun, InlineImageMap } from './types.js'
 
 interface PdfOptions {
   pdfConfig: PdfConfig
   userMap?: Record<number | string, string>
   /** Rendered only when pdfConfig.includeSideConversations is true. */
   sideConversations?: SideConversationThread[]
+  /** Pasted images by src (inlineImages.ts). One missing here gets a plain '[Mynd]' placeholder. */
+  inlineImages?: InlineImageMap
 }
 
 export async function generateTicketPdf(ticket: ZendeskTicket, comments: ZendeskComment[], options: PdfOptions): Promise<Buffer> {
@@ -111,7 +114,7 @@ export async function generateTicketPdf(ticket: ZendeskTicket, comments: Zendesk
     // Comment body - render as rich text
     const htmlBody = comment.html_body || comment.body || comment.plain_body || ''
     const blocks = parseHtmlToBlocks(htmlBody)
-    y = renderBlocks(doc, blocks, y, margin, maxWidth, pageHeight, { isInternal })
+    y = renderBlocks(doc, blocks, y, margin, maxWidth, pageHeight, { isInternal, images: options.inlineImages })
 
     // Internal note: bottom padding for grey background
     if (isInternal) {
@@ -192,7 +195,7 @@ export async function generateTicketPdf(ticket: ZendeskTicket, comments: Zendesk
         }
         y += 2
         const blocks = parseHtmlToBlocks(message.html_body || message.body || '')
-        y = renderBlocks(doc, blocks, y, margin, maxWidth, pageHeight)
+        y = renderBlocks(doc, blocks, y, margin, maxWidth, pageHeight, { images: options.inlineImages })
         y += 8
       }
 
@@ -349,7 +352,23 @@ export function parseHtmlToBlocks(html: string | null | undefined): PdfBlock[] {
       } else if (tagName === 'tr') {
         if (isClosing) flushBlock()
       }
-      // Ignore all other tags (img, span, table, thead, tbody, etc.)
+      // Pasted image: its own block, drawn or replaced by a placeholder
+      // at render time (see inlineImages.ts). An <img> without a src is
+      // ignored as before.
+      else if (tagName === 'img') {
+        const srcMatch = fullTag.match(/\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i)
+        const src = srcMatch ? decodeEntities(srcMatch[1] ?? srcMatch[2] ?? srcMatch[3] ?? '').trim() : ''
+        if (src) {
+          flushBlock()
+          blocks.push({
+            type: 'image',
+            runs: [],
+            indent: (listStack.length * 15) + (blockquoteDepth * 20),
+            src
+          })
+        }
+      }
+      // Ignore all other tags (span, table, thead, tbody, etc.)
 
     } else {
       // Collect text until next tag
@@ -417,7 +436,14 @@ function getFontStyle(b: boolean, i: boolean): string {
   return 'normal'
 }
 
-function renderBlocks(doc: jsPDF, blocks: PdfBlock[], startY: number, margin: number, maxWidth: number, pageHeight: number, options: { isInternal?: boolean } = {}): number {
+// Pixels to points (96 dpi screen → 72 pt per inch): a screenshot is drawn
+// at the size it had on screen, unless that is wider than the column.
+const PX_TO_PT = 0.75
+
+function renderBlocks(
+  doc: jsPDF, blocks: PdfBlock[], startY: number, margin: number, maxWidth: number, pageHeight: number,
+  options: { isInternal?: boolean; images?: InlineImageMap } = {}
+): number {
   const { isInternal } = options
   let y = startY
 
@@ -428,7 +454,41 @@ function renderBlocks(doc: jsPDF, blocks: PdfBlock[], startY: number, margin: nu
     const fontSize = block.type === 'heading' ? 11 : 9
     doc.setFontSize(fontSize)
 
-    const lines = wrapStyledRuns(doc, block.runs, blockWidth, fontSize)
+    let runs = block.runs
+    if (block.type === 'image') {
+      const image = options.images?.get(block.src ?? '')
+      if (image?.kind === 'embed') {
+        // Scale down (never up) to the column width and to one page.
+        let w = Math.min(image.width * PX_TO_PT, blockWidth)
+        let h = image.height * (w / image.width)
+        const maxH = pageHeight - margin * 2 - 20
+        if (h > maxH) {
+          w = w * (maxH / h)
+          h = maxH
+        }
+        let top = y - fontSize
+        if (top + h > pageHeight - 40) {
+          doc.addPage()
+          y = margin
+          top = y - fontSize
+        }
+        if (isInternal) {
+          doc.setFillColor(240, 240, 240)
+          // Down to where the next line's grey band starts, so no gap shows.
+          doc.rect(margin - 6, top - 2, maxWidth + 12, h + 8, 'F')
+        }
+        // FAST: jsPDF otherwise stores PNG pixels uncompressed (a 1 KB
+        // screenshot became ~240 KB). JPEG is embedded as it is.
+        doc.addImage(image.data, image.format, blockX, top, w, h, undefined, image.format === 'PNG' ? 'FAST' : undefined)
+        y = top + h + fontSize * 1.4 + 2
+        continue
+      }
+      // Not drawable: an italic placeholder line in its place.
+      const placeholder = image ? image.placeholder : '[Mynd]'
+      runs = [{ text: placeholder, bold: false, italic: true }]
+    }
+
+    const lines = wrapStyledRuns(doc, runs, blockWidth, fontSize)
 
     for (const line of lines) {
       if (y > pageHeight - 40) {

@@ -236,6 +236,8 @@ Start with the ticket. Every attempt leaves an internal note: a tick with the ca
 | Archive returns 404 on upload | Trailing slash on the base URL, or wrong path | Config. |
 | Archive auth fails | Expired or wrong credential | Test the archive API directly. |
 | Every attachment of an OAuth tenant is listed as failed (`download status 403`) | "Allow secure downloads" was turned on in Zendesk | Turn it off (section 5d). |
+| PDFs show `[Mynd: … – tókst ekki að sækja]` and the note lists `mynd í texta: download status 403` | Same cause: pasted images are downloaded like attachments | As above. |
+| A pasted image appears in the PDF only as `[Mynd: … – vistuð sem sérstakt skjal: mynd-<n>-…]` | The image is not PNG or JPEG (e.g. GIF, HEIC from an iPhone), is damaged, or is over 10 MB | Expected. The file is in the archive case under that name. |
 | Archive fails with `Zendesk OAuth token request failed` in the log | Wrong client ID or secret, the client was deleted, or it lacks a scope | Check the OAuth client in Zendesk against section 5d. |
 | Same ticket archived repeatedly | Trigger is not one-shot | Fix the trigger as in section 5. |
 | Every archive request for a tenant with `includeSideConversations` fails with 500, and the log shows `Zendesk API error: 403` on `side_conversations` | The account lacks the Collaboration add-on, or the API user can't see side conversations | Enable the add-on, or set `includeSideConversations: false` and redeploy (section 5e). |
@@ -255,4 +257,4 @@ Outbound, and nothing else: `*.zendesk.com` and `*.zdassets.com` for the Zendesk
 
 ## 10. Data handling
 
-The service is stateless. Ticket content, comments, attachments, uploaded files and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Internal notes and side conversations are excluded from the PDF unless the tenant opts in.
+The service is stateless. Ticket content, comments, attachments, uploaded files and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Images pasted into the text are drawn into the PDF when they are PNG or JPEG; others are sent to the archive as separate files within the same caps. Images in internal notes or side conversations are only downloaded when the tenant includes those in the PDF. Internal notes and side conversations are excluded from the PDF unless the tenant opts in.

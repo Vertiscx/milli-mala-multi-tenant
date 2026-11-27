@@ -99,10 +99,10 @@ export async function documentTicket(
     const fetched = await fetchTicketInfo(tenantConfig, ticketId)
     if (!fetched.ok) return fetched.result
     ;({ ticket, comments, attachments, failedAttachments } = fetched.info)
-    const { userMap, solvingAgentEmail, zendesk, sideConversations } = fetched.info
+    const { userMap, solvingAgentEmail, zendesk, sideConversations, inlineImages } = fetched.info
 
     // 3. Generate PDF
-    pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap, sideConversations)
+    pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap, sideConversations, inlineImages)
 
     // 4. Upload to document system
     // createDocClient is constructed here (original line-134 position) so a

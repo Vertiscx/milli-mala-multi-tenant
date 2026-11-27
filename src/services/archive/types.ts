@@ -96,7 +96,26 @@ export interface PdfBlock {
   type: string
   runs: PdfRun[]
   indent: number
+  /** type 'image' only: the <img> src, entities decoded. */
+  src?: string
 }
+
+/**
+ * What the PDF does with one image pasted into a comment or a side
+ * conversation message, decided before rendering (inlineImages.ts):
+ *  - embed:    drawn in the PDF where it was pasted
+ *  - separate: downloaded but not drawable (format, damaged, too large);
+ *              a placeholder in the PDF, the file sent to the archive
+ *  - failed:   no file to send (download refused or failed, or a limit
+ *              was reached); a placeholder in the PDF, listed in the
+ *              result note as a failed attachment
+ */
+export type InlineImage =
+  | { kind: 'embed'; data: Uint8Array; format: 'PNG' | 'JPEG'; width: number; height: number }
+  | { kind: 'separate' | 'failed'; placeholder: string }
+
+/** Keyed by the <img> src exactly as parseHtmlToBlocks returns it. */
+export type InlineImageMap = Map<string, InlineImage>
 
 export interface PdfRun {
   text: string
