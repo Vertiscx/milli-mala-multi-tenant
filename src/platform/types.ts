@@ -149,6 +149,9 @@ export interface PdfConfig {
   companyName: string
   locale: string
   includeInternalNotes: boolean
+  // Side conversations are fetched and rendered only when this is true.
+  // OAuth tenants then also request the side_conversations:read scope.
+  includeSideConversations: boolean
 }
 
 // ─── Zendesk API Types ───────────────────────────────────────────────
@@ -191,6 +194,43 @@ export interface ZendeskUser {
   id: number
   name: string
   email: string
+}
+
+// Side Conversations API. A participant (also an event's actor and a
+// message's from/to) is a Zendesk user or an outside email address.
+export interface ZendeskSideConversationParticipant {
+  user_id?: number | null
+  name?: string | null
+  email?: string | null
+}
+
+export interface ZendeskSideConversation {
+  id: string
+  subject?: string | null
+  state?: string
+  created_at: string
+  participants?: ZendeskSideConversationParticipant[]
+}
+
+export interface ZendeskSideConversationEvent {
+  id: string
+  // 'create' and 'reply' carry a message; 'update' carries state/subject changes.
+  type: string
+  created_at: string
+  actor?: ZendeskSideConversationParticipant | null
+  message?: {
+    subject?: string | null
+    body?: string | null
+    html_body?: string | null
+    from?: ZendeskSideConversationParticipant | null
+    to?: ZendeskSideConversationParticipant[]
+  } | null
+}
+
+/** A side conversation with its events, ready for the PDF. */
+export interface SideConversationThread {
+  sideConversation: ZendeskSideConversation
+  events: ZendeskSideConversationEvent[]
 }
 
 // ─── Document System Types ───────────────────────────────────────────

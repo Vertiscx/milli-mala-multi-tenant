@@ -116,7 +116,7 @@ Requires Node.js 20 or later.
 
 ```bash
 npm ci
-npm test              # 785 tests, about a second
+npm test              # 802 tests, about a second
 npm run typecheck
 ```
 

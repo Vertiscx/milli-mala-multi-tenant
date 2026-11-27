@@ -4,12 +4,14 @@
  */
 
 import { jsPDF } from 'jspdf'
-import type { ZendeskTicket, ZendeskComment, PdfConfig } from '../../platform/types.js'
+import type { ZendeskTicket, ZendeskComment, PdfConfig, SideConversationThread, ZendeskSideConversationParticipant } from '../../platform/types.js'
 import type { PdfBlock, PdfRun } from './types.js'
 
 interface PdfOptions {
   pdfConfig: PdfConfig
   userMap?: Record<number | string, string>
+  /** Rendered only when pdfConfig.includeSideConversations is true. */
+  sideConversations?: SideConversationThread[]
 }
 
 export async function generateTicketPdf(ticket: ZendeskTicket, comments: ZendeskComment[], options: PdfOptions): Promise<Buffer> {
@@ -125,8 +127,99 @@ export async function generateTicketPdf(ticket: ZendeskTicket, comments: Zendesk
     y += 14
   }
 
+  // Side conversations — only when the tenant opted in, and only if the
+  // ticket has any. Rendered after the ticket's own conversation.
+  const sideConversations = pdfConfig.includeSideConversations === true
+    ? sortByCreatedAt(options.sideConversations ?? [], t => t.sideConversation.created_at)
+    : []
+
+  const writeLine = (text: string, style: 'normal' | 'bold', fontSize: number): void => {
+    doc.setFont('helvetica', style)
+    doc.setFontSize(fontSize)
+    for (const line of doc.splitTextToSize(text, maxWidth) as string[]) {
+      if (y > pageHeight - 40) {
+        doc.addPage()
+        y = margin
+      }
+      doc.text(line, margin, y)
+      y += fontSize * 1.4
+    }
+  }
+
+  if (sideConversations.length > 0) {
+    if (y > pageHeight - 80) {
+      doc.addPage()
+      y = margin
+    }
+    y += 6
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(14)
+    doc.text('Hliðarsamtöl', margin, y)
+    // Same black hairline as the 'Samskipti' heading (the separators above
+    // left the draw colour grey).
+    doc.setDrawColor(0, 0, 0)
+    doc.setLineWidth(0.2)
+    doc.line(margin, y + 2, margin + doc.getTextWidth('Hliðarsamtöl'), y + 2)
+    y += 20
+
+    for (const { sideConversation: sc, events } of sideConversations) {
+      if (y > pageHeight - 80) {
+        doc.addPage()
+        y = margin
+      }
+      writeLine(`Hliðarsamtal: ${sc.subject || '(ekkert efni)'}`, 'bold', 11)
+      const details = [`Stofnað: ${formatDate(sc.created_at, pdfConfig.locale)}`]
+      if (sc.state) details.push(`Staða: ${SIDE_CONVERSATION_STATES[sc.state] ?? sc.state}`)
+      writeLine(details.join('   '), 'normal', 9)
+      if (sc.participants && sc.participants.length > 0) {
+        writeLine(`Þátttakendur: ${sc.participants.map(participantLabel).join(', ')}`, 'normal', 9)
+      }
+      y += 6
+
+      const messages = sortByCreatedAt(events.filter(e => e.message), e => e.created_at)
+      for (const event of messages) {
+        const message = event.message!
+        if (y > pageHeight - 80) {
+          doc.addPage()
+          y = margin
+        }
+        writeLine(
+          `${formatDate(event.created_at, pdfConfig.locale)} — ${participantLabel(message.from ?? event.actor ?? {})}`,
+          'bold', 10
+        )
+        if (message.to && message.to.length > 0) {
+          writeLine(`Til: ${message.to.map(participantLabel).join(', ')}`, 'normal', 9)
+        }
+        y += 2
+        const blocks = parseHtmlToBlocks(message.html_body || message.body || '')
+        y = renderBlocks(doc, blocks, y, margin, maxWidth, pageHeight)
+        y += 8
+      }
+
+      // Separator line after each side conversation
+      y += 6
+      doc.setDrawColor(200, 200, 200)
+      doc.setLineWidth(0.5)
+      doc.line(margin, y, pageWidth - margin, y)
+      y += 14
+    }
+  }
+
   const arrayBuffer = doc.output('arraybuffer')
   return Buffer.from(arrayBuffer)
+}
+
+const SIDE_CONVERSATION_STATES: Record<string, string> = { open: 'opið', closed: 'lokað' }
+
+/** "Name <email>", or whichever of the two exists. */
+function participantLabel(p: ZendeskSideConversationParticipant): string {
+  if (p.name && p.email) return `${p.name} <${p.email}>`
+  return p.name || p.email || 'Óþekktur'
+}
+
+/** Stable oldest-first sort; Zendesk's list order is not documented. */
+function sortByCreatedAt<T>(items: T[], createdAt: (item: T) => string): T[] {
+  return [...items].sort((a, b) => (Date.parse(createdAt(a)) || 0) - (Date.parse(createdAt(b)) || 0))
 }
 
 function formatDate(dateStr: string, locale: string): string {

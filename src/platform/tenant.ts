@@ -248,6 +248,12 @@ export function validateArchiveConfig(
     if (archive.pdf.locale !== undefined && typeof archive.pdf.locale !== 'string') {
       missing.push('pdf.locale (must be a string)')
     }
+    // Absent means off. A non-boolean (e.g. the string "false" from JSON)
+    // is refused rather than guessed at.
+    if (archive.pdf.includeSideConversations !== undefined &&
+        typeof archive.pdf.includeSideConversations !== 'boolean') {
+      missing.push('pdf.includeSideConversations (must be true or false)')
+    }
   }
 
   // At least one endpoint

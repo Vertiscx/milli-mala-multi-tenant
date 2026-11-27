@@ -10,7 +10,7 @@
 
 import { createLogger, capBody } from './logger.js'
 import { fetchWithTimeout } from './http.js'
-import type { TenantConfig, ZendeskTicket, ZendeskComment, ZendeskUser, DownloadedAttachment, AttachmentsResult, Logger } from './types.js'
+import type { TenantConfig, ZendeskTicket, ZendeskComment, ZendeskUser, ZendeskSideConversation, ZendeskSideConversationEvent, DownloadedAttachment, AttachmentsResult, Logger } from './types.js'
 
 const logger: Logger = createLogger('zendesk')
 
@@ -19,6 +19,17 @@ const logger: Logger = createLogger('zendesk')
 // users/show_many (users:read), stamp fields and post the result note
 // (tickets:write). Confirmed on d3v (2026-11-04).
 export const ZENDESK_ARCHIVE_OAUTH_SCOPE = 'tickets:read tickets:write users:read'
+
+// Added to the archive scope only for tenants with
+// pdf.includeSideConversations. Zendesk's Side Conversations API names
+// this scope; tickets:read does not cover it. A client that isn't allowed
+// the scope gets 400 invalid_scope on the token request, so requesting it
+// for every tenant would break archiving for tenants that never use it.
+export const ZENDESK_SIDE_CONVERSATIONS_SCOPE = 'side_conversations:read'
+
+// Upper bound on pages followed for one paginated list, so a misbehaving
+// next_page can never loop forever.
+const MAX_PAGES = 50
 
 // Refresh well before actual expiry so a cached token can't expire in
 // flight; floored so a very short expires_in still caches briefly.
@@ -30,6 +41,8 @@ export interface ZendeskOAuthCredentials {
   brandId: string
   clientId: string
   clientSecret: string
+  /** Space-separated scopes; defaults to ZENDESK_ARCHIVE_OAUTH_SCOPE. */
+  scope?: string
 }
 
 interface CachedToken {
@@ -50,7 +63,7 @@ async function fetchAccessToken(subdomain: string, oauth: ZendeskOAuthCredential
       grant_type: 'client_credentials',
       client_id: oauth.clientId,
       client_secret: oauth.clientSecret,
-      scope: ZENDESK_ARCHIVE_OAUTH_SCOPE
+      scope: oauth.scope ?? ZENDESK_ARCHIVE_OAUTH_SCOPE
     }).toString()
   })
   if (!response.ok) {
@@ -179,6 +192,43 @@ export class ZendeskClient {
     return (data.comments as ZendeskComment[]) || []
   }
 
+  /**
+   * Fetch every page of a list endpoint. Zendesk returns the next page as
+   * a full URL in `next_page`; it is followed only while it stays on this
+   * client's own API base, and a next_page anywhere else is an error
+   * rather than a silently shortened list.
+   */
+  private async requestAllPages<T>(endpoint: string, key: string): Promise<T[]> {
+    const items: T[] = []
+    let path: string | null = endpoint
+    for (let page = 0; path !== null; page++) {
+      if (page >= MAX_PAGES) throw new Error(`Zendesk pagination exceeded ${MAX_PAGES} pages`)
+      const data = await this.request(path)
+      items.push(...((data[key] as T[] | undefined) ?? []))
+      const next = data.next_page
+      if (typeof next !== 'string' || next === '') {
+        path = null
+      } else if (next.startsWith(`${this.baseUrl}/`)) {
+        path = next.slice(this.baseUrl.length)
+      } else {
+        throw new Error('Zendesk next_page points outside the API base URL')
+      }
+    }
+    return items
+  }
+
+  async getSideConversations(ticketId: number): Promise<ZendeskSideConversation[]> {
+    return this.requestAllPages<ZendeskSideConversation>(
+      `/tickets/${ticketId}/side_conversations`, 'side_conversations'
+    )
+  }
+
+  async getSideConversationEvents(ticketId: number, sideConversationId: string): Promise<ZendeskSideConversationEvent[]> {
+    return this.requestAllPages<ZendeskSideConversationEvent>(
+      `/tickets/${ticketId}/side_conversations/${encodeURIComponent(sideConversationId)}/events`, 'events'
+    )
+  }
+
   async getUser(userId: number): Promise<ZendeskUser> {
     const data = await this.request(`/users/${userId}.json`)
     return data.user as ZendeskUser
@@ -296,7 +346,10 @@ export function createZendeskClient(tenantConfig: TenantConfig): ZendeskClient {
     return new ZendeskClient(z.subdomain, {
       brandId: tenantConfig.brand_id,
       clientId: z.oauth.clientId,
-      clientSecret: z.oauth.clientSecret
+      clientSecret: z.oauth.clientSecret,
+      scope: tenantConfig.services.archive?.pdf?.includeSideConversations === true
+        ? `${ZENDESK_ARCHIVE_OAUTH_SCOPE} ${ZENDESK_SIDE_CONVERSATIONS_SCOPE}`
+        : ZENDESK_ARCHIVE_OAUTH_SCOPE
     })
   }
   if (!z.apiToken || !z.email) {

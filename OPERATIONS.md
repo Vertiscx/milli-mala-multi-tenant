@@ -94,7 +94,7 @@ Two layers.
 | `<T>_ZENDESK_SUBDOMAIN` | yes | **Bare subdomain only**, for example `digitaliceland`. Not the hostname. A value with a dot fails validation and the tenant returns 400 on every request. |
 | `<T>_ZENDESK_EMAIL` | archive tenants on an API token | The API user. Needs ticket-write scope for the case-number stamp and the result note. |
 | `<T>_ZENDESK_API_TOKEN` | archive tenants on an API token | 32+ characters. Zendesk tokens are 40. |
-| `<T>_ARCHIVE_OAUTH_CLIENT_ID`, `<T>_ARCHIVE_OAUTH_CLIENT_SECRET` | archive tenants on OAuth | In place of the email and API token, which Zendesk no longer issues. A Confidential OAuth client used only for archiving, scoped `tickets:read`, `tickets:write` and `users:read`. Secret 32+ characters. Section 5d. |
+| `<T>_ARCHIVE_OAUTH_CLIENT_ID`, `<T>_ARCHIVE_OAUTH_CLIENT_SECRET` | archive tenants on OAuth | In place of the email and API token, which Zendesk no longer issues. A Confidential OAuth client used only for archiving, scoped `tickets:read`, `tickets:write` and `users:read` (plus `side_conversations:read` if the tenant includes side conversations, section 5e). Secret 32+ characters. Section 5d. |
 | `<T>_ZENDESK_WEBHOOK_SECRET` | archive tenants | Shown once by Zendesk when the webhook is created. 32+ characters. |
 | `<T>_ONESYSTEMS_BASE_URL` and `<T>_ONESYSTEMS_APP_KEY` | OneSystems tenants | HTTPS, public hostname, **no trailing slash**. |
 | `<T>_GOPRO_BASE_URL`, `<T>_GOPRO_USERNAME`, `<T>_GOPRO_PASSWORD` | GoPro tenants | Password 16+ characters. |
@@ -119,7 +119,7 @@ Validation runs at boot. The container refuses to start on a missing required va
 
 End to end, in the order that avoids the two common mistakes (deploying before secrets exist, and confusing subdomain with hostname).
 
-1. **Collect from the institution:** brand ID, which archive product, the archive base URL and credential, whether internal notes should be included in the PDF.
+1. **Collect from the institution:** brand ID, which archive product, the archive base URL and credential, whether internal notes should be included in the PDF, and whether side conversations should be (section 5e).
 2. **Zendesk side, done by the institution admin or by you with admin access:**
    - Create the webhook: Admin Center, Apps and integrations, Webhooks. URL `https://milli-mala.tooling.island.is/v1/webhook`, method POST, JSON. Enable the signing secret and copy it.
    - Create the trigger. Body:
@@ -179,7 +179,7 @@ End to end, in the order that avoids the two common mistakes (deploying before s
 
 Zendesk no longer lets new API tokens be created, so a new archive tenant signs in to Zendesk with an OAuth client. Existing tenants keep their API tokens until they are moved over; the steps are the same.
 
-1. **Zendesk side:** create an OAuth client (Admin Center, Apps and integrations, APIs, OAuth clients) on the tenant's account, kind **Confidential**, used only for archiving. Restrict its scopes to `tickets:read`, `tickets:write` and `users:read`. Note the client ID and secret; the full secret is shown only once.
+1. **Zendesk side:** create an OAuth client (Admin Center, Apps and integrations, APIs, OAuth clients) on the tenant's account, kind **Confidential**, used only for archiving. Restrict its scopes to `tickets:read`, `tickets:write` and `users:read`, and add `side_conversations:read` if the tenant includes side conversations (section 5e). Note the client ID and secret; the full secret is shown only once.
 2. **Check "Allow secure downloads" is off** (in Admin Center; search for "secure downloads"). The gateway downloads attachments without a token, because Zendesk refuses OAuth tokens on attachment URLs. With the setting on, every attachment download fails: the PDF is still filed, and the note on the ticket lists the missing files.
 3. **Code:** in the tenant's block in `src/tenants.config.ts`, replace `email` and `apiToken` with
    ```ts
@@ -191,6 +191,16 @@ Zendesk no longer lets new API tokens be created, so a new archive tenant signs 
    and swap the variable names in `.env.example`. Keeping both is a boot failure.
 4. **Secrets:** send the two values to DevOps as in section 5 step 4. For a tenant moving over, ask DevOps to remove `<T>_ZENDESK_EMAIL` and `<T>_ZENDESK_API_TOKEN` once it is deployed, and revoke the old API token in Zendesk.
 5. **Deploy**, then archive one real test ticket with an attachment. The result note now shows the OAuth client's user as its author.
+
+## 5e. Including side conversations in the PDF
+
+Side conversations are left out of the PDF unless the tenant opts in, the same way as internal notes. No new environment variables.
+
+1. **Zendesk side:** side conversations need the Collaboration add-on on the tenant's account. For a tenant on OAuth (section 5d), allow the archive OAuth client the `side_conversations:read` scope **before** deploying: once the option is on, the gateway requests that scope, and Zendesk refuses the whole token request if the client isn't allowed it, which stops all archiving for the tenant. A tenant on an API token needs nothing more.
+2. **Code:** in the tenant's block in `src/tenants.config.ts`, set `includeSideConversations: true` in `pdf`. Every archive tenant sets it explicitly; `false` is the default.
+3. **Deploy**, then archive one real ticket that has a side conversation and check the PDF has a "Hliðarsamtöl" section with every message.
+
+With the option on, a failure to read side conversations fails the archiving request (500, Zendesk retries) rather than filing a PDF without them. The PDF holds only their text: files attached inside a side conversation are not forwarded to the archive.
 
 ## 6. Rotating a secret
 
@@ -228,6 +238,8 @@ Start with the ticket. Every attempt leaves an internal note: a tick with the ca
 | Every attachment of an OAuth tenant is listed as failed (`download status 403`) | "Allow secure downloads" was turned on in Zendesk | Turn it off (section 5d). |
 | Archive fails with `Zendesk OAuth token request failed` in the log | Wrong client ID or secret, the client was deleted, or it lacks a scope | Check the OAuth client in Zendesk against section 5d. |
 | Same ticket archived repeatedly | Trigger is not one-shot | Fix the trigger as in section 5. |
+| Every archive request for a tenant with `includeSideConversations` fails with 500, and the log shows `Zendesk API error: 403` on `side_conversations` | The account lacks the Collaboration add-on, or the API user can't see side conversations | Enable the add-on, or set `includeSideConversations: false` and redeploy (section 5e). |
+| Every archive request for an OAuth tenant fails just after `includeSideConversations` was turned on, with `Zendesk OAuth token request failed: 400` in the log | The archive OAuth client isn't allowed `side_conversations:read` | Add the scope to the client in Zendesk (section 5e). |
 | `404 User not found` on `/v1/users/update` for a user who exists | The user is an agent or admin (never updated), or was created seconds ago and is not yet in Zendesk's search | Check the user's role in Zendesk. For a new user, retry once or send `user.id`. |
 | `409 Email matches more than one user` | Two users share that email address across the account | Send `user.id` instead. |
 | `429` on `/v1/users/update` | The same user was updated more than five times in a minute | Retry after the `Retry-After` seconds. |
@@ -243,4 +255,4 @@ Outbound, and nothing else: `*.zendesk.com` and `*.zdassets.com` for the Zendesk
 
 ## 10. Data handling
 
-The service is stateless. Ticket content, comments, attachments, uploaded files and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Internal notes are excluded from the PDF unless the tenant opts in.
+The service is stateless. Ticket content, comments, attachments, uploaded files and the rendered PDF exist in memory for the duration of one request and are discarded. Only audit metadata is written to disk, and it contains no ticket content, names, emails, or kennitala. Attachments are capped at 50 files and 100 MB per request; anything over the cap is reported in the result note, not silently dropped. Internal notes and side conversations are excluded from the PDF unless the tenant opts in.

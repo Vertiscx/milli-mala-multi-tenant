@@ -194,6 +194,12 @@ describe('loadTenants', () => {
     }
   })
 
+  it('sets includeSideConversations explicitly on every archive tenant, off for all of them', () => {
+    for (const t of loadTenants(validEnv).filter(t => t.services.archive)) {
+      expect(t.services.archive!.pdf.includeSideConversations).toBe(false)
+    }
+  })
+
   it('configures both Tryggingastofnun brands with OneSystems endpoints and distinct brand_ids', () => {
     const [, , , tryggingastofnun, tryggingastofnunInternal] = loadTenants(validEnv)
     expect(tryggingastofnun.services.archive!.endpoints.onesystems?.type).toBe('onesystems')
@@ -402,7 +408,7 @@ describe('loadTenants — Þjóðskrá (OneSystems archive, ticket creation and 
       appKey: testSecret('thjod-os-appkey', 40),
     })
     expect(archive.malaskra.apiKey).toBe(testSecret('thjod-malaskra-key', 40))
-    expect(archive.pdf).toEqual({ companyName: 'Þjóðskrá', locale: 'is-IS', includeInternalNotes: false })
+    expect(archive.pdf).toEqual({ companyName: 'Þjóðskrá', locale: 'is-IS', includeInternalNotes: false, includeSideConversations: false })
   })
 
   it('wires the template, kennitala and case-number field IDs, and leaves them unset when absent', () => {

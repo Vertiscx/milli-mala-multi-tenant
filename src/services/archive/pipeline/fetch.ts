@@ -6,6 +6,7 @@ import type {
   ZendeskTicket,
   ZendeskComment,
   ZendeskUser,
+  SideConversationThread,
   DownloadedAttachment,
   Logger
 } from '../../../platform/types.js'
@@ -16,6 +17,8 @@ export interface TicketInfo {
   zendesk: ZendeskClient
   ticket: ZendeskTicket
   comments: ZendeskComment[]
+  /** Empty unless the tenant's pdf.includeSideConversations is true. */
+  sideConversations: SideConversationThread[]
   attachments: DownloadedAttachment[]
   failedAttachments: { filename: string; reason: string }[]
   userMap: Record<number, string>
@@ -23,7 +26,8 @@ export interface TicketInfo {
 }
 
 /**
- * Fetch ticket + comments + attachments and resolve comment authors.
+ * Fetch ticket + comments + (opt-in) side conversations + attachments and
+ * resolve comment authors.
  * Owns the fail-closed brand cross-check (returns the exact 403
  * HandlerResult, never throws) and the best-effort author-resolution
  * inner try/catch (a getUsersMany rejection does NOT propagate).
@@ -53,6 +57,19 @@ export async function fetchTicketInfo(
   }
 
   const comments = await zendesk.getTicketComments(ticketId)
+
+  // Side conversations, only for tenants that opted in. Unlike author
+  // names this is NOT best-effort: a failure throws like a failed comments
+  // fetch (500, Zendesk retries, nothing minted yet), so a tenant that
+  // asked for side conversations never gets a PDF silently missing them.
+  const sideConversations: SideConversationThread[] = []
+  if (tenantConfig.services.archive?.pdf?.includeSideConversations === true) {
+    for (const sideConversation of await zendesk.getSideConversations(ticketId)) {
+      const events = await zendesk.getSideConversationEvents(ticketId, sideConversation.id)
+      sideConversations.push({ sideConversation, events })
+    }
+  }
+
   const attachments = await zendesk.fetchAttachments(comments)
   const failedAttachments = attachments.failed ?? []
 
@@ -76,5 +93,5 @@ export async function fetchTicketInfo(
     }
   }
 
-  return { ok: true, info: { zendesk, ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail } }
+  return { ok: true, info: { zendesk, ticket, comments, sideConversations, attachments, failedAttachments, userMap, solvingAgentEmail } }
 }

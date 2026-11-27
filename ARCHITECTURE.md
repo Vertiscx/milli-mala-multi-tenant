@@ -128,8 +128,8 @@ Then, per endpoint:
 1. Verify the Zendesk HMAC-SHA256 signature over `timestamp + body` with the tenant's webhook secret. Constant-time compare.
 2. Reject if the timestamp is more than five minutes from now. Replay protection.
 3. Fetch the ticket. **Brand cross-check:** if the ticket's `brand_id` does not equal the tenant's, return 403. This is what stops one institution's webhook from archiving another institution's ticket.
-4. Fetch comments, the users named in them, and attachments. Attachment downloads are restricted to `zendesk.com` and `zdassets.com` hosts and are capped by count and total size. Skipped files are reported, never silently dropped.
-5. Render the PDF. Internal notes are included only if the tenant's `pdf.includeInternalNotes` is true.
+4. Fetch comments, the users named in them, side conversations (only if the tenant's `pdf.includeSideConversations` is true), and attachments. Attachment downloads are restricted to `zendesk.com` and `zdassets.com` hosts and are capped by count and total size. Skipped files are reported, never silently dropped.
+5. Render the PDF. Internal notes are included only if the tenant's `pdf.includeInternalNotes` is true. Side conversations, with every message in them, get their own section after the ticket's conversation only if `pdf.includeSideConversations` is true. For such a tenant a failure to read side conversations fails the request like a failed comments fetch (500, Zendesk retries, nothing created yet); the PDF is never filed without them.
 6. Decide the case number. See section 5.
 7. Upload PDF and attachments to the archive.
 8. Write an audit entry and post an internal note back to the ticket with the outcome. If configured, stamp status and last-export custom fields.
@@ -207,7 +207,7 @@ zendesk:   subdomain, webhookSecret, and email + apiToken OR oauth: { clientId, 
 services.archive:
   endpoints:  { <name>: { type, baseUrl, appKey | username+password, field IDs } }
   malaskra:   { apiKey }
-  pdf:        { companyName, locale, includeInternalNotes }
+  pdf:        { companyName, locale, includeInternalNotes, includeSideConversations }
 services.ticketUpdate (optional):
   webhookSecret, oauth: { clientId, clientSecret }
 services.ticketCreate (optional):
@@ -232,7 +232,7 @@ The Zendesk credentials and `webhookSecret` are required only for a tenant with 
 
 The archive's Zendesk client signs in one of two ways, chosen in the tenant's block: `email` + `apiToken` (Basic), or `oauth` (a Confidential OAuth client, Client Credentials grant). Zendesk no longer issues new API tokens, so a new archive tenant uses `oauth`; Þjóðskrá is the first. A tenant with both is rejected at boot, so it is always clear which one is in use. With OAuth:
 
-- The token is requested with the scopes `tickets:read tickets:write users:read`, the least the archive needs: reading the ticket, comments and comment authors, stamping fields and posting the result note. It is cached per brand in `platform/zendesk.ts`, separately from the other services' caches, and a 401 gets one retry with a fresh token.
+- The token is requested with the scopes `tickets:read tickets:write users:read`, the least the archive needs: reading the ticket, comments and comment authors, stamping fields and posting the result note. A tenant with `pdf.includeSideConversations` also requests `side_conversations:read`, which `tickets:read` does not cover. Only those tenants request it, because Zendesk refuses the whole token request (400 `invalid_scope`) when a client asks for a scope it isn't allowed. It is cached per brand in `platform/zendesk.ts`, separately from the other services' caches, and a 401 gets one retry with a fresh token.
 - **Attachments are downloaded without any `Authorization` header.** Zendesk answers an OAuth token with 403 on attachment URLs, while the URL itself works without auth as long as the account setting "Allow secure downloads" is off. If that setting is ever turned on, attachment downloads fail; they are listed in the result note and audit entry as with any other failed download, and the PDF is still filed.
 - The result note's author is the user the OAuth client acts as, not an API-token user.
 
@@ -292,7 +292,7 @@ Entries hold ticket ID, brand, outcome, case number and source, duration, PDF si
 | Ticket belongs to this tenant | Brand cross-check, 403 on mismatch, 403 if brand absent |
 | Outbound to archive only where configured | HTTPS only, private ranges blocked, at config validation |
 | Outbound to Zendesk only | Attachment URLs must be on `zendesk.com` or `zdassets.com` |
-| An archive OAuth token can do no more than the archive needs | Requested with `tickets:read tickets:write users:read` only; never sent to attachment URLs |
+| An archive OAuth token can do no more than the archive needs | Requested with `tickets:read tickets:write users:read` only, plus `side_conversations:read` for a tenant that includes side conversations; never sent to attachment URLs |
 | No secret leakage in responses | Fixed error strings; upstream bodies are capped before logging |
 | No PII in audit | Metadata only |
 | Weak or placeholder secrets | Rejected at boot |
@@ -322,7 +322,7 @@ In priority order.
 
 ## 12. Tests
 
-32 files, 785 tests, `npm test`. Highlights:
+33 files, 802 tests, `npm test`. Highlights:
 
 - `tests/integration.runtime-parity.test.ts` runs the same requests through the Node and Worker entry points and asserts identical responses.
 - `tests/cases.contract.test.ts` pins the `/v1/cases` envelope.
@@ -332,6 +332,7 @@ In priority order.
 - `tests/ticketCreate.test.ts` covers the ticket-create route: API key and Idempotency-Key checks, the restricted fields, the 401 retry, the 409, 422 and 502 mappings, the `comment.uploads` check, and that no submitted values reach the logs.
 - `tests/ticketCreate.uploads.test.ts` covers the upload route: every check runs before the body is read, the bytes reach Zendesk unchanged, the 20 MB cap, the token chaining, the error mappings, and that the filename is never logged.
 - `tests/zendesk.oauth.test.ts` covers the archive's Zendesk client in OAuth mode: the token request and scope, the per-brand cache and its expiry, the single 401 retry for reads and writes, attachment downloads without auth, the `createZendeskClient` choice between OAuth and Basic, and the fetch step end to end for an OAuth tenant.
+- `tests/sideConversations.test.ts` covers side conversations in the PDF: the list calls and their pagination (a `next_page` off the API base is refused), the `side_conversations:read` scope requested only when the option is on, the fetch step calling nothing when it is off and failing loudly when it is on and Zendesk refuses, the PDF section, and the config validation.
 - `tests/userUpdate.test.ts` covers the user-update route: the key and identifier checks, lookup by id and by email (exact, case-insensitive matches only; 404, 409), that agents and admins are never updated, the dropped fields, the 401 retries, the 422, 429 (with `Retry-After`) and 502 mappings, and that no email, name or phone number reaches the logs.
 
 CI runs tests on Node 20 and 22 on every PR, plus CodeQL.

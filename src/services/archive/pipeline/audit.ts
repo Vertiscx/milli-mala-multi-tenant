@@ -66,6 +66,7 @@ export async function writeAudit(args: {
       internal_notes: comments.filter(c => c.public === false).length,
       // Non-null guaranteed by the entry-point archive guards (webhook/attachments/cases).
       internal_notes_included: tenantConfig.services.archive!.pdf.includeInternalNotes,
+      side_conversations_included: tenantConfig.services.archive!.pdf.includeSideConversations === true,
       total_attachments: attachments.length
     },
     destination: {

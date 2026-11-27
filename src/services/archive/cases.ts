@@ -171,10 +171,10 @@ export async function handleCases({ body, headers, tenantConfig, docEndpoint, au
         }
       }
     }
-    const { ticket, comments, attachments, failedAttachments, userMap, solvingAgentEmail } = fetched.info
+    const { ticket, comments, sideConversations, attachments, failedAttachments, userMap, solvingAgentEmail } = fetched.info
 
     // 2. renderPdf
-    const pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap)
+    const pdfBuffer = await renderPdf(ticket, comments, tenantConfig, userMap, sideConversations)
 
     // 3. createDocClient (the ONLY ep.type switch lives in this factory)
     const docClient = createDocClient(ep, solvingAgentEmail)
